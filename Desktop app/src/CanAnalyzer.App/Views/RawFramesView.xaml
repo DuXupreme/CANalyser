@@ -1,0 +1,93 @@
+<UserControl x:Class="CanAnalyzer.App.Views.RawFramesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                BorderBrush="#DDDDDD"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="8"
+                Margin="0,0,0,8">
+            <StackPanel>
+                <WrapPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="CAN ID" />
+                        <TextBox Width="120" Text="{Binding IdFilter, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Data bevat (hex)" />
+                        <TextBox Width="140" Text="{Binding DataContainsHex, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Type bevat" />
+                        <TextBox Width="90" Text="{Binding TypeContains, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Kanaal bevat" />
+                        <TextBox Width="90" Text="{Binding ChannelContains, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Tijd start [s]" />
+                        <TextBox Width="90" Text="{Binding TimeStart, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Tijd einde [s]" />
+                        <TextBox Width="90" Text="{Binding TimeEnd, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Max rijen" />
+                        <TextBox Width="100" Text="{Binding MaxRows, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Frame type" />
+                        <ComboBox Width="130"
+                                  ItemsSource="{Binding ExtendedFilterModes}"
+                                  SelectedItem="{Binding ExtendedFilterMode, Mode=TwoWay}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text=" " />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Toepassen"
+                                    Command="{Binding ApplyFiltersCommand}"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Reset"
+                                    Command="{Binding ResetFiltersCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </WrapPanel>
+                <TextBlock Text="{Binding FrameStatistics}" FontWeight="SemiBold" Margin="0,4,0,0" />
+            </StackPanel>
+        </Border>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding FilteredFrames}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  MouseDoubleClick="OnRawFrameDoubleClick"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.ScrollUnit="Pixel"
+                  ScrollViewer.CanContentScroll="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=F6}" Width="120" />
+                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="70" />
+                <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="70" />
+                <DataGridTextColumn Header="ID" Binding="{Binding IdHex}" Width="100" />
+                <DataGridTextColumn Header="ID (dec)" Binding="{Binding Id}" Width="100" />
+                <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="60" />
+                <DataGridTextColumn Header="Data" Binding="{Binding DataHex}" Width="300" />
+                <DataGridTextColumn Header="ASCII" Binding="{Binding DataAscii}" Width="160" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

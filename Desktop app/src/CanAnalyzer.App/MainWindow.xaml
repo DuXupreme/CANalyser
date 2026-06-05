@@ -1,0 +1,74 @@
+<Window x:Class="CanAnalyzer.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:CanAnalyzer.App.Views"
+        mc:Ignorable="d"
+        Title="CAN Analyzer"
+        MinWidth="1200"
+        MinHeight="760">
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_Bestand">
+                <MenuItem Header="Open _CAN-log..." Command="{Binding BrowseLogFileCommand}" />
+                <MenuItem Header="Open _DBC..." Command="{Binding BrowseDbcFileCommand}" />
+                <Separator />
+                <MenuItem Header="_Laden / Decoderen" Command="{Binding LoadAndDecodeCommand}" />
+                <MenuItem Header="_Annuleren" Command="{Binding CancelCommand}" />
+                <Separator />
+                <MenuItem Header="Export _CSV..." Command="{Binding ExportDecodedCsvCommand}" />
+                <MenuItem Header="Export _Layout..." Command="{Binding ExportLayoutCommand}" />
+                <MenuItem Header="Import L_ayout..." Command="{Binding ImportLayoutCommand}" />
+                <Separator />
+                <MenuItem Header="A_fsluiten" Click="OnExitClick" />
+            </MenuItem>
+        </Menu>
+
+        <ToolBarTray DockPanel.Dock="Top">
+            <ToolBar>
+                <Button Content="Open Log" Command="{Binding BrowseLogFileCommand}" />
+                <Button Content="Open DBC" Command="{Binding BrowseDbcFileCommand}" />
+                <Separator />
+                <Button Content="Laden/Decoderen" Command="{Binding LoadAndDecodeCommand}" />
+                <Button Content="Annuleren" Command="{Binding CancelCommand}" />
+                <Separator />
+                <Button Content="Export CSV" Command="{Binding ExportDecodedCsvCommand}" />
+                <Button Content="Export Layout" Command="{Binding ExportLayoutCommand}" />
+                <Button Content="Import Layout" Command="{Binding ImportLayoutCommand}" />
+            </ToolBar>
+        </ToolBarTray>
+
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <TextBlock Text="{Binding ProgressLabel}" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem Width="220">
+                <ProgressBar Height="16"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="{Binding ProgressValue}" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+            </StatusBarItem>
+        </StatusBar>
+
+        <TabControl>
+            <TabItem Header="Analyse">
+                <views:AnalysisView DataContext="{Binding Analysis}" />
+            </TabItem>
+            <TabItem Header="Joystick Analyse">
+                <views:JoystickAnalyticsView DataContext="{Binding JoystickAnalytics}" />
+            </TabItem>
+            <TabItem Header="Raw Frames (PCAN)">
+                <views:RawFramesView DataContext="{Binding RawFrames}" />
+            </TabItem>
+            <TabItem Header="Instellingen / Diagnostics">
+                <views:SettingsDiagnosticsView DataContext="{Binding SettingsDiagnostics}" />
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

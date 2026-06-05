@@ -1,0 +1,8 @@
+bin/
+obj/
+artifacts/
+.dotnet/
+
+*.user
+*.suo
+*.cache

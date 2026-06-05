@@ -1,0 +1,424 @@
+<UserControl x:Class="CanAnalyzer.App.Views.JoystickAnalyticsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:infra="clr-namespace:CanAnalyzer.App.Infrastructure"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:oxy="http://oxyplot.org/wpf"
+             mc:Ignorable="d">
+    <UserControl.Resources>
+        <infra:FlexibleDoubleConverter x:Key="FlexibleDoubleConverter" />
+    </UserControl.Resources>
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0">
+            <TabItem Header="Joystick gebruiksanalyse">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.2*" />
+                        <RowDefinition Height="1.1*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                        <WrapPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Joystick X" />
+                                <ComboBox Width="300" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickXSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Joystick Y" />
+                                <ComboBox Width="300" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickYSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Bins" />
+                                <TextBox Width="70" Text="{Binding HistogramBins, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Deadzone" />
+                                <TextBox Width="80"
+                                         Text="{Binding DeadzoneThreshold, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Saturatie" />
+                                <TextBox Width="80"
+                                         Text="{Binding SaturationThreshold, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Tijdvenster" />
+                                <CheckBox Content="Alleen geselecteerde tijd"
+                                          IsChecked="{Binding UseJoystickTimeWindow, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Start [s]" />
+                                <TextBox Width="85"
+                                         Text="{Binding JoystickTimeStartSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Einde [s]" />
+                                <TextBox Width="85"
+                                         Text="{Binding JoystickTimeEndSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Acties" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Auto detect joystick" Command="{Binding AutoDetectJoystickPairCommand}" Margin="0,0,6,0" />
+                                    <Button Content="Volledige tijd" Command="{Binding ResetJoystickTimeWindowCommand}" Margin="0,0,6,0" />
+                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0" Width="420">
+                                <TextBlock Text="Joystick afspelen" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <CheckBox Content="Afspeel-slider actief"
+                                              IsChecked="{Binding IsJoystickPlaybackEnabled, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <Button Content="Play/Pauze"
+                                            Command="{Binding ToggleJoystickPlaybackCommand}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="Reset"
+                                            Command="{Binding ResetJoystickPlaybackCommand}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Slider Width="280"
+                                            Minimum="{Binding JoystickPlaybackStartSeconds}"
+                                            Maximum="{Binding JoystickPlaybackEndSeconds}"
+                                            Value="{Binding JoystickPlaybackPositionSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            IsEnabled="{Binding IsJoystickPlaybackEnabled}"
+                                            TickFrequency="0.1"
+                                            IsSnapToTickEnabled="False"
+                                            Margin="0,0,8,0" />
+                                    <TextBlock VerticalAlignment="Center">
+                                        <Run Text="t = " />
+                                        <Run Text="{Binding JoystickPlaybackPositionSeconds, StringFormat={}{0:0.###}}" />
+                                        <Run Text=" s | x" />
+                                        <Run Text="{Binding JoystickPlaybackSpeed, StringFormat={}{0:0.##}}" />
+                                    </TextBlock>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <TextBlock Text="Snelheid x" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Width="65"
+                                             Text="{Binding JoystickPlaybackSpeed, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <TextBlock Margin="0,7,0,0"
+                                       Foreground="#555555"
+                                       Text="Doel: direct zien waar de joystick meestal zit en of gevoeligheid/deadzone moet worden aangepast." />
+                            <TextBlock Margin="8,7,0,0"
+                                       Foreground="#555555">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="Beschikbare tijd: {0:0.###} .. {1:0.###}">
+                                        <Binding Path="JoystickAvailableStartSeconds" />
+                                        <Binding Path="JoystickAvailableEndSeconds" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Joystick tuning metrics" Margin="0,0,6,0">
+                            <DataGrid ItemsSource="{Binding JoystickUsageMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Joystick puntenwolk (genormaliseerd)">
+                            <oxy:PlotView Model="{Binding JoystickDensityModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Joystick traject (X/Y)" Margin="0,0,6,0">
+                            <oxy:PlotView Model="{Binding TrajectoryModel}" Margin="6" />
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Radius histogram">
+                            <oxy:PlotView Model="{Binding RadiusHistogramModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Delay analyse">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.15*" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                        <WrapPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Command / setpoint" />
+                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedCommandSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Response / feedback" />
+                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedResponseSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Max delay [s]" />
+                                <TextBox Width="85"
+                                         Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Acties" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Auto detect delay" Command="{Binding AutoDetectDelaySignalsCommand}" Margin="0,0,6,0" />
+                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Overlay opties" />
+                                <WrapPanel>
+                                    <CheckBox Content="Normaliseer"
+                                              IsChecked="{Binding DelayOverlayNormalize, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Trapjes"
+                                              IsChecked="{Binding DelayOverlayStepPlot, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Markers"
+                                              IsChecked="{Binding DelayOverlaySampleMarkers, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Legenda"
+                                              IsChecked="{Binding DelayOverlayShowLegend, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Delay markers + labels"
+                                              IsChecked="{Binding DelayOverlayShowDelayMarkers, Mode=TwoWay}" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <TextBlock Margin="0,7,0,0"
+                                       Foreground="#555555"
+                                       Text="Tip: kies per actuator Command=RealPos en Response=ActualPos voor setpoint -> uitvoering vertraging." />
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Delay metrics" Margin="0,0,6,0">
+                            <DataGrid ItemsSource="{Binding DelayMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Delay histogram (event-based)">
+                            <oxy:PlotView Model="{Binding DelayHistogramModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+
+                    <GroupBox Grid.Row="2" Header="Command/response overlay (genormaliseerd, trapjes + delay markers)">
+                        <oxy:PlotView Model="{Binding DelayOverlayModel}"
+                                      Controller="{Binding DelayOverlayController}"
+                                      Margin="6" />
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Vlinder kinematica">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.05*" />
+                        <RowDefinition Height="1.2*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                        <WrapPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Joystick X" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickXSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Joystick Y" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickYSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Joystick Yaw" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickYawSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Left" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorLeftSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Right" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorRightSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Front" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorFrontSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Acties" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Auto detect vlinder" Command="{Binding AutoDetectActuatorPairCommand}" Margin="0,0,6,0" />
+                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <TextBlock Margin="0,7,0,0"
+                                       Foreground="#555555"
+                                       Text="Wat zie je: joystick X/Y/Yaw -> expected Left/Right/Front, vergeleken met daadwerkelijke actuator feedback." />
+                            <TextBlock Margin="0,2,0,0"
+                                       Foreground="#555555"
+                                       Text="Mapping: Left=-Y-Yaw, Right=-Y+Yaw, Front=+X." />
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Vlinder metrics" Margin="0,0,6,0">
+                            <DataGrid ItemsSource="{Binding ActuatorMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Delay histogram per actuator">
+                            <oxy:PlotView Model="{Binding ActuatorDelayHistogramModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Left expected vs feedback" Margin="0,0,6,0">
+                            <oxy:PlotView Model="{Binding ActuatorLeftOverlayModel}" Margin="6" />
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Right expected vs feedback" Margin="0,0,6,0">
+                            <oxy:PlotView Model="{Binding ActuatorRightOverlayModel}" Margin="6" />
+                        </GroupBox>
+                        <GroupBox Grid.Column="2" Header="Front expected vs feedback">
+                            <oxy:PlotView Model="{Binding ActuatorFrontOverlayModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="CAN professioneel">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.0*" />
+                        <RowDefinition Height="1.0*" />
+                        <RowDefinition Height="1.1*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                        <WrapPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Bitrate [kbps]" />
+                                <TextBox Width="90"
+                                         Text="{Binding CanBitrateKbps, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Venster [ms]" />
+                                <TextBox Width="90"
+                                         Text="{Binding CanTimeBinMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Acties" />
+                                <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
+                            </StackPanel>
+                            <TextBlock Margin="0,7,0,0"
+                                       Foreground="#555555"
+                                       Text="Professionele CAN-overzichten: bus load/throughput, top-ID verkeer, cyclustijd en jitter per bericht-ID." />
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="1.3*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Bus metrics" Margin="0,0,6,0">
+                            <DataGrid ItemsSource="{Binding ProfessionalCanMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Top CAN-IDs (verkeer)">
+                            <DataGrid ItemsSource="{Binding ProfessionalTopIdRows}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="ID" Binding="{Binding FrameIdHex}" Width="*" />
+                                    <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="95" />
+                                    <DataGridTextColumn Header="Aandeel [%]" Binding="{Binding SharePercent}" Width="95" />
+                                    <DataGridTextColumn Header="Gem. DLC" Binding="{Binding MeanDlc}" Width="90" />
+                                    <DataGridTextColumn Header="Type" Binding="{Binding FrameType}" Width="95" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+
+                    <Grid Grid.Row="2" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Frames/s over tijd" Margin="0,0,6,0">
+                            <oxy:PlotView Model="{Binding CanFrameRateModel}" Margin="6" />
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Bus load [%] over tijd (geschat)">
+                            <oxy:PlotView Model="{Binding CanBusLoadModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+
+                    <Grid Grid.Row="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.0*" />
+                            <ColumnDefinition Width="1.15*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Top-ID aandeel plot" Margin="0,0,6,0">
+                            <oxy:PlotView Model="{Binding CanTopIdPlotModel}" Margin="6" />
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Cyclustijd / jitter per ID (hoogste jitter eerst)">
+                            <DataGrid ItemsSource="{Binding ProfessionalCycleRows}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="ID" Binding="{Binding FrameIdHex}" Width="*" />
+                                    <DataGridTextColumn Header="Samples" Binding="{Binding Samples}" Width="80" />
+                                    <DataGridTextColumn Header="Gem [ms]" Binding="{Binding AvgCycleMs}" Width="85" />
+                                    <DataGridTextColumn Header="Jitter [ms]" Binding="{Binding JitterMs}" Width="85" />
+                                    <DataGridTextColumn Header="Min [ms]" Binding="{Binding MinCycleMs}" Width="85" />
+                                    <DataGridTextColumn Header="Max [ms]" Binding="{Binding MaxCycleMs}" Width="85" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="1"
+                   Margin="2,6,2,0"
+                   Text="{Binding StatusText}"
+                   Foreground="#444444" />
+    </Grid>
+</UserControl>

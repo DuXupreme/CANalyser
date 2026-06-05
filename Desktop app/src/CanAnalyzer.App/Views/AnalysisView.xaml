@@ -1,0 +1,273 @@
+﻿<UserControl x:Class="CanAnalyzer.App.Views.AnalysisView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:oxy="http://oxyplot.org/wpf"
+             mc:Ignorable="d">
+    <Grid Margin="8">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="420" />
+            <ColumnDefinition Width="6" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="1.5*" />
+                <RowDefinition Height="1.1*" />
+                <RowDefinition Height="1.6*" />
+            </Grid.RowDefinitions>
+
+            <GroupBox Grid.Row="0" Header="Beschikbare signalen" Margin="0,0,0,6">
+                <DockPanel Margin="6">
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                        <TextBlock Text="Zoeken in signalen" />
+                        <DockPanel Margin="0,2,0,0">
+                            <Button DockPanel.Dock="Right"
+                                    Content="Wis"
+                                    Command="{Binding ClearSignalSearchCommand}"
+                                    Margin="6,0,0,0" />
+                            <TextBox Text="{Binding SignalSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                        </DockPanel>
+                        <WrapPanel Margin="0,6,0,0">
+                            <Button Content="Selecteer alles"
+                                    Command="{Binding SelectAllVisibleSignalsCommand}"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Selecteer niets"
+                                    Command="{Binding SelectNoVisibleSignalsCommand}" />
+                        </WrapPanel>
+                    </StackPanel>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Maak aparte groepen"
+                                Command="{Binding BuildGroupsFromSelectionCommand}"
+                                Margin="0,0,6,0" />
+                        <Button Content="Maak 1 groep van selectie"
+                                Command="{Binding CreateSingleGroupFromSelectionCommand}"
+                                Margin="0,0,6,0" />
+                        <Button Content="Voeg selectie toe aan actieve groep"
+                                Command="{Binding AddSelectedSignalsToGroupCommand}" />
+                    </StackPanel>
+                    <ListBox ItemsSource="{Binding FilteredSignalsView}"
+                             Height="{Binding SignalListHeight}"
+                             BorderThickness="1"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.ScrollUnit="Pixel">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding Label}"
+                                          IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          Margin="2,1" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </GroupBox>
+
+            <GroupBox Grid.Row="1" Header="Plotgroepen" Margin="0,0,0,6">
+                <DockPanel Margin="6">
+                    <WrapPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                        <Button Content="Nieuwe groep" Command="{Binding AddGroupCommand}" Margin="0,0,6,0" />
+                        <Button Content="Verwijder" Command="{Binding RemoveSelectedGroupCommand}" Margin="0,0,6,0" />
+                        <Button Content="Omhoog" Command="{Binding MoveGroupUpCommand}" Margin="0,0,6,0" />
+                        <Button Content="Omlaag" Command="{Binding MoveGroupDownCommand}" Margin="0,0,6,0" />
+                        <Button Content="Pas plotgroepen toe" Command="{Binding ApplyGroupsCommand}" />
+                    </WrapPanel>
+                    <ListBox ItemsSource="{Binding PlotGroups}"
+                             SelectedItem="{Binding SelectedPlotGroup, Mode=TwoWay}"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="2">
+                                    <TextBlock Text="{Binding Title}" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </GroupBox>
+
+            <GroupBox Grid.Row="2" Header="Actieve plotgroep">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0">
+                        <TextBlock Text="Titel subplot" />
+                        <TextBox Text="{Binding SelectedPlotGroup.Title, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Margin="0,2,0,4" />
+                        <CheckBox Content="Lock y-assen in subplot"
+                                  IsChecked="{Binding SelectedPlotGroup.LockYAxis, Mode=TwoWay}"
+                                  Margin="0,0,0,4" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="1" Text="Signalen en offsets" Margin="0,0,0,2" />
+
+                    <DataGrid Grid.Row="2"
+                              ItemsSource="{Binding SelectedPlotGroup.Signals}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              EnableRowVirtualization="True"
+                              EnableColumnVirtualization="True"
+                              VirtualizingPanel.IsVirtualizing="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Signaal"
+                                                Binding="{Binding Label}"
+                                                IsReadOnly="True"
+                                                Width="*" />
+                            <DataGridTextColumn Header="Offset"
+                                                Binding="{Binding Offset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=F6}"
+                                                Width="110" />
+                            <DataGridTemplateColumn Header="" Width="90">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="Verwijder"
+                                                Command="{Binding DataContext.RemoveSignalFromGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </GroupBox>
+        </Grid>
+
+        <GridSplitter Grid.Column="1"
+                      Width="6"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="#DDDDDD"
+                      ResizeBehavior="PreviousAndNext" />
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" BorderThickness="1" BorderBrush="#DDDDDD" Padding="6" CornerRadius="4" Margin="0,0,0,6">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Bottom"
+                               Text="{Binding PresetStatus}"
+                               Margin="0,4,0,0"
+                               Foreground="#444444" />
+                    <WrapPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Frame ID filter" />
+                            <TextBox Width="130" Text="{Binding FrameIdFilter, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Tijd start [s]" />
+                            <TextBox Width="80" Text="{Binding TimeStart, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Tijd einde [s]" />
+                            <TextBox Width="80" Text="{Binding TimeEnd, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Max punten" />
+                            <TextBox Width="95" Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=PropertyChanged}" />
+                            <CheckBox Content="Snelheidsmodus (downsampling)"
+                                      IsChecked="{Binding UseDownsampling}"
+                                      Margin="0,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Subplot hoogte [px]" />
+                            <TextBox Width="95" Text="{Binding SubplotHeight, UpdateSourceTrigger=PropertyChanged}" />
+                            <Slider Width="140"
+                                    Minimum="160"
+                                    Maximum="1200"
+                                    TickFrequency="20"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding SubplotHeight, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Signaallijst hoogte [px]" />
+                            <TextBox Width="95" Text="{Binding SignalListHeight, UpdateSourceTrigger=PropertyChanged}" />
+                            <Slider Width="140"
+                                    Minimum="180"
+                                    Maximum="1200"
+                                    TickFrequency="20"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding SignalListHeight, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Opties" />
+                            <StackPanel Orientation="Horizontal">
+                                <CheckBox Content="Normalizeer" IsChecked="{Binding NormalizeSignals}" Margin="0,0,6,0" />
+                                <CheckBox Content="Trapjes" IsChecked="{Binding StepPlot}" Margin="0,0,6,0" />
+                                <CheckBox Content="Markers" IsChecked="{Binding MarkersOnly}" Margin="0,0,6,0" />
+                                <CheckBox Content="Legenda" IsChecked="{Binding ShowLegend}" Margin="0,0,6,0" />
+                                <CheckBox Content="Koppel Y-assen" IsChecked="{Binding LinkYAxisAcrossPanels}" />
+                            </StackPanel>
+                            <CheckBox Content="Open bij toepassen direct in apart venster"
+                                      IsChecked="{Binding AutoOpenDetachedOnApply}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Layout" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Exporteer"
+                                        Command="{Binding ExportPresetCommand}"
+                                        Margin="0,0,6,0" />
+                                <Button Content="Importeer"
+                                        Command="{Binding ImportPresetCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Venster" />
+                            <Button Content="Open subplots in apart venster"
+                                    Command="{Binding OpenPlotsInWindowCommand}" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Vivado cursors" />
+                            <WrapPanel>
+                                <Button Content="Flag A = cursor" Command="{Binding SetFlagAFromCursorCommand}" Margin="0,0,6,0" />
+                                <Button Content="Flag B = cursor" Command="{Binding SetFlagBFromCursorCommand}" Margin="0,0,6,0" />
+                                <Button Content="Volgende verandering (A->B)" Command="{Binding JumpFlagBToNextChangeCommand}" Margin="0,0,6,0" />
+                                <Button Content="Wis flags" Command="{Binding ClearFlagsCommand}" Margin="0,0,6,0" />
+                                <Button Content="Reset zoom" Command="{Binding ResetAllPlotsCommand}" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding CursorInfo}" Margin="0,3,0,0" />
+                            <TextBlock Text="{Binding CursorValueInfo}" Margin="0,1,0,0" />
+                            <TextBlock Text="Tip: klik op legendanaam om lijn aan/uit te zetten. Ctrl+klik = Flag A, Shift+klik = Flag B, Ctrl+muiswiel = alleen actieve subplot Y-zoom, dubbelklik = reset, omgekeerde box-select = uitzoomen."
+                                       Foreground="#444444" />
+                        </StackPanel>
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding PlotPanels}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border BorderBrush="#D8D8D8"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="6"
+                                    Margin="0,0,0,6">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,0,0,4" />
+                                    <oxy:PlotView Model="{Binding PlotModel}"
+                                                  Controller="{Binding PlotController}"
+                                                  PreviewMouseDown="OnPlotPreviewMouseDown"
+                                                  MouseMove="OnPlotMouseMove"
+                                                  Height="{Binding DataContext.SubplotHeight, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+        </Grid>
+    </Grid>
+</UserControl>
+
