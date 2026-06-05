@@ -16,6 +16,87 @@
         </Grid.RowDefinitions>
 
         <TabControl Grid.Row="0">
+            <TabItem Header="Latency / Delay analyse">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.15*" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
+                        <WrapPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Command / setpoint" />
+                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedCommandSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Response / feedback" />
+                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedResponseSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Max delay [s]" />
+                                <TextBox Width="85"
+                                         Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Acties" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Auto detect delay" Command="{Binding AutoDetectDelaySignalsCommand}" Margin="0,0,6,0" />
+                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Overlay opties" />
+                                <WrapPanel>
+                                    <CheckBox Content="Normaliseer"
+                                              IsChecked="{Binding DelayOverlayNormalize, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Trapjes"
+                                              IsChecked="{Binding DelayOverlayStepPlot, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Markers"
+                                              IsChecked="{Binding DelayOverlaySampleMarkers, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Legenda"
+                                              IsChecked="{Binding DelayOverlayShowLegend, Mode=TwoWay}"
+                                              Margin="0,0,8,0" />
+                                    <CheckBox Content="Delay markers + labels"
+                                              IsChecked="{Binding DelayOverlayShowDelayMarkers, Mode=TwoWay}" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <TextBlock Margin="0,7,0,0"
+                                       Foreground="#555555"
+                                       Text="Tip: kies Command=aansturing/setpoint en Response=feedback/positie voor de vertraging tussen commando en eerste reactie." />
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="1.5*" />
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Delay metrics" Margin="0,0,6,0">
+                            <DataGrid ItemsSource="{Binding DelayMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                        <GroupBox Grid.Column="1" Header="Delay histogram (event-based)">
+                            <oxy:PlotView Model="{Binding DelayHistogramModel}" Margin="6" />
+                        </GroupBox>
+                    </Grid>
+
+                    <GroupBox Grid.Row="2" Header="Command/response overlay (genormaliseerd, trapjes + delay markers)">
+                        <oxy:PlotView Model="{Binding DelayOverlayModel}"
+                                      Controller="{Binding DelayOverlayController}"
+                                      Margin="6" />
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
             <TabItem Header="Joystick gebruiksanalyse">
                 <Grid Margin="6">
                     <Grid.RowDefinitions>
@@ -150,87 +231,6 @@
                             <oxy:PlotView Model="{Binding RadiusHistogramModel}" Margin="6" />
                         </GroupBox>
                     </Grid>
-                </Grid>
-            </TabItem>
-
-            <TabItem Header="Delay analyse">
-                <Grid Margin="6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="1.15*" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                        <WrapPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Command / setpoint" />
-                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedCommandSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Response / feedback" />
-                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedResponseSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Max delay [s]" />
-                                <TextBox Width="85"
-                                         Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Acties" />
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="Auto detect delay" Command="{Binding AutoDetectDelaySignalsCommand}" Margin="0,0,6,0" />
-                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
-                                </StackPanel>
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Overlay opties" />
-                                <WrapPanel>
-                                    <CheckBox Content="Normaliseer"
-                                              IsChecked="{Binding DelayOverlayNormalize, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Trapjes"
-                                              IsChecked="{Binding DelayOverlayStepPlot, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Markers"
-                                              IsChecked="{Binding DelayOverlaySampleMarkers, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Legenda"
-                                              IsChecked="{Binding DelayOverlayShowLegend, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Delay markers + labels"
-                                              IsChecked="{Binding DelayOverlayShowDelayMarkers, Mode=TwoWay}" />
-                                </WrapPanel>
-                            </StackPanel>
-                            <TextBlock Margin="0,7,0,0"
-                                       Foreground="#555555"
-                                       Text="Tip: kies per actuator Command=RealPos en Response=ActualPos voor setpoint -> uitvoering vertraging." />
-                        </WrapPanel>
-                    </Border>
-
-                    <Grid Grid.Row="1" Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="0.95*" />
-                            <ColumnDefinition Width="1.5*" />
-                        </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Delay metrics" Margin="0,0,6,0">
-                            <DataGrid ItemsSource="{Binding DelayMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
-                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Delay histogram (event-based)">
-                            <oxy:PlotView Model="{Binding DelayHistogramModel}" Margin="6" />
-                        </GroupBox>
-                    </Grid>
-
-                    <GroupBox Grid.Row="2" Header="Command/response overlay (genormaliseerd, trapjes + delay markers)">
-                        <oxy:PlotView Model="{Binding DelayOverlayModel}"
-                                      Controller="{Binding DelayOverlayController}"
-                                      Margin="6" />
-                    </GroupBox>
                 </Grid>
             </TabItem>
 
