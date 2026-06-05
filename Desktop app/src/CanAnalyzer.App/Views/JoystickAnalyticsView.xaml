@@ -219,8 +219,13 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                         </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Joystick puntenwolk (genormaliseerd)">
-                            <oxy:PlotView Model="{Binding JoystickDensityModel}" Margin="6" />
+                        <GroupBox Grid.Column="1" Header="Joystick dichtheid (genormaliseerd, 1:1)">
+                            <Grid x:Name="JoystickDensityCell">
+                                <oxy:PlotView Model="{Binding JoystickDensityModel}"
+                                              Width="{Binding ActualHeight, ElementName=JoystickDensityCell}"
+                                              HorizontalAlignment="Center"
+                                              Margin="6" />
+                            </Grid>
                         </GroupBox>
                     </Grid>
 
@@ -229,8 +234,13 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Joystick traject (X/Y)" Margin="0,0,6,0">
-                            <oxy:PlotView Model="{Binding TrajectoryModel}" Margin="6" />
+                        <GroupBox Grid.Column="0" Header="Joystick traject (X/Y, 1:1)" Margin="0,0,6,0">
+                            <Grid x:Name="JoystickTrajectoryCell">
+                                <oxy:PlotView Model="{Binding TrajectoryModel}"
+                                              Width="{Binding ActualHeight, ElementName=JoystickTrajectoryCell}"
+                                              HorizontalAlignment="Center"
+                                              Margin="6" />
+                            </Grid>
                         </GroupBox>
                         <GroupBox Grid.Column="1" Header="Radius histogram">
                             <oxy:PlotView Model="{Binding RadiusHistogramModel}" Margin="6" />
@@ -294,13 +304,22 @@
                             <ColumnDefinition Width="0.95*" />
                             <ColumnDefinition Width="1.5*" />
                         </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Vlinder metrics" Margin="0,0,6,0">
-                            <DataGrid ItemsSource="{Binding ActuatorMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
-                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
-                                </DataGrid.Columns>
-                            </DataGrid>
+                        <GroupBox Grid.Column="0" Header="Vlinder metrics (per actuator)" Margin="0,0,6,0">
+                            <DockPanel Margin="6">
+                                <TextBlock DockPanel.Dock="Bottom"
+                                           Text="{Binding ActuatorSummary}"
+                                           Foreground="#555555"
+                                           TextWrapping="Wrap"
+                                           Margin="0,6,0,0" />
+                                <DataGrid ItemsSource="{Binding ActuatorMatrix}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Metric" Binding="{Binding Metric}" Width="*" />
+                                        <DataGridTextColumn Header="Left" Binding="{Binding Left}" Width="80" />
+                                        <DataGridTextColumn Header="Right" Binding="{Binding Right}" Width="80" />
+                                        <DataGridTextColumn Header="Front" Binding="{Binding Front}" Width="80" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
                         </GroupBox>
                         <GroupBox Grid.Column="1" Header="Delay histogram per actuator">
                             <oxy:PlotView Model="{Binding ActuatorDelayHistogramModel}" Margin="6" />

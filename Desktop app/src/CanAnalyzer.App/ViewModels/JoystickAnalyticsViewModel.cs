@@ -60,6 +60,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private double _delaySearchRangeSeconds = 1.5;
     [ObservableProperty] private double _responseThresholdPercent = 2.0;
     [ObservableProperty] private string _statusText = "Laad eerst log + DBC en open daarna dit tabblad.";
+    [ObservableProperty] private string _actuatorSummary = string.Empty;
 
     [ObservableProperty] private PlotModel _joystickDensityModel = EmptyPlot("Joystick puntenwolk");
     [ObservableProperty] private PlotModel _trajectoryModel = EmptyPlot("Joystick traject");
@@ -79,7 +80,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     {
         _analyticsService = analyticsService;
         RecomputeCommand = new RelayCommand(Recompute);
-        AutoDetectJoystickPairCommand = new RelayCommand(AutoDetectButterflySignals);
+        AutoDetectJoystickPairCommand = new RelayCommand(AutoDetectJoystickSignals);
         AutoDetectActuatorPairCommand = new RelayCommand(AutoDetectButterflySignals);
         AutoDetectDelaySignalsCommand = new RelayCommand(AutoDetectDelaySignals);
         ResetJoystickTimeWindowCommand = new RelayCommand(ResetJoystickTimeWindow);
@@ -94,7 +95,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     public ObservableCollection<string> AvailableSignals { get; } = [];
     public ObservableCollection<MetricRow> JoystickUsageMetrics { get; } = [];
-    public ObservableCollection<MetricRow> ActuatorMetrics { get; } = [];
+    public ObservableCollection<ActuatorMetricRow> ActuatorMatrix { get; } = [];
     public ObservableCollection<MetricRow> DelayMetrics { get; } = [];
     public ObservableCollection<MetricRow> ProfessionalCanMetrics { get; } = [];
     public ObservableCollection<CanTopIdRow> ProfessionalTopIdRows { get; } = [];
@@ -415,7 +416,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         _lastDelayResult = null;
         _currentJoystickFilteredPath = [];
         JoystickUsageMetrics.Clear();
-        ActuatorMetrics.Clear();
+        ActuatorMatrix.Clear();
+        ActuatorSummary = string.Empty;
         DelayMetrics.Clear();
         ProfessionalCanMetrics.Clear();
         ProfessionalTopIdRows.Clear();
@@ -511,8 +513,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         Add(JoystickUsageMetrics, "Samples", s.SampleCount.ToString("N0", CultureInfo.CurrentCulture));
         Add(JoystickUsageMetrics, "Deadzone usage [%]", F(s.DeadzonePercent));
         Add(JoystickUsageMetrics, "Saturation usage [%]", F(s.SaturationPercent));
-        Add(JoystickUsageMetrics, "Gebruikte X-range [%]", F(s.UsedXRangePercent));
-        Add(JoystickUsageMetrics, "Gebruikte Y-range [%]", F(s.UsedYRangePercent));
+        Add(JoystickUsageMetrics, "Gebruikte X-range [%] (indicatief)", F(s.UsedXRangePercent));
+        Add(JoystickUsageMetrics, "Gebruikte Y-range [%] (indicatief)", F(s.UsedYRangePercent));
         Add(JoystickUsageMetrics, "Bias/center-offset X", F(s.BiasX));
         Add(JoystickUsageMetrics, "Bias/center-offset Y", F(s.BiasY));
         Add(JoystickUsageMetrics, "Quadrant I [%]", F(s.Quadrant1Percent));
@@ -541,12 +543,15 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         UpdateJoystickPlaybackPlots();
-        RadiusHistogramModel = BuildHistogram("Joystick radius histogram", result.RadiusHistogram, "Radius", OxyColor.Parse("#F28E2B"));
+        var radiusModel = BuildHistogram("Joystick radius histogram", result.RadiusHistogram, "Radius", OxyColor.Parse("#F28E2B"));
+        AddRadiusGuides(radiusModel, Math.Max(0, DeadzoneThreshold), Math.Max(0, SaturationThreshold));
+        RadiusHistogramModel = radiusModel;
     }
 
     private void BuildActuatorTrackingAnalytics()
     {
-        ActuatorMetrics.Clear();
+        ActuatorMatrix.Clear();
+        ActuatorSummary = string.Empty;
         if (!TryGetSeries(SelectedJoystickXSignal, out var jx) || !TryGetSeries(SelectedJoystickYSignal, out var jy) || !TryGetSeries(SelectedJoystickYawSignal, out var jyaw) ||
             !TryGetSeries(SelectedActuatorLeftSignal, out var al) || !TryGetSeries(SelectedActuatorRightSignal, out var ar) || !TryGetSeries(SelectedActuatorFrontSignal, out var af))
         {
@@ -558,16 +563,23 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         var r = _analyticsService.AnalyzeButterflyKinematics(jx, jy, jyaw, al, ar, af, Math.Max(0, DeadzoneThreshold), Math.Max(0.05, DelaySearchRangeSeconds), Math.Clamp(HistogramBins, 10, 90), 12000);
-        Add(ActuatorMetrics, "Wat analyseert dit", "Joystick X/Y/Yaw wordt omgerekend naar expected Left/Right/Front en vergeleken met feedback.");
-        Add(ActuatorMetrics, "Mapping", "Left=-Y-Yaw | Right=-Y+Yaw | Front=+X");
-        AddAxisRows("Left", r.LeftTracking, r.LeftDelay);
-        AddAxisRows("Right", r.RightTracking, r.RightDelay);
-        AddAxisRows("Front", r.FrontTracking, r.FrontDelay);
+        AddActuatorMatrixRow("Correlatie", r.LeftTracking.Correlation, r.RightTracking.Correlation, r.FrontTracking.Correlation);
+        AddActuatorMatrixRow("Gain", r.LeftTracking.Gain, r.RightTracking.Gain, r.FrontTracking.Gain);
+        ActuatorMatrix.Add(new ActuatorMetricRow("Richting", DirText(r.LeftTracking.Gain), DirText(r.RightTracking.Gain), DirText(r.FrontTracking.Gain)));
+        AddActuatorMatrixRow("RMSE (norm)", r.LeftTracking.NormalizedRmse, r.RightTracking.NormalizedRmse, r.FrontTracking.NormalizedRmse);
+        ActuatorMatrix.Add(new ActuatorMetricRow("Delay gem [s]", FN(r.LeftDelay.MeanDelaySeconds), FN(r.RightDelay.MeanDelaySeconds), FN(r.FrontDelay.MeanDelaySeconds)));
+        ActuatorMatrix.Add(new ActuatorMetricRow("Delay min [s]", FN(r.LeftDelay.MinimumDelaySeconds), FN(r.RightDelay.MinimumDelaySeconds), FN(r.FrontDelay.MinimumDelaySeconds)));
+        ActuatorMatrix.Add(new ActuatorMetricRow("Delay max [s]", FN(r.LeftDelay.MaximumDelaySeconds), FN(r.RightDelay.MaximumDelaySeconds), FN(r.FrontDelay.MaximumDelaySeconds)));
+        ActuatorMatrix.Add(new ActuatorMetricRow(
+            "Events",
+            r.LeftDelay.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture),
+            r.RightDelay.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture),
+            r.FrontDelay.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture)));
         var total = r.LeftDelay.MatchedEventCount + r.RightDelay.MatchedEventCount + r.FrontDelay.MatchedEventCount;
-        Add(ActuatorMetrics, "Totaal matched events", total.ToString("N0", CultureInfo.CurrentCulture));
-        Add(ActuatorMetrics, "Delay avg totaal [s]", FN(WeightedMean(r.LeftDelay, r.RightDelay, r.FrontDelay)));
-        Add(ActuatorMetrics, "Delay min totaal [s]", FN(MinDelay(r.LeftDelay, r.RightDelay, r.FrontDelay)));
-        Add(ActuatorMetrics, "Delay max totaal [s]", FN(MaxDelay(r.LeftDelay, r.RightDelay, r.FrontDelay)));
+        ActuatorSummary =
+            $"Mapping: Left=-Y-Yaw · Right=-Y+Yaw · Front=+X    |    Totaal {total.ToString("N0", CultureInfo.CurrentCulture)} events · " +
+            $"delay gem {FN(WeightedMean(r.LeftDelay, r.RightDelay, r.FrontDelay))} s · " +
+            $"min {FN(MinDelay(r.LeftDelay, r.RightDelay, r.FrontDelay))} · max {FN(MaxDelay(r.LeftDelay, r.RightDelay, r.FrontDelay))}";
         ActuatorLeftOverlayModel = BuildOverlay(
             "Left actuator: expected vs feedback",
             r.LeftCommandSeries,
@@ -589,17 +601,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         ActuatorDelayHistogramModel = BuildButterflyDelayHistogram(r);
     }
 
-    private void AddAxisRows(string name, AxisTrackingStatistics t, DelayEventStatistics d)
-    {
-        Add(ActuatorMetrics, $"{name} corr", F(t.Correlation));
-        Add(ActuatorMetrics, $"{name} gain", F(t.Gain));
-        Add(ActuatorMetrics, $"{name} richting", t.Gain >= 0 ? "zelfde richting" : "omgekeerde richting");
-        Add(ActuatorMetrics, $"{name} RMSE(norm)", F(t.NormalizedRmse));
-        Add(ActuatorMetrics, $"{name} delay avg [s]", FN(d.MeanDelaySeconds));
-        Add(ActuatorMetrics, $"{name} delay min [s]", FN(d.MinimumDelaySeconds));
-        Add(ActuatorMetrics, $"{name} delay max [s]", FN(d.MaximumDelaySeconds));
-        Add(ActuatorMetrics, $"{name} events", d.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture));
-    }
+    private void AddActuatorMatrixRow(string metric, double left, double right, double front)
+        => ActuatorMatrix.Add(new ActuatorMetricRow(metric, F(left), F(right), F(front)));
+
+    private static string DirText(double gain) => gain >= 0 ? "zelfde" : "omgekeerd";
 
     private void BuildDelayAnalytics()
     {
@@ -632,8 +637,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         Add(DelayMetrics, "Dalend dode tijd gem [s]", FN(fr.FallingDeadTime.MeanDelaySeconds));
         Add(DelayMetrics, "— Kruiscorrelatie (hele golf, ter controle) —", "");
         Add(DelayMetrics, "Lag (correlatie) [s]", F(r.BestLagSeconds));
-        Add(DelayMetrics, "Correlatie kwaliteit", F(r.BestCorrelation));
-        DelayHistogramModel = BuildHistogram("Dode tijd histogram (commando → eerste reactie)", fr.DeadTimeHistogram, "Dode tijd [s]", OxyColor.Parse("#59A14F"));
+        Add(DelayMetrics, "Correlatie kwaliteit (-1..1)", F(r.BestCorrelation));
+        var deadModel = BuildHistogram("Dode tijd histogram (commando → eerste reactie)", fr.DeadTimeHistogram, "Dode tijd [s]", OxyColor.Parse("#59A14F"));
+        AddCumulativeOverlay(deadModel, fr.DeadTimeHistogram);
+        DelayHistogramModel = deadModel;
         RefreshDelayOverlayFromCache();
     }
 
@@ -705,8 +712,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         Add(ProfessionalCanMetrics, "Totale frames", orderedFrames.Count.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Unieke IDs", uniqueIds.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Extended frames", extendedCount.ToString("N0", CultureInfo.CurrentCulture));
-        Add(ProfessionalCanMetrics, "Error frames (geschat)", errorFrames.ToString("N0", CultureInfo.CurrentCulture));
-        Add(ProfessionalCanMetrics, "Remote/RTR frames", remoteFrames.ToString("N0", CultureInfo.CurrentCulture));
+        Add(ProfessionalCanMetrics, "Error frames (indien gelogd)", errorFrames.ToString("N0", CultureInfo.CurrentCulture));
+        Add(ProfessionalCanMetrics, "Remote/RTR (indien gelogd)", remoteFrames.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Gem frames/s", F(avgFrameRate));
         Add(ProfessionalCanMetrics, "Piek frames/s", F(peakFrameRate));
         Add(ProfessionalCanMetrics, "Gem bus load [%]", F(avgBusLoad));
@@ -727,7 +734,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 item.Count.ToString("N0", CultureInfo.CurrentCulture),
                 F(share),
                 F(item.MeanDlc),
-                item.ExtendedCount > 0 ? "Ext/Std mix" : "Std"));
+                item.ExtendedCount == 0 ? "Std" : item.ExtendedCount == item.Count ? "Ext" : "Ext/Std mix"));
         }
 
         var timingRows = perId.Values
@@ -765,21 +772,28 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         CanTopIdPlotModel = BuildTopIdBarPlot(topByCount, orderedFrames.Count);
     }
 
-    private void AutoDetectButterflySignals()
+    private void AutoDetectJoystickSignals()
     {
         if (AvailableSignals.Count == 0) return;
         var labels = AvailableSignals.ToList();
         var joy = labels.Where(v => Has(v, ["joy", "joystick"])).ToList();
-        var act = labels.Where(v => Has(v, ["act", "actuator", "actual", "realpos", "feedback", "position"])).ToList();
         SelectedJoystickXSignal = Pick(joy, ["pos_x", "joystick_x", "_x", ".x", " axisx"]) ?? Pick(labels, ["pos_x", "joystick_x", "_x", ".x", " axisx"]);
         SelectedJoystickYSignal = Pick(joy, ["pos_y", "joystick_y", "_y", ".y", " axisy"]) ?? Pick(labels, ["pos_y", "joystick_y", "_y", ".y", " axisy"]);
         SelectedJoystickYawSignal = Pick(joy, ["yaw", "twist", "rz", "rot"]) ?? Pick(labels, ["yaw", "twist", "rz", "rot"]);
-        SelectedActuatorLeftSignal = BestActuator(labels, ["left", "links"]) ?? Pick(act, ["left", "links"]) ?? Pick(labels, ["left", "links"]);
-        SelectedActuatorRightSignal = BestActuator(labels, ["right", "rechts"]) ?? Pick(act, ["right", "rechts"]) ?? Pick(labels, ["right", "rechts"]);
-        SelectedActuatorFrontSignal = BestActuator(labels, ["front", "voor"]) ?? Pick(act, ["front", "voor"]) ?? Pick(labels, ["front", "voor"]);
         SelectedJoystickXSignal ??= labels.FirstOrDefault();
         SelectedJoystickYSignal ??= labels.Skip(1).FirstOrDefault() ?? labels.FirstOrDefault();
         SelectedJoystickYawSignal ??= labels.Skip(2).FirstOrDefault() ?? SelectedJoystickYSignal;
+    }
+
+    private void AutoDetectButterflySignals()
+    {
+        AutoDetectJoystickSignals();
+        if (AvailableSignals.Count == 0) return;
+        var labels = AvailableSignals.ToList();
+        var act = labels.Where(v => Has(v, ["act", "actuator", "actual", "realpos", "feedback", "position"])).ToList();
+        SelectedActuatorLeftSignal = BestActuator(labels, ["left", "links"]) ?? Pick(act, ["left", "links"]) ?? Pick(labels, ["left", "links"]);
+        SelectedActuatorRightSignal = BestActuator(labels, ["right", "rechts"]) ?? Pick(act, ["right", "rechts"]) ?? Pick(labels, ["right", "rechts"]);
+        SelectedActuatorFrontSignal = BestActuator(labels, ["front", "voor"]) ?? Pick(act, ["front", "voor"]) ?? Pick(labels, ["front", "voor"]);
         SelectedActuatorLeftSignal ??= act.FirstOrDefault() ?? labels.FirstOrDefault();
         SelectedActuatorRightSignal ??= act.Skip(1).FirstOrDefault() ?? SelectedActuatorLeftSignal;
         SelectedActuatorFrontSignal ??= act.Skip(2).FirstOrDefault() ?? SelectedActuatorRightSignal;
@@ -960,30 +974,53 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
         const double min = -1.2;
         const double max = 1.2;
+        const int n = 64;
+        var span = max - min;
+        var counts = new double[n, n];
+        foreach (var p in points)
+        {
+            var bx = (int)Math.Clamp((p.X - min) / span * n, 0, n - 1);
+            var by = (int)Math.Clamp((p.Y - min) / span * n, 0, n - 1);
+            counts[bx, by] += 1;
+        }
+
+        var data = new double[n, n];
+        for (var i = 0; i < n; i++)
+        {
+            for (var j = 0; j < n; j++)
+            {
+                data[i, j] = counts[i, j] > 0 ? Math.Sqrt(counts[i, j]) : 0d;
+            }
+        }
+
         var model = new PlotModel
         {
-            Title = "Genormaliseerde joystick puntenwolk",
+            Title = "Genormaliseerde joystick dichtheid",
             IsLegendVisible = false
         };
         model.Axes.Add(Axis(AxisPosition.Bottom, "Joystick X (genormaliseerd)", min, max));
         model.Axes.Add(Axis(AxisPosition.Left, "Joystick Y (genormaliseerd)", min, max));
-
-        var scatter = new ScatterSeries
+        model.Axes.Add(new LinearColorAxis
         {
-            MarkerType = MarkerType.Circle,
-            MarkerSize = 1.7,
-            MarkerFill = OxyColor.Parse("#E22A2A"),
-            MarkerStroke = OxyColor.Parse("#E22A2A"),
-            MarkerStrokeThickness = 0.4
-        };
+            Position = AxisPosition.Right,
+            Palette = OxyPalettes.Jet(200),
+            LowColor = OxyColors.Transparent,
+            Minimum = 0.5,
+            Title = "Dichtheid (√n)"
+        });
 
-        var stride = Math.Max(1, (int)Math.Ceiling(points.Count / 16000.0));
-        for (var i = 0; i < points.Count; i += stride)
+        var cellHalf = span / (2.0 * n);
+        model.Series.Add(new HeatMapSeries
         {
-            scatter.Points.Add(new ScatterPoint(points[i].X, points[i].Y));
-        }
+            X0 = min + cellHalf,
+            X1 = max - cellHalf,
+            Y0 = min + cellHalf,
+            Y1 = max - cellHalf,
+            Interpolate = true,
+            RenderMethod = HeatMapRenderMethod.Bitmap,
+            Data = data
+        });
 
-        model.Series.Add(scatter);
         if (currentPoint is not null)
         {
             var cursor = new ScatterSeries
@@ -1048,6 +1085,95 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         foreach (var b in bins) bars.Items.Add(new RectangleBarItem(b.Start, 0, b.End, b.Count));
         model.Series.Add(bars);
         return model;
+    }
+
+    private static void AddRadiusGuides(PlotModel model, double deadzone, double saturation)
+    {
+        if (deadzone > 0)
+        {
+            model.Annotations.Add(new LineAnnotation
+            {
+                Type = LineAnnotationType.Vertical,
+                X = deadzone,
+                Color = OxyColor.Parse("#E15759"),
+                LineStyle = LineStyle.Dash,
+                StrokeThickness = 1.2,
+                Text = "deadzone",
+                TextColor = OxyColor.Parse("#E15759")
+            });
+        }
+
+        if (saturation > deadzone)
+        {
+            model.Annotations.Add(new LineAnnotation
+            {
+                Type = LineAnnotationType.Vertical,
+                X = saturation,
+                Color = OxyColor.Parse("#59A14F"),
+                LineStyle = LineStyle.Dash,
+                StrokeThickness = 1.2,
+                Text = "saturatie",
+                TextColor = OxyColor.Parse("#59A14F")
+            });
+        }
+    }
+
+    private static void AddCumulativeOverlay(PlotModel model, IReadOnlyList<HistogramBin> bins)
+    {
+        if (bins.Count == 0)
+        {
+            return;
+        }
+
+        var total = 0;
+        foreach (var b in bins)
+        {
+            total += b.Count;
+        }
+
+        if (total <= 0)
+        {
+            return;
+        }
+
+        model.Axes.Add(new LinearAxis
+        {
+            Position = AxisPosition.Right,
+            Key = "cdf",
+            Title = "Cumulatief [%]",
+            Minimum = 0,
+            Maximum = 100,
+            MajorGridlineStyle = LineStyle.None,
+            MinorGridlineStyle = LineStyle.None
+        });
+
+        var line = new LineSeries
+        {
+            Title = "Cumulatief %",
+            Color = OxyColor.Parse("#444444"),
+            StrokeThickness = 1.6,
+            YAxisKey = "cdf"
+        };
+        line.Points.Add(new DataPoint(bins[0].Start, 0));
+        var cumulative = 0;
+        foreach (var b in bins)
+        {
+            cumulative += b.Count;
+            line.Points.Add(new DataPoint(b.End, cumulative * 100.0 / total));
+        }
+
+        model.Series.Add(line);
+        model.Annotations.Add(new LineAnnotation
+        {
+            Type = LineAnnotationType.Horizontal,
+            Y = 95,
+            YAxisKey = "cdf",
+            Color = OxyColor.FromAColor(160, OxyColors.Gray),
+            LineStyle = LineStyle.Dash,
+            StrokeThickness = 1.0,
+            Text = "P95",
+            TextColor = OxyColors.Gray
+        });
     }
 
     private static bool IsTimeSorted(IReadOnlyList<RawCanFrame> frames)
@@ -1124,39 +1250,38 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return EmptyPlot("Top CAN-IDs (geen data)");
         }
 
+        var shown = topByCount.Take(20).ToArray();
         var model = new PlotModel { Title = "Top CAN-IDs op frame-aandeel" };
-        var xAxis = Axis(AxisPosition.Bottom, "Top-ID rank");
-        xAxis.Minimum = 0.5;
-        xAxis.Maximum = topByCount.Count + 0.5;
-        xAxis.MajorStep = 1;
-        var yAxis = Axis(AxisPosition.Left, "Aandeel [%]", 0);
-        model.Axes.Add(xAxis);
-        model.Axes.Add(yAxis);
-
-        var stems = new StemSeries
+        var categoryAxis = new CategoryAxis
         {
-            Title = "Aandeel",
-            Color = OxyColor.Parse("#59A14F"),
-            StrokeThickness = 2.0
+            Position = AxisPosition.Left,
+            Title = "CAN-ID",
+            GapWidth = 0.4
         };
-        for (var i = 0; i < topByCount.Count; i++)
+
+        // Add bottom-to-top so the highest-traffic ID ends up on top.
+        for (var i = shown.Length - 1; i >= 0; i--)
         {
-            var share = (topByCount[i].Count * 100.0) / Math.Max(1, totalFrames);
-            var x = i + 1;
-            stems.Points.Add(new DataPoint(x, share));
-            model.Annotations.Add(new TextAnnotation
-            {
-                Text = $"0x{topByCount[i].FrameId:X}",
-                TextPosition = new DataPoint(x, share),
-                TextHorizontalAlignment = HorizontalAlignment.Center,
-                TextVerticalAlignment = VerticalAlignment.Top,
-                Stroke = OxyColors.Undefined,
-                FontSize = 9,
-                TextColor = OxyColor.Parse("#333333")
-            });
+            categoryAxis.Labels.Add($"0x{shown[i].FrameId:X}");
         }
 
-        model.Series.Add(stems);
+        model.Axes.Add(categoryAxis);
+        model.Axes.Add(Axis(AxisPosition.Bottom, "Aandeel [%]", 0));
+
+        var bars = new BarSeries
+        {
+            FillColor = OxyColor.Parse("#59A14F"),
+            StrokeThickness = 0,
+            LabelPlacement = LabelPlacement.Outside,
+            LabelFormatString = "{0:0.#}%"
+        };
+        for (var i = shown.Length - 1; i >= 0; i--)
+        {
+            var share = (shown[i].Count * 100.0) / Math.Max(1, totalFrames);
+            bars.Items.Add(new BarItem(share));
+        }
+
+        model.Series.Add(bars);
         return model;
     }
 
