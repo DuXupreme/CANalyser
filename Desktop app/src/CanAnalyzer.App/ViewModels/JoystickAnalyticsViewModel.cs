@@ -58,6 +58,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private double _canBitrateKbps = 500;
     [ObservableProperty] private int _canTimeBinMilliseconds = 100;
     [ObservableProperty] private double _delaySearchRangeSeconds = 1.5;
+    [ObservableProperty] private double _responseThresholdPercent = 2.0;
     [ObservableProperty] private string _statusText = "Laad eerst log + DBC en open daarna dit tabblad.";
 
     [ObservableProperty] private PlotModel _joystickDensityModel = EmptyPlot("Joystick puntenwolk");
@@ -127,6 +128,26 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             JoystickPlaybackSpeed = 0.1;
         }
     }
+    partial void OnResponseThresholdPercentChanged(double value)
+    {
+        if (value < 0.1)
+        {
+            ResponseThresholdPercent = 0.1;
+            return;
+        }
+
+        if (value > 50)
+        {
+            ResponseThresholdPercent = 50;
+            return;
+        }
+
+        if (_dataset is not null)
+        {
+            BuildDelayAnalytics();
+        }
+    }
+
     partial void OnDelayOverlayNormalizeChanged(bool value) => RefreshDelayOverlayFromCache();
     partial void OnDelayOverlayStepPlotChanged(bool value) => RefreshDelayOverlayFromCache();
     partial void OnDelayOverlaySampleMarkersChanged(bool value) => RefreshDelayOverlayFromCache();
@@ -406,7 +427,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         ActuatorRightOverlayModel = EmptyPlot("Right actuator");
         ActuatorFrontOverlayModel = EmptyPlot("Front actuator");
         ActuatorDelayHistogramModel = EmptyPlot("Delay histogram vlinder");
-        DelayHistogramModel = EmptyPlot("Delay histogram");
+        DelayHistogramModel = EmptyPlot("Dode tijd histogram");
         DelayOverlayModel = EmptyPlot("Command/response overlay");
         CanFrameRateModel = EmptyPlot("Frames/s over tijd");
         CanBusLoadModel = EmptyPlot("Bus load [%] over tijd");
@@ -586,25 +607,33 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         if (!TryGetSeries(SelectedCommandSignal, out var cmd) || !TryGetSeries(SelectedResponseSignal, out var rsp))
         {
             _lastDelayResult = null;
-            DelayHistogramModel = EmptyPlot("Delay histogram");
+            DelayHistogramModel = EmptyPlot("Dode tijd histogram");
             DelayOverlayModel = EmptyPlot("Command/response overlay");
             return;
         }
 
-        var r = _analyticsService.AnalyzeDelay(cmd, rsp, Math.Max(0.05, DelaySearchRangeSeconds), 2800, 0.5, 9000);
+        var searchRange = Math.Max(0.05, DelaySearchRangeSeconds);
+        var r = _analyticsService.AnalyzeDelay(cmd, rsp, searchRange, 2800, 0.5, 9000);
         _lastDelayResult = r;
-        Add(DelayMetrics, "Command", r.CommandSignalLabel);
-        Add(DelayMetrics, "Response", r.ResponseSignalLabel);
-        Add(DelayMetrics, "Gem delay [s]", FN(r.MeanEventDelaySeconds));
-        Add(DelayMetrics, "Min delay [s]", FN(r.MinimumEventDelaySeconds));
-        Add(DelayMetrics, "Max delay [s]", FN(r.MaximumEventDelaySeconds));
-        Add(DelayMetrics, "P95 delay [s]", FN(r.Percentile95EventDelaySeconds));
-        Add(DelayMetrics, "Matched events", r.MatchedDelayEvents.ToString("N0", CultureInfo.CurrentCulture));
-        Add(DelayMetrics, "Rising events", r.RisingDelay.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture));
-        Add(DelayMetrics, "Rising avg [s]", FN(r.RisingDelay.MeanDelaySeconds));
-        Add(DelayMetrics, "Falling events", r.FallingDelay.MatchedEventCount.ToString("N0", CultureInfo.CurrentCulture));
-        Add(DelayMetrics, "Falling avg [s]", FN(r.FallingDelay.MeanDelaySeconds));
-        DelayHistogramModel = BuildHistogram("Delay histogram (event-based)", r.DelayHistogram, "Delta-t [s]", OxyColor.Parse("#59A14F"));
+
+        var thresholdFraction = Math.Clamp(ResponseThresholdPercent, 0.1, 50.0) / 100.0;
+        var fr = _analyticsService.AnalyzeFirstResponseDelay(cmd, rsp, searchRange, thresholdFraction, 30);
+
+        Add(DelayMetrics, "Command", fr.CommandSignalLabel);
+        Add(DelayMetrics, "Response", fr.ResponseSignalLabel);
+        Add(DelayMetrics, "— Dode tijd: commando → eerste reactie —", $"drempel {F(ResponseThresholdPercent)}% van bereik");
+        Add(DelayMetrics, "Dode tijd gem [s]", FN(fr.MeanDeadTimeSeconds));
+        Add(DelayMetrics, "Dode tijd min [s]", FN(fr.MinimumDeadTimeSeconds));
+        Add(DelayMetrics, "Dode tijd max [s]", FN(fr.MaximumDeadTimeSeconds));
+        Add(DelayMetrics, "Dode tijd P95 [s]", FN(fr.Percentile95DeadTimeSeconds));
+        Add(DelayMetrics, "Commando-flanken", fr.CommandEdgeCount.ToString("N0", CultureInfo.CurrentCulture));
+        Add(DelayMetrics, "Reacties gemeten", fr.MatchedReactionCount.ToString("N0", CultureInfo.CurrentCulture));
+        Add(DelayMetrics, "Stijgend dode tijd gem [s]", FN(fr.RisingDeadTime.MeanDelaySeconds));
+        Add(DelayMetrics, "Dalend dode tijd gem [s]", FN(fr.FallingDeadTime.MeanDelaySeconds));
+        Add(DelayMetrics, "— Kruiscorrelatie (hele golf, ter controle) —", "");
+        Add(DelayMetrics, "Lag (correlatie) [s]", F(r.BestLagSeconds));
+        Add(DelayMetrics, "Correlatie kwaliteit", F(r.BestCorrelation));
+        DelayHistogramModel = BuildHistogram("Dode tijd histogram (commando → eerste reactie)", fr.DeadTimeHistogram, "Dode tijd [s]", OxyColor.Parse("#59A14F"));
         RefreshDelayOverlayFromCache();
     }
 

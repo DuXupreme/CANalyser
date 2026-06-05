@@ -317,6 +317,130 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             ReduceTV(t, rsRaw, maxPlotPoints));
     }
 
+    public FirstResponseDelayResult AnalyzeFirstResponseDelay(
+        SignalSeries commandSeries,
+        SignalSeries responseSeries,
+        double searchRangeSeconds = 1.5,
+        double responseThresholdFraction = 0.02,
+        int histogramBins = 30)
+    {
+        var frac = Math.Clamp(responseThresholdFraction, 0.001, 0.5);
+        if (commandSeries.Time.Length < 2 || responseSeries.Time.Length < 2 || commandSeries.Value.Length < 2 || responseSeries.Value.Length < 2)
+        {
+            return CreateEmptyFirstResponseResult(commandSeries.Label, responseSeries.Label, frac);
+        }
+
+        var window = Math.Max(0.01, searchRangeSeconds);
+
+        // Command step detection: a real edge moves a sizeable fraction of the command swing.
+        var cmdValues = commandSeries.Value.Select(static v => (double)v).ToArray();
+        var cmdSorted = cmdValues.OrderBy(static v => v).ToArray();
+        var cmdRange = Math.Max(1e-9, Percentile(cmdSorted, 0.99) - Percentile(cmdSorted, 0.01));
+        var stepThreshold = cmdRange * 0.30;
+
+        // Feedback reaction threshold: a small fraction of the feedback range above the resting value.
+        var rspSorted = responseSeries.Value.Select(static v => (double)v).OrderBy(static v => v).ToArray();
+        var rspRange = Math.Max(1e-9, Percentile(rspSorted, 0.99) - Percentile(rspSorted, 0.01));
+        var responseThreshold = Math.Max(1e-9, rspRange * frac);
+
+        var medianDt = EstimateMedianDt(commandSeries.Time.Select(static t => (double)t).ToArray(), commandSeries.Time.Length);
+        var minGap = Math.Max(0.02, Math.Min(window * 0.5, medianDt * 4.0));
+
+        var deadTimes = new List<double>();
+        var risingValues = new List<double>();
+        var fallingValues = new List<double>();
+        var edgeCount = 0;
+        var lastEdgeTime = double.NegativeInfinity;
+        for (var i = 1; i < commandSeries.Time.Length; i++)
+        {
+            var delta = cmdValues[i] - cmdValues[i - 1];
+            if (Math.Abs(delta) < stepThreshold)
+            {
+                continue;
+            }
+
+            var edgeTime = commandSeries.Time[i];
+            if ((edgeTime - lastEdgeTime) < minGap)
+            {
+                continue;
+            }
+
+            var direction = Math.Sign(delta);
+            if (direction == 0)
+            {
+                continue;
+            }
+
+            lastEdgeTime = edgeTime;
+            edgeCount++;
+
+            // Resting feedback value at the moment the command changes (before it could react).
+            var baseline = Lerp(responseSeries.Time, responseSeries.Value, edgeTime);
+            var target = baseline + (direction * responseThreshold);
+
+            // First feedback sample after the edge that deviates past the threshold in the command direction.
+            var startIdx = UpperBound(responseSeries.Time, (float)edgeTime);
+            for (var j = startIdx; j < responseSeries.Time.Length; j++)
+            {
+                var reactionTime = responseSeries.Time[j];
+                if (reactionTime <= edgeTime)
+                {
+                    continue;
+                }
+
+                if ((reactionTime - edgeTime) > window)
+                {
+                    break;
+                }
+
+                var value = responseSeries.Value[j];
+                var crossed = direction > 0 ? value >= target : value <= target;
+                if (!crossed)
+                {
+                    continue;
+                }
+
+                var deadTime = reactionTime - edgeTime;
+                if (deadTime < 0)
+                {
+                    break;
+                }
+
+                deadTimes.Add(deadTime);
+                (direction > 0 ? risingValues : fallingValues).Add(deadTime);
+                break;
+            }
+        }
+
+        var stats = BuildDelayEventStatistics(deadTimes);
+        var rising = BuildDelayEventStatistics(risingValues);
+        var falling = BuildDelayEventStatistics(fallingValues);
+        var histogramHigh = deadTimes.Count == 0
+            ? Math.Max(0.05, window)
+            : Math.Max(0.02, Percentile(deadTimes.OrderBy(static v => v).ToArray(), 0.99));
+        var histogram = Histogram(deadTimes, histogramBins, 0, histogramHigh);
+
+        return new FirstResponseDelayResult(
+            commandSeries.Label,
+            responseSeries.Label,
+            edgeCount,
+            deadTimes.Count,
+            frac,
+            stats.MeanDelaySeconds,
+            stats.MinimumDelaySeconds,
+            stats.MaximumDelaySeconds,
+            stats.Percentile95DelaySeconds,
+            rising,
+            falling,
+            histogram);
+    }
+
+    private static FirstResponseDelayResult CreateEmptyFirstResponseResult(string commandLabel, string responseLabel, double thresholdFraction)
+    {
+        var empty = new DelayEventStatistics(0, null, null, null, null);
+        return new FirstResponseDelayResult(commandLabel, responseLabel, 0, 0, thresholdFraction, null, null, null, null, empty, empty, []);
+    }
+
     public ButterflyKinematicsResult AnalyzeButterflyKinematics(
         SignalSeries joystickXSeries,
         SignalSeries joystickYSeries,

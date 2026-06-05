@@ -60,7 +60,7 @@
             <TabItem Header="Analyse">
                 <views:AnalysisView DataContext="{Binding Analysis}" />
             </TabItem>
-            <TabItem Header="Joystick Analyse">
+            <TabItem Header="CAN Analyse">
                 <views:JoystickAnalyticsView DataContext="{Binding JoystickAnalytics}" />
             </TabItem>
             <TabItem Header="Raw Frames (PCAN)">
