@@ -31,6 +31,20 @@ public sealed class FileDialogService : IFileDialogService
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
+    public string? SaveDbcFile(string? initialPath)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Database opslaan als DBC",
+            Filter = "DBC files (*.dbc)|*.dbc|All files (*.*)|*.*",
+            AddExtension = true,
+            DefaultExt = ".dbc",
+            FileName = "can_database.dbc"
+        };
+        ApplyInitialPath(dialog, initialPath);
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
     public string? PickPresetFile(string? initialPath)
     {
         var dialog = new OpenFileDialog

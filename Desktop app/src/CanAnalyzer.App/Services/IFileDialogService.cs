@@ -9,6 +9,8 @@ public interface IFileDialogService
 
     string? PickDbcFile(string? initialPath);
 
+    string? SaveDbcFile(string? initialPath);
+
     string? PickPresetFile(string? initialPath);
 
     string? SavePresetFile(string? initialPath);

@@ -55,6 +55,7 @@ public partial class App : Application
         services.AddSingleton<ICanLogParsingService, CanLogParsingService>();
 
         services.AddSingleton<IDbcLoader, DbcLoader>();
+        services.AddSingleton<IDbcWriter, DbcWriter>();
         services.AddSingleton<ICanDecodingService, CanDecodingService>();
         services.AddSingleton<IDatasetBuilder, DatasetBuilder>();
         services.AddSingleton<IRawFrameFilterService, RawFrameFilterService>();
@@ -67,6 +68,7 @@ public partial class App : Application
         services.AddSingleton<JoystickAnalyticsViewModel>();
         services.AddSingleton<RawFramesViewModel>();
         services.AddSingleton<SettingsDiagnosticsViewModel>();
+        services.AddSingleton<DbcEditorViewModel>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 

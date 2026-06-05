@@ -66,6 +66,9 @@
             <TabItem Header="Raw Frames (PCAN)">
                 <views:RawFramesView DataContext="{Binding RawFrames}" />
             </TabItem>
+            <TabItem Header="Database (DBC)">
+                <views:DbcEditorView DataContext="{Binding DbcEditor}" />
+            </TabItem>
             <TabItem Header="Instellingen / Diagnostics">
                 <views:SettingsDiagnosticsView DataContext="{Binding SettingsDiagnostics}" />
             </TabItem>

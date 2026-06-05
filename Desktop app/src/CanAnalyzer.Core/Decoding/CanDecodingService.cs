@@ -261,7 +261,7 @@ public sealed class CanDecodingService : ICanDecodingService
         }
 
         var raw = BigInteger.Zero;
-        foreach (var bitIndex in IterateMotorolaBitIndices(signal.StartBit, signal.Length))
+        foreach (var bitIndex in DbcBitLayout.GetOccupiedLsb0Bits(signal.StartBit, signal.Length, isLittleEndian: false))
         {
             if (!TryGetBitLsb0(data, bitIndex, permissive, out var bit))
             {
@@ -289,23 +289,6 @@ public sealed class CanDecodingService : ICanDecodingService
 
         var asDouble = (double)value;
         return (asDouble * signal.Scale) + signal.Offset;
-    }
-
-    private static IEnumerable<int> IterateMotorolaBitIndices(int startBit, int length)
-    {
-        var bit = startBit;
-        for (var i = 0; i < length; i++)
-        {
-            yield return bit;
-            if (bit % 8 == 0)
-            {
-                bit += 15;
-            }
-            else
-            {
-                bit -= 1;
-            }
-        }
     }
 
     private static bool TryGetBitLsb0(byte[] data, int bitIndex, bool permissive, out BigInteger bit)

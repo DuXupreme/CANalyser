@@ -52,6 +52,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         JoystickAnalyticsViewModel joystickAnalytics,
         RawFramesViewModel rawFrames,
         SettingsDiagnosticsViewModel settingsDiagnostics,
+        DbcEditorViewModel dbcEditor,
         ILogger<MainWindowViewModel> logger)
     {
         _analysisPipeline = analysisPipeline;
@@ -65,6 +66,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         JoystickAnalytics = joystickAnalytics;
         RawFrames = rawFrames;
         SettingsDiagnostics = settingsDiagnostics;
+        DbcEditor = dbcEditor;
 
         LoadedSettings = _settingsStore.Load();
         LogFilePath = LoadedSettings.LastLogFilePath;
@@ -93,6 +95,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public RawFramesViewModel RawFrames { get; }
 
     public SettingsDiagnosticsViewModel SettingsDiagnostics { get; }
+
+    public DbcEditorViewModel DbcEditor { get; }
 
     public IRelayCommand BrowseLogFileCommand { get; }
 
