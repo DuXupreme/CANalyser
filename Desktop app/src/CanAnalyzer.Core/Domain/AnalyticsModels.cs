@@ -174,6 +174,25 @@ public sealed record DelayAnalysisResult(
     IReadOnlyList<TimeValuePoint> ShiftedResponseSeries);
 
 /// <summary>
+/// Dead-time analysis: the time between each command step edge and the first
+/// reaction in the feedback signal. Robust against ramped (non-step) feedback,
+/// because it measures the onset of motion rather than the steepest change.
+/// </summary>
+public sealed record FirstResponseDelayResult(
+    string CommandSignalLabel,
+    string ResponseSignalLabel,
+    int CommandEdgeCount,
+    int MatchedReactionCount,
+    double ResponseThresholdFraction,
+    double? MeanDeadTimeSeconds,
+    double? MinimumDeadTimeSeconds,
+    double? MaximumDeadTimeSeconds,
+    double? Percentile95DeadTimeSeconds,
+    DelayEventStatistics RisingDeadTime,
+    DelayEventStatistics FallingDeadTime,
+    IReadOnlyList<HistogramBin> DeadTimeHistogram);
+
+/// <summary>
 /// Event-based delay statistics (command -> feedback).
 /// </summary>
 public sealed record DelayEventStatistics(

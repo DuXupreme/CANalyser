@@ -40,6 +40,11 @@
                                          Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                             </StackPanel>
                             <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Reactiedrempel [%]" />
+                                <TextBox Width="85"
+                                         Text="{Binding ResponseThresholdPercent, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="Acties" />
                                 <StackPanel Orientation="Horizontal">
                                     <Button Content="Auto detect delay" Command="{Binding AutoDetectDelaySignalsCommand}" Margin="0,0,6,0" />
@@ -67,7 +72,7 @@
                             </StackPanel>
                             <TextBlock Margin="0,7,0,0"
                                        Foreground="#555555"
-                                       Text="Tip: kies Command=aansturing/setpoint en Response=feedback/positie voor de vertraging tussen commando en eerste reactie." />
+                                       Text="Meet de dode tijd: van commando-flank tot eerste beweging in de feedback. Reactiedrempel = hoeveel % van het feedbackbereik telt als 'eerste reactie'." />
                         </WrapPanel>
                     </Border>
 
@@ -84,7 +89,7 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                         </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Delay histogram (event-based)">
+                        <GroupBox Grid.Column="1" Header="Dode tijd histogram (commando → eerste reactie)">
                             <oxy:PlotView Model="{Binding DelayHistogramModel}" Margin="6" />
                         </GroupBox>
                     </Grid>

@@ -44,6 +44,13 @@ public interface IJoystickAnalyticsService
         double thresholdFraction = 0.2,
         int maxPlotPoints = 5000);
 
+    FirstResponseDelayResult AnalyzeFirstResponseDelay(
+        SignalSeries commandSeries,
+        SignalSeries responseSeries,
+        double searchRangeSeconds = 1.5,
+        double responseThresholdFraction = 0.02,
+        int histogramBins = 30);
+
     ButterflyKinematicsResult AnalyzeButterflyKinematics(
         SignalSeries joystickXSeries,
         SignalSeries joystickYSeries,
