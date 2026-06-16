@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -11,6 +12,8 @@ namespace CanAnalyzer.App.ViewModels;
 /// </summary>
 public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 {
+    private readonly IUpdateService _updateService;
+    private readonly IMessageDialogService _messageDialogService;
     private Func<Task>? _applySettingsAsync;
 
     [ObservableProperty]
@@ -52,10 +55,19 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private string _settingsSaveStatus = string.Empty;
 
-    public SettingsDiagnosticsViewModel()
+    [ObservableProperty]
+    private string _updateStatus = string.Empty;
+
+    public SettingsDiagnosticsViewModel(IUpdateService updateService, IMessageDialogService messageDialogService)
     {
+        _updateService = updateService;
+        _messageDialogService = messageDialogService;
         ApplyProgramSettingsCommand = new AsyncRelayCommand(ApplyProgramSettingsAsync);
+        CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);
     }
+
+    /// <summary>Versie van de draaiende app, voor weergave.</summary>
+    public string AppVersion => _updateService.CurrentVersion;
 
     public ObservableCollection<string> RecentLogFiles { get; } = [];
 
@@ -64,6 +76,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     public ObservableCollection<MessageSummary> MessageSummaries { get; } = [];
 
     public IAsyncRelayCommand ApplyProgramSettingsCommand { get; }
+
+    public IAsyncRelayCommand CheckForUpdatesCommand { get; }
 
     public void BindApplySettingsHandler(Func<Task> applySettingsAsync)
     {
@@ -127,5 +141,49 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
         await _applySettingsAsync();
         SettingsSaveStatus = $"Instellingen opgeslagen ({DateTime.Now:HH:mm:ss}).";
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (!_updateService.IsInstalled)
+        {
+            UpdateStatus = "Updates zijn alleen beschikbaar in de geïnstalleerde versie.";
+            return;
+        }
+
+        UpdateStatus = "Bezig met controleren op updates...";
+        var result = await _updateService.CheckForUpdatesAsync();
+
+        if (result.Error is not null)
+        {
+            UpdateStatus = $"Controle mislukt: {result.Error}";
+            return;
+        }
+
+        if (!result.UpdateAvailable)
+        {
+            UpdateStatus = $"Je hebt de nieuwste versie ({_updateService.CurrentVersion}).";
+            return;
+        }
+
+        var confirmed = _messageDialogService.Confirm(
+            "Update beschikbaar",
+            $"Versie {result.NewVersion} is beschikbaar (huidige versie {_updateService.CurrentVersion}).\n\n" +
+            "Nu downloaden en de app herstarten?");
+        if (!confirmed)
+        {
+            UpdateStatus = $"Update {result.NewVersion} beschikbaar, nog niet geïnstalleerd.";
+            return;
+        }
+
+        try
+        {
+            UpdateStatus = "Bezig met downloaden van de update...";
+            await _updateService.DownloadAndApplyAsync();
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus = $"Update mislukt: {ex.Message}";
+        }
     }
 }

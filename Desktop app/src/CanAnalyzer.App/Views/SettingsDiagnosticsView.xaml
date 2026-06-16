@@ -36,6 +36,19 @@
                 </StackPanel>
             </GroupBox>
 
+            <GroupBox Header="Updates" Margin="0,8,0,0">
+                <StackPanel Margin="8">
+                    <TextBlock>
+                        <Run Text="Huidige versie: " FontWeight="SemiBold" />
+                        <Run Text="{Binding AppVersion, Mode=OneWay}" />
+                    </TextBlock>
+                    <Button Content="Controleer op updates"
+                            Command="{Binding CheckForUpdatesCommand}"
+                            Margin="0,8,0,0" />
+                    <TextBlock Text="{Binding UpdateStatus}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                </StackPanel>
+            </GroupBox>
+
             <GroupBox Header="Programma-instellingen" Margin="0,8,0,0">
                 <StackPanel Margin="8">
                     <TextBlock Text="Max punten per trace (default)" />
