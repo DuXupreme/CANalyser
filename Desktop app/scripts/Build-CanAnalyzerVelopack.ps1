@@ -84,7 +84,13 @@ try {
     dotnet tool restore
     if ($LASTEXITCODE -ne 0) { throw "dotnet tool restore faalde." }
 
+    # Releases-map leegmaken: lokale restanten van een vorige run zouden
+    # botsen ("versie bestaat al"). De download-stap hieronder vult de map
+    # opnieuw met de echte remote releases voor delta-updates.
     $releasesDir = Join-Path $OutputRoot "velopack\releases"
+    if (Test-Path $releasesDir) {
+        Remove-Item -Path $releasesDir -Recurse -Force
+    }
     New-Item -ItemType Directory -Path $releasesDir -Force | Out-Null
 
     # --- 3. Vorige releases ophalen voor delta-updates (alleen bij upload) ---
