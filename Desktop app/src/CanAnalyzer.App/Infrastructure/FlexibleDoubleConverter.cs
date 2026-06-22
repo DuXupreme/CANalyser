@@ -18,13 +18,17 @@ public sealed class FlexibleDoubleConverter : IValueConverter
 
         if (value is double d)
         {
-            return d.ToString("0.###", CultureInfo.CurrentCulture);
+            // Toon de volledige waarde (tot 15 decimalen, zonder onnodige nullen).
+            // Een vaste, korte notatie zoals "0.###" rondt af op 3 decimalen, waardoor
+            // bv. een DBC-schaal van 0,00390625 als "0,004" verschijnt en bij het
+            // opnieuw opslaan zou verminken. Dit behoudt de precisie bij het bewerken.
+            return d.ToString("0.###############", CultureInfo.CurrentCulture);
         }
 
         return value.ToString() ?? string.Empty;
     }
 
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is not string text)
         {
@@ -34,7 +38,11 @@ public sealed class FlexibleDoubleConverter : IValueConverter
         var input = text.Trim();
         if (string.IsNullOrWhiteSpace(input))
         {
-            return DependencyProperty.UnsetValue;
+            // Leeg veld: een nullable doel (bv. optioneel tijdfilter) wordt gewist (null);
+            // een niet-nullable doel behoudt zijn huidige waarde.
+            return Nullable.GetUnderlyingType(targetType) is not null
+                ? null
+                : DependencyProperty.UnsetValue;
         }
 
         if (double.TryParse(input, NumberStyles.Float, CultureInfo.CurrentCulture, out var parsed))

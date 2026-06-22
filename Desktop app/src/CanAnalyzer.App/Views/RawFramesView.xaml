@@ -36,11 +36,11 @@
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
                         <TextBlock Text="Tijd start [s]" />
-                        <TextBox Width="90" Text="{Binding TimeStart, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBox Width="90" Text="{Binding TimeStart, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
                         <TextBlock Text="Tijd einde [s]" />
-                        <TextBox Width="90" Text="{Binding TimeEnd, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBox Width="90" Text="{Binding TimeEnd, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
                         <TextBlock Text="Max rijen" />

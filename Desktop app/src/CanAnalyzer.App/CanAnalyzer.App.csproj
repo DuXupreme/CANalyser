@@ -7,8 +7,8 @@
     <Product>CanAnalyzer</Product>
     <Company>Gyrari B.V.</Company>
     <ApplicationIcon>..\..\installer\velopack\app.ico</ApplicationIcon>
-    <Version>1.0.2</Version>
-    <FileVersion>1.0.2.0</FileVersion>
+    <Version>1.0.3</Version>
+    <FileVersion>1.0.3.0</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- WPF genereert zelf een Main uit App.xaml; dit wijst het echte entry-point
          aan zodat Velopack's hook als allereerste kan draaien. -->
