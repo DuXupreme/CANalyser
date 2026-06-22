@@ -1,4 +1,8 @@
-# CanAnalyzer (.NET 8 WPF MVVM)
+<p align="center">
+  <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
+</p>
+
+# CANalyser (.NET 8 WPF MVVM)
 
 Production-oriented Windows desktop migration of the Python `Gyrari CANalyser.py` tool.
 

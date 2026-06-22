@@ -1,5 +1,5 @@
 #ifndef AppName
-  #define AppName "CanAnalyzer"
+  #define AppName "CANalyser"
 #endif
 
 #ifndef AppVersion
@@ -32,6 +32,7 @@ DefaultGroupName={#AppName}
 OutputDir={#OutputDir}
 OutputBaseFilename=CanAnalyzer-Setup-{#AppVersion}
 WizardStyle=modern
+SetupIconFile=velopack\app.ico
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

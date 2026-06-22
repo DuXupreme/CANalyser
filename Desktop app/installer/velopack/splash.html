@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=600, initial-scale=1">
+  <title>CANalyser wordt geïnstalleerd</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 600px;
+      height: 400px;
+      margin: 0;
+      overflow: hidden;
+    }
+    body {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: #fff;
+      background: linear-gradient(160deg, #16263b 0%, #101722 72%, #0c1119 100%);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    .wordmark {
+      width: 450px;
+      height: 138px;
+      margin-top: 62px;
+      object-fit: contain;
+    }
+    .status {
+      margin-top: 23px;
+      color: #c5ced9;
+      font-size: 20px;
+      font-weight: 400;
+      letter-spacing: .15px;
+    }
+    .publisher {
+      position: absolute;
+      bottom: 42px;
+      color: #9eabbc;
+      font-size: 14px;
+    }
+    .accent {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 6px;
+      background: linear-gradient(90deg, #1f5fa8 0 50%, #ec7a2d 50% 100%);
+    }
+  </style>
+</head>
+<body>
+  <img class="wordmark"
+       src="../../src/CanAnalyzer.App/Resources/Branding/canalyser-wordmark-dark.svg"
+       alt="CANalyser">
+  <div class="status">Wordt geïnstalleerd…</div>
+  <div class="publisher">Gyrari B.V.</div>
+  <div class="accent"></div>
+</body>
+</html>

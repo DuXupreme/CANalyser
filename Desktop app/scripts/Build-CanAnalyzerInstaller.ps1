@@ -99,7 +99,7 @@ Write-Host "Building installer with Inno Setup..."
     ("/DSourceDir=$publishDir") `
     ("/DOutputDir=$installerOutDir") `
     ("/DAppVersion=$appVersion") `
-    "/DAppName=CanAnalyzer" `
+    "/DAppName=CANalyser" `
     "/DAppPublisher=Gyrari B.V." `
     "/DExeName=CanAnalyzer.exe" `
     $issPath
