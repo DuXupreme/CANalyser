@@ -2,6 +2,7 @@ using System.Windows;
 using CanAnalyzer.App.Infrastructure;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.ViewModels;
+using CanAnalyzer.App.Views;
 using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Decoding;
 using CanAnalyzer.Core.Export;
@@ -19,9 +20,21 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        var splash = new SplashWindow();
+        splash.Show();
+
         _serviceProvider = BuildServiceProvider();
         var window = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = window;
+
+        void CloseSplash(object? sender, EventArgs args)
+        {
+            window.ContentRendered -= CloseSplash;
+            splash.Close();
+        }
+
+        window.ContentRendered += CloseSplash;
         window.Show();
 
         // Niet-blokkerende update-controle: bij een nieuwe versie krijgt de

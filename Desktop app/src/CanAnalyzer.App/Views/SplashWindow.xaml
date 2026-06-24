@@ -1,0 +1,59 @@
+<Window x:Class="CanAnalyzer.App.Views.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CANalyser"
+        Width="600"
+        Height="360"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Background="Transparent"
+        AllowsTransparency="True">
+    <Border Background="#FFFFFF"
+            BorderBrush="#D9E0E8"
+            BorderThickness="1"
+            CornerRadius="10"
+            SnapsToDevicePixels="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="6" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                <Image Source="pack://application:,,,/Resources/Branding/canalyser-lockup.png"
+                       Width="460"
+                       Height="110"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <TextBlock Text="CAN-bus analyse"
+                           Margin="0,18,0,0"
+                           HorizontalAlignment="Center"
+                           Foreground="#627186"
+                           FontSize="18" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="1"
+                       Text="Gyrari B.V."
+                       Margin="0,0,0,28"
+                       HorizontalAlignment="Center"
+                       Foreground="#7D8999"
+                       FontSize="13" />
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="#1F5FA8" CornerRadius="0,0,0,9" />
+                <Border Grid.Column="1" Background="#EC7A2D" CornerRadius="0,0,9,0" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

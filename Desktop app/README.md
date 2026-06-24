@@ -52,9 +52,9 @@ src/
     Utilities/      # hex parsing, timestamp parsing, CAN/J1939 ID helpers
 
   CanAnalyzer.App/
-    App.xaml(.cs)   # DI + startup
+    App.xaml(.cs)   # DI + branded startup splash
     MainWindow.xaml(.cs)
-    Views/          # Analysis, Raw Frames, Settings/Diagnostics
+    Views/          # Analysis, Raw Frames, Settings/Diagnostics, Info
     ViewModels/     # Main shell + tab viewmodels
     Models/         # UI models for signal/group/frame rows and plot panel
     Services/       # file dialogs + plot model builder
