@@ -68,7 +68,7 @@ public sealed class CoreBehaviorTests
                 Offset = 0,
                 Minimum = 0,
                 Maximum = 255,
-                Unit = string.Empty
+                Unit = "count"
             });
 
         var database = new DbcDatabase { Messages = [message] };
@@ -84,6 +84,8 @@ public sealed class CoreBehaviorTests
         Assert.Equal("ExampleMessage", result.Samples[0].MessageName);
         Assert.Equal("ExampleSignal", result.Samples[0].SignalName);
         Assert.Equal(42f, result.Samples[0].Value);
+        Assert.Equal("0x2A", result.Samples[0].RawValueHex);
+        Assert.Equal("count", result.Samples[0].Unit);
     }
 
     [Fact]

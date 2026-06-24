@@ -1,21 +1,20 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Navigation;
+using CanAnalyzer.App.ViewModels;
 
 namespace CanAnalyzer.App.Views;
 
 /// <summary>
-/// Eenvoudig "Over"-venster met versie, auteur en links naar de repo/documentatie.
+/// "Over"-venster met versie, auteur, updatecontrole en documentatielinks.
 /// </summary>
 public partial class AboutWindow : Window
 {
-    public AboutWindow()
+    public AboutWindow(SettingsDiagnosticsViewModel viewModel)
     {
         InitializeComponent();
-
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "onbekend";
-        VersionText.Text = $"Versie {version}";
+        DataContext = viewModel;
+        VersionText.Text = $"Versie {viewModel.AppVersion}";
     }
 
     private void OnNavigate(object sender, RequestNavigateEventArgs e)

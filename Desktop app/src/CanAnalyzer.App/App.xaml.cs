@@ -124,6 +124,7 @@ public partial class App : Application
         services.AddSingleton<AnalysisViewModel>();
         services.AddSingleton<JoystickAnalyticsViewModel>();
         services.AddSingleton<RawFramesViewModel>();
+        services.AddSingleton<BusmasterViewModel>();
         services.AddSingleton<SettingsDiagnosticsViewModel>();
         services.AddSingleton<DbcEditorViewModel>();
         services.AddSingleton<MainWindowViewModel>();
