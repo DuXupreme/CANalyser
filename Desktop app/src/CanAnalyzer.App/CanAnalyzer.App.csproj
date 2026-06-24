@@ -4,11 +4,12 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <AssemblyName>CanAnalyzer</AssemblyName>
-    <Product>CanAnalyzer</Product>
+    <Title>CANalyser</Title>
+    <Product>CANalyser</Product>
     <Company>Gyrari B.V.</Company>
-    <ApplicationIcon>..\..\installer\velopack\app.ico</ApplicationIcon>
-    <Version>1.0.3</Version>
-    <FileVersion>1.0.3.0</FileVersion>
+    <ApplicationIcon>Resources\Branding\canalyser-icon.ico</ApplicationIcon>
+    <Version>1.0.4</Version>
+    <FileVersion>1.0.4.0</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- WPF genereert zelf een Main uit App.xaml; dit wijst het echte entry-point
          aan zodat Velopack's hook als allereerste kan draaien. -->
@@ -17,6 +18,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CanAnalyzer.Core\CanAnalyzer.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\Branding\canalyser-icon.ico" />
+    <None Remove="Resources\Branding\canalyser-lockup.png" />
+    <Resource Include="Resources\Branding\canalyser-icon.ico" />
+    <Resource Include="Resources\Branding\canalyser-lockup.png" />
   </ItemGroup>
 
   <ItemGroup>

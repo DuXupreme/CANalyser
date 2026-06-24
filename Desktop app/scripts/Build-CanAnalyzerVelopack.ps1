@@ -114,7 +114,7 @@ try {
         "--packVersion", $Version
         "--packDir", $publishDir
         "--mainExe", "CanAnalyzer.exe"
-        "--packTitle", "CanAnalyzer"
+        "--packTitle", "CANalyser"
         "--packAuthors", "Gyrari B.V."
         "--channel", $Channel
         "--splashImage", $splashImage
@@ -142,7 +142,7 @@ try {
             --channel $Channel `
             -o $releasesDir `
             --publish `
-            --releaseName "CanAnalyzer $Version" `
+            --releaseName "CANalyser $Version" `
             --tag "v$Version"
         if ($LASTEXITCODE -ne 0) { throw "vpk upload faalde met exitcode $LASTEXITCODE." }
         Write-Host "Upload klaar. De release staat op GitHub."

@@ -1,0 +1,54 @@
+<Window x:Class="CanAnalyzer.App.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Over CANalyser"
+        Icon="pack://application:,,,/Resources/Branding/canalyser-icon.ico"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <Grid Margin="22" Width="390">
+        <StackPanel>
+            <Image Source="pack://application:,,,/Resources/Branding/canalyser-lockup.png"
+                   Width="350"
+                   Height="84"
+                   HorizontalAlignment="Left"
+                   Stretch="Uniform"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <TextBlock x:Name="VersionText"
+                       Foreground="#44546A"
+                       Margin="88,4,0,0" />
+
+            <Separator Margin="0,14" />
+
+            <TextBlock>
+                <Run Text="Gemaakt door " /><Run Text="Melle Poeckling" FontWeight="SemiBold" />
+            </TextBlock>
+            <TextBlock Text="© Gyrari B.V." Foreground="#444444" Margin="0,2,0,0" />
+
+            <Separator Margin="0,14" />
+
+            <TextBlock Text="Meer informatie" Foreground="#444444" Margin="0,0,0,4" />
+            <TextBlock>
+                <Hyperlink NavigateUri="https://github.com/DuXupreme/CANalyser"
+                           RequestNavigate="OnNavigate">GitHub-repository</Hyperlink>
+            </TextBlock>
+            <TextBlock Margin="0,4,0,0">
+                <Hyperlink NavigateUri="https://github.com/DuXupreme/CANalyser/blob/main/Desktop%20app/README.md"
+                           RequestNavigate="OnNavigate">Documentatie (README)</Hyperlink>
+            </TextBlock>
+
+            <Button Content="Sluiten"
+                    IsDefault="True"
+                    IsCancel="True"
+                    Click="OnCloseClick"
+                    HorizontalAlignment="Right"
+                    MinWidth="92"
+                    Padding="8,3"
+                    Margin="0,18,0,0" />
+        </StackPanel>
+    </Grid>
+</Window>

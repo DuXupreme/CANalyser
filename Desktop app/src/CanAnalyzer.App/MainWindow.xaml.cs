@@ -69,4 +69,10 @@ public partial class MainWindow : Window
     {
         Close();
     }
+
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        var about = new Views.AboutWindow { Owner = this };
+        about.ShowDialog();
+    }
 }
