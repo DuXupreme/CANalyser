@@ -51,6 +51,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         AnalysisViewModel analysis,
         JoystickAnalyticsViewModel joystickAnalytics,
         RawFramesViewModel rawFrames,
+        BusmasterViewModel busmaster,
         SettingsDiagnosticsViewModel settingsDiagnostics,
         DbcEditorViewModel dbcEditor,
         ILogger<MainWindowViewModel> logger)
@@ -65,6 +66,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Analysis = analysis;
         JoystickAnalytics = joystickAnalytics;
         RawFrames = rawFrames;
+        Busmaster = busmaster;
         SettingsDiagnostics = settingsDiagnostics;
         DbcEditor = dbcEditor;
 
@@ -93,6 +95,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public JoystickAnalyticsViewModel JoystickAnalytics { get; }
 
     public RawFramesViewModel RawFrames { get; }
+
+    public BusmasterViewModel Busmaster { get; }
 
     public SettingsDiagnosticsViewModel SettingsDiagnostics { get; }
 
@@ -212,6 +216,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Analysis.LoadDataset(_dataset);
             JoystickAnalytics.LoadDataset(_dataset);
             RawFrames.LoadDataset(_dataset);
+            Busmaster.LoadDataset(_dataset);
             SettingsDiagnostics.UpdateDataset(_dataset);
 
             StatusText = BuildStatusText(_dataset, Analysis.UseDownsampling, Analysis.MaxPointsPerTrace);

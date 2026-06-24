@@ -1,0 +1,123 @@
+<UserControl x:Class="CanAnalyzer.App.Views.BusmasterView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" />
+            <RowDefinition Height="6" />
+            <RowDefinition Height="2*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                BorderBrush="#D6DEE8"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="8"
+                Margin="0,0,0,8">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Bottom">
+                    <Button Content="Toepassen"
+                            Command="{Binding ApplyFiltersCommand}"
+                            MinWidth="92"
+                            Margin="8,0,6,0" />
+                    <Button Content="Reset"
+                            Command="{Binding ResetFiltersCommand}"
+                            MinWidth="72" />
+                </StackPanel>
+
+                <WrapPanel>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="Zoeken (ID, bericht of data)" />
+                        <TextBox Width="250"
+                                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="Max rijen" />
+                        <TextBox Width="100"
+                                 Text="{Binding MaxRows, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <CheckBox Content="Alleen DBC-berichten"
+                              IsChecked="{Binding ShowOnlyDecoded}"
+                              VerticalAlignment="Bottom"
+                              Margin="0,0,0,3" />
+                    <TextBlock Text="{Binding MessageStatistics}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Bottom"
+                               Margin="18,0,0,3" />
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Messages}"
+                  SelectedItem="{Binding SelectedMessage, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  SelectionMode="Single"
+                  SelectionUnit="FullRow"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.ScrollUnit="Pixel"
+                  ScrollViewer.CanContentScroll="True">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=F6}" Width="115" />
+                <DataGridTextColumn Header="Tx/Rx" Binding="{Binding Direction}" Width="70" />
+                <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="75" />
+                <DataGridTextColumn Header="Msg" Binding="{Binding MessageType}" Width="55" />
+                <DataGridTextColumn Header="ID" Binding="{Binding IdHex}" Width="100" />
+                <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="180" />
+                <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="55" />
+                <DataGridTextColumn Header="Data Byte(s)" Binding="{Binding DataBytes}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <GridSplitter Grid.Row="2"
+                      Height="6"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      Background="#D6DEE8" />
+
+        <GroupBox Grid.Row="3" Header="Message-interpretatie" Margin="0,8,0,0">
+            <Grid Margin="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <WrapPanel Grid.Row="0" Margin="0,0,0,8">
+                    <TextBlock Text="Naam:" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedMessage.MessageName}" Margin="6,0,28,0" />
+                    <TextBlock Text="ID:" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedMessage.IdHex}" Margin="6,0,28,0" />
+                    <TextBlock Text="Kanaal:" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedMessage.Channel}" Margin="6,0,28,0" />
+                    <TextBlock Text="DLC:" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedMessage.Dlc}" Margin="6,0,0,0" />
+                </WrapPanel>
+
+                <DataGrid Grid.Row="1"
+                          ItemsSource="{Binding SelectedSignals}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          HeadersVisibility="Column"
+                          EnableRowVirtualization="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                        <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="*" />
+                        <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="*" />
+                        <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </GroupBox>
+    </Grid>
+</UserControl>

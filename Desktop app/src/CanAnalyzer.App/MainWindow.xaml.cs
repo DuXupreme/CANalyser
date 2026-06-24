@@ -72,7 +72,7 @@ public partial class MainWindow : Window
 
     private void OnAboutClick(object sender, RoutedEventArgs e)
     {
-        var about = new Views.AboutWindow { Owner = this };
+        var about = new Views.AboutWindow(_viewModel.SettingsDiagnostics) { Owner = this };
         about.ShowDialog();
     }
 }

@@ -8,7 +8,9 @@ public sealed record DecodedSignalSample(
     uint FrameId,
     string MessageName,
     string SignalName,
-    float Value)
+    float Value,
+    string RawValueHex = "",
+    string Unit = "")
 {
     public string Label => $"{MessageName}.{SignalName} [0x{FrameId:X}]";
 }

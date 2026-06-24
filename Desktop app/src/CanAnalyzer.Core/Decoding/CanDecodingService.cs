@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using System.Text;
 using CanAnalyzer.Core.Domain;
@@ -86,7 +87,7 @@ public sealed class CanDecodingService : ICanDecodingService
                 continue;
             }
 
-            Dictionary<string, double>? decoded = null;
+            Dictionary<string, DecodedSignalValue>? decoded = null;
             DbcMessage? decodedMessage = null;
             var manualUsed = false;
 
@@ -129,7 +130,7 @@ public sealed class CanDecodingService : ICanDecodingService
 
             foreach (var pair in decoded)
             {
-                if (double.IsNaN(pair.Value) || double.IsInfinity(pair.Value))
+                if (double.IsNaN(pair.Value.PhysicalValue) || double.IsInfinity(pair.Value.PhysicalValue))
                 {
                     continue;
                 }
@@ -140,7 +141,9 @@ public sealed class CanDecodingService : ICanDecodingService
                         FrameId: normalizedFrameId,
                         MessageName: decodedMessage.Name,
                         SignalName: pair.Key,
-                        Value: (float)pair.Value));
+                        Value: (float)pair.Value.PhysicalValue,
+                        RawValueHex: FormatRawValue(pair.Value.RawValue),
+                        Unit: pair.Value.Unit));
             }
         }
 
@@ -174,9 +177,9 @@ public sealed class CanDecodingService : ICanDecodingService
         DbcMessage message,
         byte[] data,
         bool permissive,
-        out Dictionary<string, double> decoded)
+        out Dictionary<string, DecodedSignalValue> decoded)
     {
-        decoded = new Dictionary<string, double>(StringComparer.Ordinal);
+        decoded = new Dictionary<string, DecodedSignalValue>(StringComparer.Ordinal);
         var multiplexerValues = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var signal in message.Signals.Where(s => s.IsMultiplexer))
@@ -192,7 +195,7 @@ public sealed class CanDecodingService : ICanDecodingService
             }
 
             decoded[signal.Name] = value;
-            multiplexerValues[signal.Name] = (int)Math.Round(value);
+            multiplexerValues[signal.Name] = (int)Math.Round(value.PhysicalValue);
         }
 
         foreach (var signal in message.Signals.Where(s => !s.IsMultiplexer))
@@ -222,17 +225,31 @@ public sealed class CanDecodingService : ICanDecodingService
         return decoded.Count > 0;
     }
 
-    private static bool TryDecodeSignalValue(DbcSignal signal, byte[] data, bool permissive, out double value)
+    private static bool TryDecodeSignalValue(
+        DbcSignal signal,
+        byte[] data,
+        bool permissive,
+        out DecodedSignalValue value)
     {
-        value = 0;
+        value = default;
         if (!TryExtractRaw(signal, data, permissive, out var raw))
         {
             return false;
         }
 
-        var scaled = ApplySignalScaling(raw, signal);
-        value = scaled;
+        value = new DecodedSignalValue(
+            ApplySignalScaling(raw, signal),
+            raw,
+            signal.Unit);
         return true;
+    }
+
+    private static string FormatRawValue(BigInteger rawValue)
+    {
+        var hex = rawValue
+            .ToString("X", CultureInfo.InvariantCulture)
+            .TrimStart('0');
+        return $"0x{(hex.Length == 0 ? "0" : hex)}";
     }
 
     private static bool TryExtractRaw(DbcSignal signal, byte[] data, bool permissive, out BigInteger rawValue)
@@ -446,4 +463,9 @@ public sealed class CanDecodingService : ICanDecodingService
             dictionary[key] = 1;
         }
     }
+
+    private readonly record struct DecodedSignalValue(
+        double PhysicalValue,
+        BigInteger RawValue,
+        string Unit);
 }

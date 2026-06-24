@@ -31,6 +31,20 @@
 
             <Separator Margin="0,14" />
 
+            <TextBlock Text="Updates" FontWeight="SemiBold" />
+            <Button Content="Zoek naar updates"
+                    Command="{Binding CheckForUpdatesCommand}"
+                    HorizontalAlignment="Left"
+                    MinWidth="142"
+                    Padding="8,3"
+                    Margin="0,6,0,0" />
+            <TextBlock Text="{Binding UpdateStatus}"
+                       Foreground="#44546A"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0" />
+
+            <Separator Margin="0,14" />
+
             <TextBlock Text="Meer informatie" Foreground="#444444" Margin="0,0,0,4" />
             <TextBlock>
                 <Hyperlink NavigateUri="https://github.com/DuXupreme/CANalyser"
