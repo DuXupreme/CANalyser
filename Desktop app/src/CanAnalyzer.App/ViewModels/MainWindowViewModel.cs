@@ -197,6 +197,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         IsBusy = true;
+        _dataset?.Dispose();
+        _dataset = null;
         ProgressValue = 0;
         ProgressLabel = "Start verwerking...";
         SettingsDiagnostics.LastErrorDetails = string.Empty;
@@ -212,7 +214,51 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 ProgressValue = Math.Clamp(item.Percent, 0, 100);
             });
 
-            _dataset = await _analysisPipeline.LoadAsync(LogFilePath, DbcFilePath, progress, _loadCts.Token);
+            try
+            {
+                _dataset = await _analysisPipeline.LoadAsync(LogFilePath, DbcFilePath, ImportMode.Strict, progress, _loadCts.Token);
+            }
+            catch (ImportIntegrityException integrityException)
+            {
+                var reportText = FormatImportReport(integrityException.Report);
+                SettingsDiagnostics.LastErrorDetails = reportText;
+                var proceed = _messageDialogService.Confirm(
+                    "Integriteitsfouten gevonden",
+                    $"{integrityException.Message}\n\n{reportText}\n\n" +
+                    "Wil je bewust doorgaan in PARTIAL-modus? Afgewezen regels en frames worden nooit met kunstmatige waarden aangevuld.");
+                if (!proceed)
+                {
+                    StatusText = "Import geblokkeerd wegens integriteitsfouten.";
+                    ProgressLabel = "Strikte import afgebroken.";
+                    return;
+                }
+
+                _dataset = await _analysisPipeline.LoadAsync(LogFilePath, DbcFilePath, ImportMode.Partial, progress, _loadCts.Token);
+            }
+
+            var channels = _dataset.RawFrames
+                .Select(static frame => string.IsNullOrWhiteSpace(frame.Channel) ? "(onbekend)" : frame.Channel)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static channel => channel, StringComparer.Ordinal)
+                .ToArray();
+            if (channels.Length > 1)
+            {
+                var dbcName = Path.GetFileName(DbcFilePath);
+                var mapping = string.Join(Environment.NewLine, channels.Select(channel => $"• {channel} → {dbcName}"));
+                var confirmed = _messageDialogService.Confirm(
+                    "DBC-toewijzing per kanaal bevestigen",
+                    $"De log bevat {channels.Length} kanalen. Bevestig expliciet dat dezelfde DBC op ieder kanaal van toepassing is:\n\n{mapping}\n\n" +
+                    "Kies Annuleren als een kanaal een andere DBC vereist; de analyse wordt dan niet geopend.");
+                if (!confirmed)
+                {
+                    _dataset.Dispose();
+                    _dataset = null;
+                    StatusText = "Analyse geblokkeerd: DBC-toewijzing per kanaal niet bevestigd.";
+                    ProgressLabel = "DBC-toewijzing afgebroken.";
+                    return;
+                }
+            }
+
             Analysis.LoadDataset(_dataset);
             JoystickAnalytics.LoadDataset(_dataset);
             RawFrames.LoadDataset(_dataset);
@@ -286,7 +332,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            await _csvExportService.ExportDecodedSignalsAsync(filePath, _dataset.DecodedSamples, CancellationToken.None);
+            await _csvExportService.ExportDecodedSignalsAsync(filePath, _dataset, CancellationToken.None);
             _messageDialogService.ShowInfo("CSV export", $"Gedecodeerde data opgeslagen:\n{filePath}");
         }
         catch (Exception ex)
@@ -366,20 +412,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
     {
         var speedModeText = useDownsampling
-            ? $"Snelheidsmodus actief: downsampling + cache (max {Math.Clamp(maxPointsPerTrace, 200, 20_000):N0} punten per trace in grafiek). Volledige data blijft beschikbaar voor export en analyses."
-            : "Volledige puntweergave actief: downsampling staat UIT (kan trager zijn bij grote logs).";
+            ? $"LOD-weergave actief: maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace; analyses en export gebruiken de bronreeks."
+            : "Volledige zichtbare puntweergave actief; er wordt geen verborgen plotdecimator gebruikt.";
+
+        var integrity = dataset.Completeness == DatasetCompleteness.Complete
+            ? "Integriteit: COMPLETE"
+            : "Integriteit: PARTIAL — analyses en exports zijn onvolledig";
 
         if (dataset.SignalCount > 0)
         {
             return
-                $"Bestanden geladen.\n" +
+                $"Bestanden geladen.\n{integrity}\n" +
                 $"Ruwe frames geparsed: {dataset.RawCount:N0}\n" +
                 $"Extended frames: {dataset.ExtendedCount:N0}\n" +
                 $"Gedecodeerde meetpunten: {dataset.DecodedSamples.Count:N0}\n" +
                 $"Unieke signalen: {dataset.SignalCount:N0}\n" +
                 $"Gedecodeerde berichten: {dataset.MessageSummaries.Count:N0}\n" +
                 $"Niet-gematchte frames: {dataset.Diagnostics.UnmatchedFrameCount:N0}\n" +
-                $"Niet-gematchte unieke IDs: {dataset.Diagnostics.UnmatchedUniqueIds:N0}\n\n" +
+                $"Niet-gematchte unieke IDs: {dataset.Diagnostics.UnmatchedUniqueIds:N0}\n" +
+                $"Decode-/lengtefouten: {dataset.Diagnostics.DecodeErrorFrameCount:N0}\n" +
+                $"Ambigue frames: {dataset.Diagnostics.AmbiguousFrameCount:N0}\n\n" +
                 speedModeText;
         }
 
@@ -392,6 +444,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
             $"Niet-gematchte unieke IDs: {dataset.Diagnostics.UnmatchedUniqueIds:N0}\n\n" +
             $"Zie Diagnostics-tab voor onbekende IDs en decode-fallback details.\n" +
             speedModeText;
+    }
+
+    private static string FormatImportReport(ImportReport report)
+    {
+        var examples = report.Issues.Take(8)
+            .Select(issue => $"- regel {issue.SourceLineNumber}: [{issue.Code}] {issue.Message}");
+        return $"Parser: {report.ParserName}\n" +
+               $"Totaal regels: {report.TotalLines:N0}\n" +
+               $"Niet-dataregels: {report.NonDataLines:N0}\n" +
+               $"Geaccepteerd: {report.AcceptedLines:N0}\n" +
+               $"Afgewezen: {report.RejectedLines:N0}\n" +
+               string.Join("\n", examples);
     }
 
     private static void PushRecent(List<string> list, string? filePath)

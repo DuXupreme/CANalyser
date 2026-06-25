@@ -16,6 +16,12 @@ public sealed class RawFrameRow
 
     public double TimeSeconds => Source.TimeSeconds;
 
+    public long TimestampNanoseconds => Source.TimestampNanoseconds;
+
+    public long FrameIndex => Source.FrameIndex;
+
+    public long SourceLineNumber => Source.SourceLineNumber;
+
     public string Type => Source.Type;
 
     public string Channel => Source.Channel;
@@ -25,6 +31,12 @@ public sealed class RawFrameRow
     public uint Id => Source.Id;
 
     public int Dlc => Source.Dlc;
+
+    public int PayloadLength => Source.PayloadLength;
+
+    public string FrameFormat => Source.FrameFormat == CanFrameFormat.FlexibleDataRate ? "FD" : "Classic";
+
+    public string Direction => Source.Direction.ToString();
 
     public string DataHex => Source.DataHex;
 

@@ -9,8 +9,11 @@ public interface ICanLogParser
 {
     string Name { get; }
 
-    Task<IReadOnlyList<RawCanFrame>?> ParseAsync(
+    int Probe(string filePath, IReadOnlyList<string> sampleLines);
+
+    Task<CanLogParseResult?> ParseAsync(
         string filePath,
+        ImportMode mode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken);
 }

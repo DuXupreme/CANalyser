@@ -10,6 +10,7 @@ public interface ICanAnalysisPipeline
     Task<CanDataset> LoadAsync(
         string logFilePath,
         string dbcFilePath,
+        ImportMode importMode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken);
 }

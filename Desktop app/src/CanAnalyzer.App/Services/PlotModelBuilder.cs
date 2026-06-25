@@ -78,7 +78,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             {
                 Position = AxisPosition.Bottom,
                 Title = "Tijd [s]",
-                StringFormat = "0.###",
+                StringFormat = "0.###############",
                 MinimumPadding = 0.01,
                 MaximumPadding = 0.01,
                 MajorGridlineStyle = LineStyle.Solid,
@@ -93,7 +93,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 Position = AxisPosition.Left,
                 Key = "Y1",
                 Title = group.Signals[0],
-                StringFormat = "0.###",
+                StringFormat = "0.###############",
                 MinimumPadding = 0.05,
                 MaximumPadding = 0.08,
                 MajorGridlineStyle = LineStyle.Solid,
@@ -132,6 +132,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                         MaximumPadding = 0.08,
                         TextColor = ColorCycle[colorIndex % ColorCycle.Length],
                         AxislineColor = ColorCycle[colorIndex % ColorCycle.Length]
+                        ,StringFormat = "0.###############"
                     };
                     model.Axes.Add(rightAxis);
                 }
@@ -144,11 +145,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 var seriesColor = ColorCycle[colorIndex % ColorCycle.Length];
                 renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor));
 
-                (float[] x, float[] y) = viewOptions.UseDownsampling
-                    ? Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 20_000))
+                (double[] x, double[] y) = viewOptions.UseDownsampling
+                    ? Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
                     : (filtered.X, filtered.Y);
 
-                AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions);
+                var displayTitle = x.Length < filtered.X.Length
+                    ? $"{label} — weergegeven {x.Length:N0} / totaal {filtered.X.Length:N0}"
+                    : label;
+                AddSeries(model, x, y, displayTitle, yAxisKey, seriesColor, viewOptions);
                 colorIndex++;
             }
 
@@ -164,14 +168,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         return panels;
     }
 
-    private static (float[] X, float[] Y) FilterAndTransformSeries(
+    private static (double[] X, double[] Y) FilterAndTransformSeries(
         SignalSeries source,
         PlotGroup group,
         string label,
         PlotViewOptions options)
     {
-        var xOut = new List<float>(source.Time.Length);
-        var yOut = new List<float>(source.Value.Length);
+        var xOut = new List<double>(source.Time.Length);
+        var yOut = new List<double>(source.Value.Length);
 
         var hasOffset = group.Offsets.TryGetValue(label, out var offset);
 
@@ -191,7 +195,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             var y = source.Value[i];
             if (hasOffset)
             {
-                y += (float)offset;
+                y += offset;
             }
 
             xOut.Add(x);
@@ -224,8 +228,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
 
     private static void AddSeries(
         PlotModel model,
-        float[] x,
-        float[] y,
+        double[] x,
+        double[] y,
         string label,
         string yAxisKey,
         OxyColor color,
@@ -242,6 +246,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 MarkerSize = 2.5,
                 YAxisKey = yAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed
+                ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -262,7 +267,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 StrokeThickness = 1.2,
                 YAxisKey = yAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                Decimator = Decimator.Decimate
+                Decimator = options.UseDownsampling ? Decimator.Decimate : null
+                ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
             };
             for (var i = 0; i < x.Length; i++)
             {
@@ -280,7 +286,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             StrokeThickness = 1.2,
             YAxisKey = yAxisKey,
             EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-            Decimator = Decimator.Decimate
+            Decimator = options.UseDownsampling ? Decimator.Decimate : null
+            ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
         };
         for (var i = 0; i < x.Length; i++)
         {

@@ -1,0 +1,51 @@
+name: CANalyser CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_10m_benchmark:
+        description: Run the disk-intensive 10M-frame acceptance fixture
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  release-build-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Desktop app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore CanAnalyzer.sln
+      - run: dotnet build CanAnalyzer.sln -c Release --no-restore --nologo
+      - name: Tests and Core line-coverage gate (85%)
+        run: >-
+          dotnet test src/CanAnalyzer.Tests/CanAnalyzer.Tests.csproj -c Release --no-build --nologo
+          /p:CollectCoverage=true
+          /p:CoverletOutputFormat=cobertura
+          /p:Include="[CanAnalyzer.Core]*"
+          /p:ExcludeByFile="**/RegexGenerator.g.cs"
+          /p:Threshold=85
+          /p:ThresholdType=line
+          /p:ThresholdStat=total
+      - name: Core branch-coverage gate (80%)
+        run: >-
+          dotnet test src/CanAnalyzer.Tests/CanAnalyzer.Tests.csproj -c Release --no-build --nologo
+          /p:CollectCoverage=true
+          /p:CoverletOutputFormat=cobertura
+          /p:Include="[CanAnalyzer.Core]*"
+          /p:ExcludeByFile="**/RegexGenerator.g.cs"
+          /p:Threshold=80
+          /p:ThresholdType=branch
+          /p:ThresholdStat=total
+      - name: 10M-frame benchmark
+        if: ${{ inputs.run_10m_benchmark == true }}
+        env:
+          CANALYSER_RUN_10M_BENCHMARK: "1"
+        run: dotnet test src/CanAnalyzer.Tests/CanAnalyzer.Tests.csproj -c Release --no-build --filter Category=Benchmark --nologo

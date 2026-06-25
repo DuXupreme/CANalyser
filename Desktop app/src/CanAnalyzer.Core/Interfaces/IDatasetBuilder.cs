@@ -11,5 +11,10 @@ public interface IDatasetBuilder
         IReadOnlyList<RawCanFrame> rawFrames,
         IReadOnlyList<DecodedSignalSample> decodedSamples,
         IReadOnlyList<MessageSummary> messageSummaries,
-        DecoderDiagnostics diagnostics);
+        DecoderDiagnostics diagnostics,
+        ImportReport? importReport = null,
+        DatasetCompleteness completeness = DatasetCompleteness.Complete,
+        string sourceLogSha256 = "",
+        string dbcSha256 = "",
+        string applicationVersion = "");
 }

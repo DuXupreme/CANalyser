@@ -357,9 +357,14 @@
                     <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
                         <WrapPanel>
                             <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Bitrate [kbps]" />
+                                <TextBlock Text="Arbitration [kbps]" />
                                 <TextBox Width="90"
                                          Text="{Binding CanBitrateKbps, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="FD data [kbps]" />
+                                <TextBox Width="90"
+                                         Text="{Binding CanDataBitrateKbps, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                             </StackPanel>
                             <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="Venster [ms]" />
@@ -395,7 +400,7 @@
                                     <DataGridTextColumn Header="ID" Binding="{Binding FrameIdHex}" Width="*" />
                                     <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="95" />
                                     <DataGridTextColumn Header="Aandeel [%]" Binding="{Binding SharePercent}" Width="95" />
-                                    <DataGridTextColumn Header="Gem. DLC" Binding="{Binding MeanDlc}" Width="90" />
+                                    <DataGridTextColumn Header="Gem. bytes" Binding="{Binding MeanDlc}" Width="90" />
                                     <DataGridTextColumn Header="Type" Binding="{Binding FrameType}" Width="95" />
                                 </DataGrid.Columns>
                             </DataGrid>
@@ -432,6 +437,7 @@
                                     <DataGridTextColumn Header="Jitter [ms]" Binding="{Binding JitterMs}" Width="85" />
                                     <DataGridTextColumn Header="Min [ms]" Binding="{Binding MinCycleMs}" Width="85" />
                                     <DataGridTextColumn Header="Max [ms]" Binding="{Binding MaxCycleMs}" Width="85" />
+                                    <DataGridTextColumn Header="Negatief" Binding="{Binding NegativeCycles}" Width="75" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </GroupBox>

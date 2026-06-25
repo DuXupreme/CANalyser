@@ -35,7 +35,7 @@
                         <TextBlock Text="Max punten/trace" />
                         <Slider Width="170"
                                 Minimum="200"
-                                Maximum="20000"
+                                Maximum="200000"
                                 TickFrequency="200"
                                 IsSnapToTickEnabled="True"
                                 Value="{Binding MaxPointsPerTrace, Mode=TwoWay}" />

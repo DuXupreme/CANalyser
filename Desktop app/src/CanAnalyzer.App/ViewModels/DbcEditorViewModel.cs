@@ -48,6 +48,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     [ObservableProperty]
     private string? _currentFilePath;
 
+    [ObservableProperty]
+    private bool _isReadOnly;
+
     public DbcEditorViewModel(
         IDbcLoader dbcLoader,
         IDbcWriter dbcWriter,
@@ -76,11 +79,11 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
         NewDatabaseCommand = new RelayCommand(NewDatabase);
         OpenDbcCommand = new AsyncRelayCommand(OpenDbcAsync);
-        SaveDbcCommand = new AsyncRelayCommand(SaveDbcAsync, () => Frames.Count > 0);
-        AddFrameCommand = new RelayCommand(AddFrame);
-        RemoveFrameCommand = new RelayCommand(RemoveFrame, () => SelectedFrame is not null);
-        AddSignalCommand = new RelayCommand(AddSignal, () => SelectedFrame is not null);
-        RemoveSignalCommand = new RelayCommand(RemoveSignal, () => SelectedSignal is not null);
+        SaveDbcCommand = new AsyncRelayCommand(SaveDbcAsync, () => Frames.Count > 0 && !IsReadOnly);
+        AddFrameCommand = new RelayCommand(AddFrame, () => !IsReadOnly);
+        RemoveFrameCommand = new RelayCommand(RemoveFrame, () => SelectedFrame is not null && !IsReadOnly);
+        AddSignalCommand = new RelayCommand(AddSignal, () => SelectedFrame is not null && !IsReadOnly);
+        RemoveSignalCommand = new RelayCommand(RemoveSignal, () => SelectedSignal is not null && !IsReadOnly);
 
         RecomputeLayout();
         UpdateValidation();
@@ -119,6 +122,15 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         RemoveSignalCommand.NotifyCanExecuteChanged();
     }
 
+    partial void OnIsReadOnlyChanged(bool value)
+    {
+        SaveDbcCommand.NotifyCanExecuteChanged();
+        AddFrameCommand.NotifyCanExecuteChanged();
+        RemoveFrameCommand.NotifyCanExecuteChanged();
+        AddSignalCommand.NotifyCanExecuteChanged();
+        RemoveSignalCommand.NotifyCanExecuteChanged();
+    }
+
     private void NewDatabase()
     {
         if (Frames.Count > 0 &&
@@ -131,6 +143,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         SelectedFrame = null;
         Frames.Clear();
         CurrentFilePath = null;
+        IsReadOnly = false;
         StatusText = "Nieuwe lege database.";
         UpdateValidation();
     }
@@ -154,7 +167,10 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             var database = await _dbcLoader.LoadAsync(path, CancellationToken.None);
             LoadFromDatabase(database);
             CurrentFilePath = path;
-            StatusText = $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
+            IsReadOnly = !database.IsLosslessWritable;
+            StatusText = IsReadOnly
+                ? $"ALLEEN-LEZEN: {path} — deze geïmporteerde DBC bevat constructies die de editor niet aantoonbaar lossless kan terugschrijven."
+                : $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
         }
         catch (Exception ex)
         {
@@ -165,6 +181,14 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private async Task SaveDbcAsync()
     {
+        if (IsReadOnly)
+        {
+            _messageDialogService.ShowError(
+                "Lossless opslaan niet mogelijk",
+                "Deze geïmporteerde DBC is bewust alleen-lezen. De editor kan niet garanderen dat alle metadata en multiplexconstructies semantisch identiek worden teruggeschreven.");
+            return;
+        }
+
         if (Frames.Count == 0)
         {
             _messageDialogService.ShowInfo("Niets op te slaan", "Voeg eerst minstens één frame toe.");
@@ -256,6 +280,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private void OnFramesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         SaveDbcCommand.NotifyCanExecuteChanged();
+        AddFrameCommand.NotifyCanExecuteChanged();
         RemoveFrameCommand.NotifyCanExecuteChanged();
         UpdateValidation();
     }

@@ -26,6 +26,16 @@ public sealed class PresetSerializer : IPresetSerializer
             throw new InvalidDataException("Preset JSON is empty or invalid.");
         }
 
+        if (!string.Equals(preset.PresetType, "can-log-viewer-layout", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"Onbekend presettype '{preset.PresetType}'.");
+        }
+
+        if (preset.Version is < 1 or > 2)
+        {
+            throw new InvalidDataException($"Presetversie {preset.Version} wordt niet ondersteund.");
+        }
+
         preset.PlotGroups ??= [];
         preset.View ??= new PlotViewOptions();
         return preset;

@@ -9,6 +9,6 @@ public interface ICsvExportService
 {
     Task ExportDecodedSignalsAsync(
         string filePath,
-        IEnumerable<DecodedSignalSample> samples,
+        CanDataset dataset,
         CancellationToken cancellationToken);
 }

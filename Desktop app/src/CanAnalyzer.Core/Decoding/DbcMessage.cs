@@ -17,5 +17,7 @@ public sealed class DbcMessage
 
     public List<DbcSignal> Signals { get; } = [];
 
+    public bool SuppressDecoding { get; set; }
+
     public uint NormalizedFrameId => CanIdUtilities.NormalizeDbcFrameId(RawFrameId, IsExtendedFrame);
 }

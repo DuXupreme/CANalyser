@@ -11,7 +11,7 @@ public sealed class PlotPreset
     public string PresetType { get; set; } = "can-log-viewer-layout";
 
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     [JsonPropertyName("saved_at")]
     public DateTime SavedAtUtc { get; set; } = DateTime.UtcNow;

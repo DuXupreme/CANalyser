@@ -19,4 +19,5 @@ public sealed record CanCycleTimingRow(
     string AvgCycleMs,
     string JitterMs,
     string MinCycleMs,
-    string MaxCycleMs);
+    string MaxCycleMs,
+    string NegativeCycles);

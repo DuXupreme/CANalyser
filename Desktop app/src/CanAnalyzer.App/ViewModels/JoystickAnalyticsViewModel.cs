@@ -27,6 +27,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private IReadOnlyList<TimeNormalizedPoint> _currentJoystickFilteredPath = [];
     private double _currentJoystickDeadzone;
     private double _currentJoystickSaturation;
+    private string? _lastTimedPathFailure;
 
     [ObservableProperty] private string? _selectedJoystickXSignal;
     [ObservableProperty] private string? _selectedJoystickYSignal;
@@ -56,6 +57,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private bool _delayOverlayShowLegend = true;
     [ObservableProperty] private bool _delayOverlayShowDelayMarkers = true;
     [ObservableProperty] private double _canBitrateKbps = 500;
+    [ObservableProperty] private double _canDataBitrateKbps = 2000;
     [ObservableProperty] private int _canTimeBinMilliseconds = 100;
     [ObservableProperty] private double _delaySearchRangeSeconds = 1.5;
     [ObservableProperty] private double _responseThresholdPercent = 2.0;
@@ -165,6 +167,17 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         RefreshProfessionalCanAnalyticsFromSettings();
     }
 
+    partial void OnCanDataBitrateKbpsChanged(double value)
+    {
+        if (value < 50)
+        {
+            CanDataBitrateKbps = 50;
+            return;
+        }
+
+        RefreshProfessionalCanAnalyticsFromSettings();
+    }
+
     partial void OnCanTimeBinMillisecondsChanged(int value)
     {
         if (value < 50)
@@ -205,7 +218,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         BuildActuatorTrackingAnalytics();
         BuildDelayAnalytics();
         BuildProfessionalCanAnalytics();
-        StatusText = "Analyses bijgewerkt.";
+        StatusText = _dataset.Completeness == DatasetCompleteness.Partial
+            ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
+            : "COMPLETE — analyses bijgewerkt.";
     }
 
     private void RefreshProfessionalCanAnalyticsFromSettings()
@@ -451,6 +466,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         var timedPath = BuildTimedNormalizedPath(sx, sy);
         if (timedPath.Count == 0)
         {
+            Add(JoystickUsageMetrics, "Alignmentstatus", _lastTimedPathFailure ?? "Geen gemeenschappelijke tijdsperiode");
             JoystickDensityModel = EmptyPlot("Joystick puntenwolk");
             TrajectoryModel = EmptyPlot("Joystick traject");
             RadiusHistogramModel = EmptyPlot("Joystick radius histogram");
@@ -492,9 +508,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
         var filteredX = filteredPath.Select(static p => p.X).ToArray();
         var filteredY = filteredPath.Select(static p => p.Y).ToArray();
-        var filteredTime = filteredPath.Select(static p => (float)p.Time).ToArray();
-        var filteredXSeries = new SignalSeries(sx.Label, filteredTime, filteredX.Select(static v => (float)v).ToArray());
-        var filteredYSeries = new SignalSeries(sy.Label, filteredTime, filteredY.Select(static v => (float)v).ToArray());
+        var filteredTime = filteredPath.Select(static p => p.Time).ToArray();
+        var filteredXSeries = new SignalSeries(sx.Label, filteredTime, filteredX);
+        var filteredYSeries = new SignalSeries(sy.Label, filteredTime, filteredY);
 
         var result = _analyticsService.AnalyzePair(
             filteredXSeries,
@@ -511,6 +527,11 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 ? $"{F(JoystickTimeStartSeconds)} .. {F(JoystickTimeEndSeconds)}"
                 : $"{F(JoystickAvailableStartSeconds)} .. {F(JoystickAvailableEndSeconds)}");
         Add(JoystickUsageMetrics, "Samples", s.SampleCount.ToString("N0", CultureInfo.CurrentCulture));
+        Add(JoystickUsageMetrics, "Alignmentstatus", result.Alignment.Status.ToString());
+        Add(JoystickUsageMetrics, "Overlap [s]", F(result.Alignment.OverlapNanoseconds / 1_000_000_000d));
+        Add(JoystickUsageMetrics, "Alignmentdekking [%]", F(result.Alignment.CoveragePercent));
+        Add(JoystickUsageMetrics, "Max sampleafstand [s]", F(result.Alignment.MaximumSampleDistanceSeconds));
+        Add(JoystickUsageMetrics, "Dubbele timestampintervallen overgeslagen", result.Alignment.DuplicateTimestampIntervalsSkipped.ToString("N0", CultureInfo.CurrentCulture));
         Add(JoystickUsageMetrics, "Deadzone usage [%]", F(s.DeadzonePercent));
         Add(JoystickUsageMetrics, "Saturation usage [%]", F(s.SaturationPercent));
         Add(JoystickUsageMetrics, "Gebruikte X-range [%] (indicatief)", F(s.UsedXRangePercent));
@@ -562,7 +583,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return;
         }
 
-        var r = _analyticsService.AnalyzeButterflyKinematics(jx, jy, jyaw, al, ar, af, Math.Max(0, DeadzoneThreshold), Math.Max(0.05, DelaySearchRangeSeconds), Math.Clamp(HistogramBins, 10, 90), 12000);
+        var r = _analyticsService.AnalyzeButterflyKinematics(jx, jy, jyaw, al, ar, af, Math.Max(0, DeadzoneThreshold), Math.Max(0.05, DelaySearchRangeSeconds), Math.Clamp(HistogramBins, 10, 90), 200_000);
         AddActuatorMatrixRow("Correlatie", r.LeftTracking.Correlation, r.RightTracking.Correlation, r.FrontTracking.Correlation);
         AddActuatorMatrixRow("Gain", r.LeftTracking.Gain, r.RightTracking.Gain, r.FrontTracking.Gain);
         ActuatorMatrix.Add(new ActuatorMetricRow("Richting", DirText(r.LeftTracking.Gain), DirText(r.RightTracking.Gain), DirText(r.FrontTracking.Gain)));
@@ -618,7 +639,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         var searchRange = Math.Max(0.05, DelaySearchRangeSeconds);
-        var r = _analyticsService.AnalyzeDelay(cmd, rsp, searchRange, 2800, 0.5, 9000);
+        var r = _analyticsService.AnalyzeDelay(cmd, rsp, searchRange, 0.5, 200_000);
         _lastDelayResult = r;
 
         var thresholdFraction = Math.Clamp(ResponseThresholdPercent, 0.1, 50.0) / 100.0;
@@ -659,27 +680,35 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         var frames = _dataset.RawFrames;
-        var orderedFrames = IsTimeSorted(frames) ? frames : frames.OrderBy(static frame => frame.TimeSeconds).ToArray();
-        var start = orderedFrames[0].TimeSeconds;
-        var end = orderedFrames[^1].TimeSeconds;
+        // Iterate the immutable source order so backwards timestamps remain visible in cycle diagnostics.
+        var orderedFrames = frames;
+        var start = frames.Min(static frame => frame.TimeSeconds);
+        var end = frames.Max(static frame => frame.TimeSeconds);
         var duration = Math.Max(1e-9, end - start);
-        var bitrate = Math.Max(50, CanBitrateKbps) * 1000.0;
+        var arbitrationBitrate = Math.Max(50, CanBitrateKbps) * 1000.0;
+        var dataBitrate = Math.Max(50, CanDataBitrateKbps) * 1000.0;
         var binWidthSeconds = Math.Clamp(CanTimeBinMilliseconds / 1000.0, 0.05, 5.0);
-        var binCount = Math.Clamp((int)Math.Ceiling(duration / binWidthSeconds) + 1, 1, 200000);
+        var requiredBinCount = Math.Max(1L, checked((long)Math.Ceiling(duration / binWidthSeconds) + 1L));
+        if (requiredBinCount > 200_000)
+        {
+            binWidthSeconds = duration / 199_999d;
+        }
+
+        var binCount = (int)Math.Min(200_000L, requiredBinCount);
         var frameRateBins = new double[binCount];
-        var busBitsBins = new double[binCount];
-        var perId = new Dictionary<uint, CanIdAccumulator>(256);
+        var busTimeBins = new double[binCount];
+        var perId = new Dictionary<CanStreamKey, CanIdAccumulator>(256);
         var errorFrames = 0;
         var remoteFrames = 0;
-        var totalBits = 0.0;
+        var totalTransmissionSeconds = 0.0;
         foreach (var frame in orderedFrames)
         {
             var bin = Math.Clamp((int)((frame.TimeSeconds - start) / binWidthSeconds), 0, binCount - 1);
             frameRateBins[bin] += 1;
 
-            var estimatedBits = EstimateFrameBits(frame);
-            busBitsBins[bin] += estimatedBits;
-            totalBits += estimatedBits;
+            var estimatedTransmissionSeconds = EstimateFrameDurationSeconds(frame, arbitrationBitrate, dataBitrate);
+            busTimeBins[bin] += estimatedTransmissionSeconds;
+            totalTransmissionSeconds += estimatedTransmissionSeconds;
 
             if (frame.Type.Contains("err", StringComparison.OrdinalIgnoreCase) ||
                 frame.Type.Contains("error", StringComparison.OrdinalIgnoreCase))
@@ -693,10 +722,11 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 remoteFrames++;
             }
 
-            if (!perId.TryGetValue(frame.Id, out var idStats))
+            var key = new CanStreamKey(frame.Channel, frame.Direction, frame.FrameFormat, frame.IsExtended, frame.Id);
+            if (!perId.TryGetValue(key, out var idStats))
             {
-                idStats = new CanIdAccumulator(frame.Id);
-                perId.Add(frame.Id, idStats);
+                idStats = new CanIdAccumulator(key);
+                perId.Add(key, idStats);
             }
 
             idStats.Observe(frame);
@@ -704,37 +734,42 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
         var avgFrameRate = orderedFrames.Count / duration;
         var peakFrameRate = frameRateBins.Max() / binWidthSeconds;
-        var avgBusLoad = ((totalBits / duration) / bitrate) * 100.0;
-        var peakBusLoad = (busBitsBins.Max() / binWidthSeconds / bitrate) * 100.0;
-        var uniqueIds = perId.Count;
+        var avgBusLoad = (totalTransmissionSeconds / duration) * 100.0;
+        var peakBusLoad = (busTimeBins.Max() / binWidthSeconds) * 100.0;
+        var uniqueIds = perId.Keys.Select(static key => key.FrameId).Distinct().Count();
         var extendedCount = orderedFrames.Count(static frame => frame.IsExtended);
         Add(ProfessionalCanMetrics, "Duur log [s]", F(duration));
         Add(ProfessionalCanMetrics, "Totale frames", orderedFrames.Count.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Unieke IDs", uniqueIds.ToString("N0", CultureInfo.CurrentCulture));
+        Add(ProfessionalCanMetrics, "Unieke frame-reeksen", perId.Count.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Extended frames", extendedCount.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Error frames (indien gelogd)", errorFrames.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Remote/RTR (indien gelogd)", remoteFrames.ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Gem frames/s", F(avgFrameRate));
         Add(ProfessionalCanMetrics, "Piek frames/s", F(peakFrameRate));
-        Add(ProfessionalCanMetrics, "Gem bus load [%]", F(avgBusLoad));
-        Add(ProfessionalCanMetrics, "Piek bus load [%]", F(peakBusLoad));
-        Add(ProfessionalCanMetrics, "Bitrate [kbps] (instelling)", F(Math.Max(50, CanBitrateKbps)));
+        Add(ProfessionalCanMetrics, "Gem bus load [%] (geschat)", F(avgBusLoad));
+        Add(ProfessionalCanMetrics, "Piek bus load [%] (geschat)", F(peakBusLoad));
+        Add(ProfessionalCanMetrics, "Arbitration bitrate [kbps] (aanname)", F(Math.Max(50, CanBitrateKbps)));
+        Add(ProfessionalCanMetrics, "FD data bitrate [kbps] (aanname)", F(Math.Max(50, CanDataBitrateKbps)));
+        Add(ProfessionalCanMetrics, "Busloadmodel", "CAN/CAN-FD velden + stuffingraming; geschat");
+        Add(ProfessionalCanMetrics, "Negatieve cyclustijden", perId.Values.Sum(static item => item.NegativeCycleCount).ToString("N0", CultureInfo.CurrentCulture));
         Add(ProfessionalCanMetrics, "Venster [ms] (instelling)", Math.Clamp(CanTimeBinMilliseconds, 50, 5000).ToString(CultureInfo.CurrentCulture));
 
         var topByCount = perId.Values
             .OrderByDescending(static stats => stats.Count)
-            .ThenBy(static stats => stats.FrameId)
+            .ThenBy(static stats => stats.Key.Channel, StringComparer.Ordinal)
+            .ThenBy(static stats => stats.Key.FrameId)
             .Take(30)
             .ToArray();
         foreach (var item in topByCount)
         {
             var share = item.Count * 100.0 / Math.Max(1, orderedFrames.Count);
             ProfessionalTopIdRows.Add(new CanTopIdRow(
-                $"0x{item.FrameId:X}",
+                item.DisplayKey,
                 item.Count.ToString("N0", CultureInfo.CurrentCulture),
                 F(share),
-                F(item.MeanDlc),
-                item.ExtendedCount == 0 ? "Std" : item.ExtendedCount == item.Count ? "Ext" : "Ext/Std mix"));
+                F(item.MeanPayloadLength),
+                $"{item.Key.FrameFormat}/{(item.Key.IsExtended ? "Ext" : "Std")}/{item.Key.Direction}"));
         }
 
         var timingRows = perId.Values
@@ -746,12 +781,13 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         foreach (var item in timingRows)
         {
             ProfessionalCycleRows.Add(new CanCycleTimingRow(
-                $"0x{item.FrameId:X}",
+                item.DisplayKey,
                 item.CycleSamples.ToString("N0", CultureInfo.CurrentCulture),
                 F(item.AverageCycleMs),
                 F(item.JitterMs),
                 F(item.MinCycleMs),
-                F(item.MaxCycleMs)));
+                F(item.MaxCycleMs),
+                item.NegativeCycleCount.ToString("N0", CultureInfo.CurrentCulture)));
         }
 
         CanFrameRateModel = BuildCanTrendPlot(
@@ -765,7 +801,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             "Bus load [%] over tijd (geschat)",
             start,
             binWidthSeconds,
-            busBitsBins.Select(bits => (bits / binWidthSeconds / bitrate) * 100.0).ToArray(),
+            busTimeBins.Select(seconds => (seconds / binWidthSeconds) * 100.0).ToArray(),
             "Bus load [%]",
             OxyColor.Parse("#E15759"),
             true);
@@ -842,40 +878,54 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private bool TryGetSeries(string? label, out SignalSeries series)
     {
         series = default!;
-        return _dataset is not null && !string.IsNullOrWhiteSpace(label) && _dataset.SignalSeriesByLabel.TryGetValue(label, out series);
+        if (_dataset is null || string.IsNullOrWhiteSpace(label) || !_dataset.SignalSeriesByLabel.TryGetValue(label, out var found))
+        {
+            return false;
+        }
+
+        series = found;
+        return true;
     }
 
     private List<TimeNormalizedPoint> BuildTimedNormalizedPath(SignalSeries xSeries, SignalSeries ySeries)
     {
+        _lastTimedPathFailure = null;
         if (xSeries.Time.Length == 0 || ySeries.Time.Length == 0 || xSeries.Value.Length == 0 || ySeries.Value.Length == 0)
         {
             return [];
         }
 
-        var useXAsBase = xSeries.Time.Length <= ySeries.Time.Length;
-        var baseTime = useXAsBase ? xSeries.Time : ySeries.Time;
-        var baseValue = useXAsBase ? xSeries.Value : ySeries.Value;
-        var otherTime = useXAsBase ? ySeries.Time : xSeries.Time;
-        var otherValue = useXAsBase ? ySeries.Value : xSeries.Value;
-
-        var rawX = new double[baseTime.Length];
-        var rawY = new double[baseTime.Length];
-        var time = new double[baseTime.Length];
-
-        for (var i = 0; i < baseTime.Length; i++)
+        var overlapStart = Math.Max(xSeries.Time[0], ySeries.Time[0]);
+        var overlapEnd = Math.Min(xSeries.Time[^1], ySeries.Time[^1]);
+        if (overlapEnd < overlapStart)
         {
-            var t = baseTime[i];
-            time[i] = t;
-            if (useXAsBase)
-            {
-                rawX[i] = baseValue[i];
-                rawY[i] = Interpolate(otherTime, otherValue, t);
-            }
-            else
-            {
-                rawX[i] = Interpolate(otherTime, otherValue, t);
-                rawY[i] = baseValue[i];
-            }
+            return [];
+        }
+
+        var time = xSeries.Time.Concat(ySeries.Time)
+            .Where(t => t >= overlapStart && t <= overlapEnd)
+            .Distinct()
+            .OrderBy(static t => t)
+            .ToArray();
+        var maximumAllowedGap = 5d * Math.Max(MedianPositiveInterval(xSeries.Time), MedianPositiveInterval(ySeries.Time));
+        var maximumObservedGap = 0d;
+        foreach (var timestamp in time)
+        {
+            maximumObservedGap = Math.Max(maximumObservedGap, Math.Max(BracketGap(xSeries.Time, timestamp), BracketGap(ySeries.Time, timestamp)));
+        }
+
+        if (maximumAllowedGap > 0 && maximumObservedGap > maximumAllowedGap)
+        {
+            _lastTimedPathFailure = $"ONGELDIG: max sampleafstand {maximumObservedGap:G15}s > 5× traagste mediane interval ({maximumAllowedGap:G15}s)";
+            return [];
+        }
+
+        var rawX = new double[time.Length];
+        var rawY = new double[time.Length];
+        for (var i = 0; i < time.Length; i++)
+        {
+            rawX[i] = Interpolate(xSeries.Time, xSeries.Value, time[i]);
+            rawY[i] = Interpolate(ySeries.Time, ySeries.Value, time[i]);
         }
 
         var sortedX = rawX.OrderBy(static v => v).ToArray();
@@ -891,12 +941,34 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         var points = new List<TimeNormalizedPoint>(time.Length);
         for (var i = 0; i < time.Length; i++)
         {
-            var nx = Math.Clamp((rawX[i] - centerX) / scale, -1.2, 1.2);
-            var ny = Math.Clamp((rawY[i] - centerY) / scale, -1.2, 1.2);
+            var nx = (rawX[i] - centerX) / scale;
+            var ny = (rawY[i] - centerY) / scale;
             points.Add(new TimeNormalizedPoint(time[i], nx, ny));
         }
 
         return points;
+    }
+
+    private static double MedianPositiveInterval(double[] times)
+    {
+        var intervals = new List<double>(Math.Max(0, times.Length - 1));
+        for (var i = 1; i < times.Length; i++)
+        {
+            var interval = times[i] - times[i - 1];
+            if (interval > 0) intervals.Add(interval);
+        }
+
+        if (intervals.Count == 0) return 0;
+        intervals.Sort();
+        var middle = intervals.Count / 2;
+        return intervals.Count % 2 == 0 ? (intervals[middle - 1] + intervals[middle]) / 2d : intervals[middle];
+    }
+
+    private static double BracketGap(double[] times, double timestamp)
+    {
+        var upper = UpperBound(times, timestamp);
+        if (upper > 0 && times[upper - 1] == timestamp) return 0;
+        return upper <= 0 || upper >= times.Length ? 0 : times[upper] - times[upper - 1];
     }
 
     private List<TimeNormalizedPoint> FilterTimedPath(IReadOnlyList<TimeNormalizedPoint> path)
@@ -911,7 +983,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return path.Where(p => p.Time >= start && p.Time <= end).ToList();
     }
 
-    private static double Interpolate(float[] time, float[] value, double sampleTime)
+    private static double Interpolate(double[] time, double[] value, double sampleTime)
     {
         if (time.Length == 0 || value.Length == 0)
         {
@@ -928,7 +1000,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return value[^1];
         }
 
-        var hi = UpperBound(time, (float)sampleTime);
+        var hi = UpperBound(time, sampleTime);
         var i1 = Math.Clamp(hi, 1, time.Length - 1);
         var i0 = i1 - 1;
         var dt = time[i1] - time[i0];
@@ -941,7 +1013,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return value[i0] + ((value[i1] - value[i0]) * p);
     }
 
-    private static int UpperBound(float[] values, float threshold)
+    private static int UpperBound(double[] values, double threshold)
     {
         var lo = 0;
         var hi = values.Length;
@@ -1198,13 +1270,19 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return true;
     }
 
-    private static double EstimateFrameBits(RawCanFrame frame)
+    private static double EstimateFrameDurationSeconds(RawCanFrame frame, double arbitrationBitrate, double dataBitrate)
     {
-        var payloadBits = frame.Dlc * 8.0;
-        var baseBits = frame.IsExtended ? 67.0 + payloadBits : 47.0 + payloadBits;
-        var stuffingMargin = baseBits * 0.20;
-        const double intermissionBits = 3.0;
-        return baseBits + stuffingMargin + intermissionBits;
+        if (frame.FrameFormat == CanFrameFormat.Classic)
+        {
+            var bitsWithoutStuffing = (frame.IsExtended ? 67d : 47d) + (frame.PayloadLength * 8d) + 3d;
+            return (bitsWithoutStuffing * 1.20d) / arbitrationBitrate;
+        }
+
+        var arbitrationBits = (frame.IsExtended ? 41d : 23d) * 1.20d;
+        var crcBits = frame.PayloadLength <= 16 ? 17d : 21d;
+        var dataPhaseBits = ((frame.PayloadLength * 8d) + crcBits + 13d) * 1.20d;
+        var dataPhaseBitrate = frame.BitRateSwitch ? dataBitrate : arbitrationBitrate;
+        return (arbitrationBits / arbitrationBitrate) + (dataPhaseBits / dataPhaseBitrate);
     }
 
     private static PlotModel BuildCanTrendPlot(
@@ -1262,7 +1340,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         // Add bottom-to-top so the highest-traffic ID ends up on top.
         for (var i = shown.Length - 1; i >= 0; i--)
         {
-            categoryAxis.Labels.Add($"0x{shown[i].FrameId:X}");
+            categoryAxis.Labels.Add(shown[i].DisplayKey);
         }
 
         model.Axes.Add(categoryAxis);
@@ -1829,7 +1907,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     }
 
     private static void Add(ICollection<MetricRow> list, string n, string v) => list.Add(new MetricRow(n, v));
-    private static string F(double value) => value.ToString("0.###", CultureInfo.CurrentCulture);
+    private static string F(double value) => value.ToString("G15", CultureInfo.CurrentCulture);
     private static string FN(double? value) => value.HasValue ? F(value.Value) : "-";
 
     private static double? WeightedMean(params DelayEventStatistics[] stats)
@@ -1970,36 +2048,44 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return controller;
     }
 
-    private sealed class CanIdAccumulator(uint frameId)
+    private sealed record CanStreamKey(
+        string Channel,
+        CanFrameDirection Direction,
+        CanFrameFormat FrameFormat,
+        bool IsExtended,
+        uint FrameId);
+
+    private sealed class CanIdAccumulator(CanStreamKey key)
     {
         private double _lastTimeSeconds = double.NaN;
         private double _cycleM2Ms;
         private double _cycleMeanMs;
 
-        public uint FrameId { get; } = frameId;
+        public CanStreamKey Key { get; } = key;
+        public string DisplayKey => $"{(string.IsNullOrWhiteSpace(Key.Channel) ? "?" : Key.Channel)} / 0x{Key.FrameId:X}";
         public int Count { get; private set; }
-        public int ExtendedCount { get; private set; }
-        public int DlcSum { get; private set; }
+        public int PayloadLengthSum { get; private set; }
         public int CycleSamples { get; private set; }
+        public int NegativeCycleCount { get; private set; }
         public double MinCycleMs { get; private set; } = double.PositiveInfinity;
         public double MaxCycleMs { get; private set; } = double.NegativeInfinity;
 
-        public double MeanDlc => Count <= 0 ? 0 : DlcSum / (double)Count;
+        public double MeanPayloadLength => Count <= 0 ? 0 : PayloadLengthSum / (double)Count;
         public double AverageCycleMs => CycleSamples <= 0 ? 0 : _cycleMeanMs;
         public double JitterMs => CycleSamples <= 1 ? 0 : Math.Sqrt(_cycleM2Ms / (CycleSamples - 1));
 
         public void Observe(RawCanFrame frame)
         {
             Count++;
-            DlcSum += frame.Dlc;
-            if (frame.IsExtended)
-            {
-                ExtendedCount++;
-            }
+            PayloadLengthSum += frame.PayloadLength;
 
             if (!double.IsNaN(_lastTimeSeconds))
             {
-                var cycleMs = Math.Max(0, (frame.TimeSeconds - _lastTimeSeconds) * 1000.0);
+                var cycleMs = (frame.TimeSeconds - _lastTimeSeconds) * 1000.0;
+                if (cycleMs < 0)
+                {
+                    NegativeCycleCount++;
+                }
                 ObserveCycle(cycleMs);
             }
 

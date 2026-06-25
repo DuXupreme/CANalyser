@@ -64,7 +64,7 @@ public sealed class RawFrameFilterService : IRawFrameFilterService
         }
 
         var maxRows = Math.Max(1, options.MaxRows);
-        return query.Take(maxRows).ToList();
+        return query.Skip(Math.Max(0, options.Offset)).Take(maxRows).ToList();
     }
 
     private static bool TryParseId(string token, out uint frameId)

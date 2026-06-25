@@ -7,8 +7,9 @@ namespace CanAnalyzer.Core.Interfaces;
 /// </summary>
 public interface ICanLogParsingService
 {
-    Task<IReadOnlyList<RawCanFrame>> ParseAsync(
+    Task<CanLogParseResult> ParseAsync(
         string filePath,
+        ImportMode mode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken);
 }

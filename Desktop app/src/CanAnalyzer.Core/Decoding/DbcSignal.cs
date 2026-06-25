@@ -1,5 +1,14 @@
 namespace CanAnalyzer.Core.Decoding;
 
+public enum DbcSignalValueKind
+{
+    Integer,
+    IeeeFloat32,
+    IeeeFloat64
+}
+
+public sealed record DbcMultiplexerRange(string MultiplexerSignalName, uint Minimum, uint Maximum);
+
 /// <summary>
 /// Parsed DBC signal definition.
 /// </summary>
@@ -28,4 +37,8 @@ public sealed class DbcSignal
     public bool IsMultiplexer { get; init; }
 
     public IReadOnlyList<int> MultiplexerIds { get; init; } = [];
+
+    public IReadOnlyList<DbcMultiplexerRange> MultiplexerRanges { get; init; } = [];
+
+    public DbcSignalValueKind ValueKind { get; init; } = DbcSignalValueKind.Integer;
 }

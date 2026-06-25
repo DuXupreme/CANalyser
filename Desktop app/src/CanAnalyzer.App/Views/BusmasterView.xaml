@@ -29,6 +29,11 @@
                     <Button Content="Reset"
                             Command="{Binding ResetFiltersCommand}"
                             MinWidth="72" />
+                    <Button Content="Vorige pagina"
+                            Command="{Binding PreviousPageCommand}"
+                            Margin="12,0,6,0" />
+                    <Button Content="Volgende pagina"
+                            Command="{Binding NextPageCommand}" />
                 </StackPanel>
 
                 <WrapPanel>
@@ -68,13 +73,17 @@
                   VirtualizingPanel.ScrollUnit="Pixel"
                   ScrollViewer.CanContentScroll="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=F6}" Width="115" />
+                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=G17}" Width="150" />
+                <DataGridTextColumn Header="Time [ns]" Binding="{Binding TimestampNanoseconds}" Width="145" />
+                <DataGridTextColumn Header="Frame" Binding="{Binding FrameIndex}" Width="75" />
+                <DataGridTextColumn Header="Source line" Binding="{Binding SourceLineNumber}" Width="85" />
                 <DataGridTextColumn Header="Tx/Rx" Binding="{Binding Direction}" Width="70" />
                 <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="75" />
-                <DataGridTextColumn Header="Msg" Binding="{Binding MessageType}" Width="55" />
+                <DataGridTextColumn Header="Msg" Binding="{Binding MessageType}" Width="85" />
                 <DataGridTextColumn Header="ID" Binding="{Binding IdHex}" Width="100" />
                 <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="180" />
                 <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="55" />
+                <DataGridTextColumn Header="Bytes" Binding="{Binding PayloadLength}" Width="55" />
                 <DataGridTextColumn Header="Data Byte(s)" Binding="{Binding DataBytes}" Width="*" />
             </DataGrid.Columns>
         </DataGrid>

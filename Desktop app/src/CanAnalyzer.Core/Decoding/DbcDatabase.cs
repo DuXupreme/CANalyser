@@ -1,3 +1,5 @@
+using CanAnalyzer.Core.Domain;
+
 namespace CanAnalyzer.Core.Decoding;
 
 /// <summary>
@@ -6,4 +8,8 @@ namespace CanAnalyzer.Core.Decoding;
 public sealed class DbcDatabase
 {
     public required IReadOnlyList<DbcMessage> Messages { get; init; }
+
+    public IReadOnlyList<ImportIssue> Issues { get; init; } = [];
+
+    public bool IsLosslessWritable { get; init; } = true;
 }

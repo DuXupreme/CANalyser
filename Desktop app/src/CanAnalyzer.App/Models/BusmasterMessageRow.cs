@@ -9,40 +9,36 @@ public sealed class BusmasterMessageRow
 {
     public BusmasterMessageRow(
         RawCanFrame frame,
-        IReadOnlyList<DecodedSignalSample> decodedSignals)
+        bool isDecoded,
+        string? decodedMessageName)
     {
         Source = frame;
-        DecodedSignals = decodedSignals;
-        MessageName = decodedSignals.FirstOrDefault()?.MessageName ?? frame.IdHex;
+        IsDecoded = isDecoded;
+        MessageName = string.IsNullOrWhiteSpace(decodedMessageName) ? frame.IdHex : decodedMessageName;
     }
 
     public RawCanFrame Source { get; }
 
-    public IReadOnlyList<DecodedSignalSample> DecodedSignals { get; }
-
     public double TimeSeconds => Source.TimeSeconds;
+
+    public long TimestampNanoseconds => Source.TimestampNanoseconds;
+
+    public long FrameIndex => Source.FrameIndex;
+
+    public long SourceLineNumber => Source.SourceLineNumber;
 
     public string Direction
     {
         get
         {
-            if (Source.Type.Contains("tx", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Tx";
-            }
-
-            if (Source.Type.Contains("rx", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Rx";
-            }
-
-            return "Rx";
+            return Source.Direction == CanFrameDirection.Transmit ? "Tx" :
+                Source.Direction == CanFrameDirection.Receive ? "Rx" : "?";
         }
     }
 
     public string Channel => string.IsNullOrWhiteSpace(Source.Channel) ? "1" : Source.Channel;
 
-    public string MessageType => Source.IsExtended ? "x" : "s";
+    public string MessageType => $"{(Source.FrameFormat == CanFrameFormat.FlexibleDataRate ? "FD" : "CAN")}/{(Source.IsExtended ? "Ext" : "Std")}";
 
     public string IdHex => Source.IdHex;
 
@@ -50,7 +46,9 @@ public sealed class BusmasterMessageRow
 
     public int Dlc => Source.Dlc;
 
+    public int PayloadLength => Source.PayloadLength;
+
     public string DataBytes => Source.DataHex;
 
-    public bool IsDecoded => DecodedSignals.Count > 0;
+    public bool IsDecoded { get; }
 }

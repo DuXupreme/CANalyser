@@ -20,4 +20,6 @@ public sealed class RawFrameFilterOptions
     public bool? IsExtended { get; set; }
 
     public int MaxRows { get; set; } = 50_000;
+
+    public int Offset { get; set; }
 }

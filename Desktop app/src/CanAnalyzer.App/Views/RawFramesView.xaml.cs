@@ -24,7 +24,7 @@ public partial class RawFramesView : UserControl
 
             var text = DataContext is RawFramesViewModel viewModel
                 ? viewModel.BuildFrameDetailsText(row)
-                : $"Tijd [s]: {row.TimeSeconds:F6}\nID: {row.IdHex}\nData: {row.DataHex}";
+                : $"Tijd [s]: {row.TimeSeconds:G17}\nTijd [ns]: {row.TimestampNanoseconds}\nFrame-index: {row.FrameIndex}\nBronregel: {row.SourceLineNumber}\nID: {row.IdHex}\nData: {row.DataHex}";
 
             MessageBox.Show(text, "Raw Frame details + decoded signals", MessageBoxButton.OK, MessageBoxImage.Information);
             e.Handled = true;

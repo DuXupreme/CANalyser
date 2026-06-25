@@ -5,12 +5,12 @@ namespace CanAnalyzer.Core.Parsing;
 internal static partial class ParserRegex
 {
     [GeneratedRegex(
-        "^(?<ts>\\d{1,2}:\\d{1,2}:\\d{1,2}:\\d{1,4})\\s+(?<dir>Rx|Tx)\\s+(?<channel>\\d+)\\s+(?<id>0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\\s+(?<frame_type>[A-Za-z]+)\\s+(?<dlc>\\d+)\\s*(?<data>(?:[0-9A-Fa-f]{2}\\s*){0,64})$",
+        "^(?<ts>\\d{1,2}:\\d{1,2}:\\d{1,2}:\\d{1,9})\\s+(?<dir>Rx|Tx)\\s+(?<channel>\\S+)\\s+(?<id>0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\\s+(?<frame_type>[A-Za-z]+)\\s+(?<dlc>\\d+)\\s*(?<data>(?:[0-9A-Fa-f]{2}\\s*){0,64})$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant)]
     public static partial Regex BusmasterLine();
 
     [GeneratedRegex(
-        "^\\((?<ts>\\d+(?:\\.\\d+)?)\\)\\s+\\S+\\s+(?<id>[0-9A-Fa-f]+)#(?<data>[0-9A-Fa-f]*)$",
+        "^\\((?<ts>\\d+(?:\\.\\d+)?)\\)\\s+(?<channel>\\S+)\\s+(?<id>[0-9A-Fa-f]+)(?<sep>##|#)(?<data>[0-9A-Fa-f]*)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant)]
     public static partial Regex Candump();
 

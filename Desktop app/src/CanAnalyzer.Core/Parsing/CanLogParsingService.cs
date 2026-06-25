@@ -4,10 +4,10 @@ using Microsoft.Extensions.Logging;
 
 namespace CanAnalyzer.Core.Parsing;
 
-/// <inheritdoc />
+/// <summary>Selects exactly one parser using format probes and enforces the import integrity policy.</summary>
 public sealed class CanLogParsingService : ICanLogParsingService
 {
-    private readonly IReadOnlyDictionary<Type, ICanLogParser> _parserByType;
+    private readonly IReadOnlyList<ICanLogParser> _automaticParsers;
     private readonly ILogger<CanLogParsingService> _logger;
 
     public CanLogParsingService(
@@ -18,91 +18,71 @@ public sealed class CanLogParsingService : ICanLogParsingService
         GenericTextCanParser genericParser,
         ILogger<CanLogParsingService> logger)
     {
-        _parserByType = new Dictionary<Type, ICanLogParser>
-        {
-            [typeof(CssSemicolonParser)] = cssParser,
-            [typeof(BusmasterParser)] = busmasterParser,
-            [typeof(PeakTrcParser)] = peakParser,
-            [typeof(CandumpParser)] = candumpParser,
-            [typeof(GenericTextCanParser)] = genericParser
-        };
+        _automaticParsers = [cssParser, busmasterParser, peakParser, candumpParser];
         _logger = logger;
+        GenericParser = genericParser;
     }
 
-    public async Task<IReadOnlyList<RawCanFrame>> ParseAsync(
+    /// <summary>The generic parser is intentionally not part of automatic detection.</summary>
+    public GenericTextCanParser GenericParser { get; }
+
+    public async Task<CanLogParseResult> ParseAsync(
         string filePath,
+        ImportMode mode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var fileName = Path.GetFileName(filePath).ToLowerInvariant();
-        var parserOrder = BuildParserOrder(fileName);
-
-        foreach (var parser in parserOrder)
+        var sample = new List<string>(200);
+        await using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var reader = new StreamReader(stream))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            _logger.LogInformation("Trying parser {ParserName} for {FilePath}", parser.Name, filePath);
-            progress?.Report(new LoadProgress($"Parser starten: {parser.Name}", 5));
-            var rows = await parser.ParseAsync(filePath, progress, cancellationToken);
-            if (rows is { Count: > 0 })
+            while (sample.Count < 200)
             {
-                _logger.LogInformation(
-                    "Parser {ParserName} recognized {FrameCount} frames in {FilePath}",
-                    parser.Name,
-                    rows.Count,
-                    filePath);
-                return rows;
+                cancellationToken.ThrowIfCancellationRequested();
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null) break;
+                sample.Add(line);
             }
         }
 
-        throw new InvalidDataException(
-            "Kon geen CAN frames herkennen. Ondersteunde formaten: PEAK .trc, BUSMASTER .log/.txt, CSS/CL1000 .txt (Timestamp;Type;ID;Data), en candump.");
-    }
-
-    private IReadOnlyList<ICanLogParser> BuildParserOrder(string fileName)
-    {
-        if (fileName.EndsWith(".trc", StringComparison.Ordinal))
+        var probes = _automaticParsers
+            .Select(parser => (Parser: parser, Score: parser.Probe(filePath, sample)))
+            .OrderByDescending(static result => result.Score)
+            .ToList();
+        var best = probes.FirstOrDefault();
+        if (best.Parser is null || best.Score <= 0)
         {
-            return
-            [
-                _parserByType[typeof(PeakTrcParser)],
-                _parserByType[typeof(BusmasterParser)],
-                _parserByType[typeof(CssSemicolonParser)],
-                _parserByType[typeof(CandumpParser)],
-                _parserByType[typeof(GenericTextCanParser)]
-            ];
+            throw new InvalidDataException(
+                "Het logformaat kon niet betrouwbaar worden vastgesteld. Kies een ondersteund PEAK, BUSMASTER, CSS/CL1000- of candump-bestand; generieke import is niet automatisch toegestaan.");
         }
 
-        if (fileName.EndsWith(".log", StringComparison.Ordinal) || fileName.EndsWith(".log.txt", StringComparison.Ordinal))
+        if (probes.Count > 1 && probes[1].Score == best.Score)
         {
-            return
-            [
-                _parserByType[typeof(BusmasterParser)],
-                _parserByType[typeof(CssSemicolonParser)],
-                _parserByType[typeof(PeakTrcParser)],
-                _parserByType[typeof(CandumpParser)],
-                _parserByType[typeof(GenericTextCanParser)]
-            ];
+            throw new InvalidDataException(
+                $"Het logformaat is ambigu tussen {best.Parser.Name} en {probes[1].Parser.Name}. Import is geblokkeerd om gedeeltelijke parsing te voorkomen.");
         }
 
-        if (fileName.EndsWith(".txt", StringComparison.Ordinal))
+        _logger.LogInformation("Selected parser {ParserName} with confidence {Score}", best.Parser.Name, best.Score);
+        progress?.Report(new LoadProgress($"Parser geselecteerd: {best.Parser.Name}", 5));
+        var result = await best.Parser.ParseAsync(filePath, mode, progress, cancellationToken).ConfigureAwait(false);
+        if (result is null || result.Frames.Count == 0)
         {
-            return
-            [
-                _parserByType[typeof(CssSemicolonParser)],
-                _parserByType[typeof(BusmasterParser)],
-                _parserByType[typeof(PeakTrcParser)],
-                _parserByType[typeof(CandumpParser)],
-                _parserByType[typeof(GenericTextCanParser)]
-            ];
+            throw new InvalidDataException($"Parser {best.Parser.Name} herkende geen geldige CAN-frames.");
         }
 
-        return
-        [
-            _parserByType[typeof(CssSemicolonParser)],
-            _parserByType[typeof(BusmasterParser)],
-            _parserByType[typeof(PeakTrcParser)],
-            _parserByType[typeof(CandumpParser)],
-            _parserByType[typeof(GenericTextCanParser)]
-        ];
+        if (!result.Report.IsConsistent)
+        {
+            throw new InvalidDataException("Interne importfout: niet iedere bronregel is geclassificeerd.");
+        }
+
+        if (mode == ImportMode.Strict && result.Report.HasErrors)
+        {
+            (result.Frames as IDisposable)?.Dispose();
+            throw new ImportIntegrityException(
+                $"Import geblokkeerd: {result.Report.RejectedLines:N0} gegevensregels zijn afgewezen door {result.Report.ParserName}.",
+                result.Report);
+        }
+
+        return result;
     }
 }

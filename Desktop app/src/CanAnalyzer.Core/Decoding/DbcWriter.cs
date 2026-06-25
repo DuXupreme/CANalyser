@@ -22,6 +22,11 @@ public sealed class DbcWriter : IDbcWriter
 
     public async Task WriteAsync(DbcDatabase database, string filePath, CancellationToken cancellationToken)
     {
+        if (!database.IsLosslessWritable)
+        {
+            throw new InvalidOperationException("Deze geïmporteerde DBC bevat metadata die de editor niet lossless kan terugschrijven en is daarom read-only. Maak een nieuwe DBC om veilig op te slaan.");
+        }
+
         var content = Serialize(database);
         await File.WriteAllTextAsync(filePath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken)
             .ConfigureAwait(false);
@@ -48,7 +53,46 @@ public sealed class DbcWriter : IDbcWriter
             AppendMessage(builder, message);
         }
 
+        AppendExtendedDefinitions(builder, database);
+
         return builder.ToString();
+    }
+
+    private static void AppendExtendedDefinitions(StringBuilder builder, DbcDatabase database)
+    {
+        foreach (var message in database.Messages)
+        {
+            var diskId = message.IsExtendedFrame
+                ? message.NormalizedFrameId | CanIdUtilities.DbcExtendedFlag
+                : message.NormalizedFrameId;
+            foreach (var signal in message.Signals)
+            {
+                if (signal.ValueKind != DbcSignalValueKind.Integer)
+                {
+                    builder.Append("SIG_VALTYPE_ ")
+                        .Append(diskId.ToString(CultureInfo.InvariantCulture)).Append(' ')
+                        .Append(SanitizeIdentifier(signal.Name, "Signal")).Append(" : ")
+                        .Append(signal.ValueKind == DbcSignalValueKind.IeeeFloat32 ? '1' : '2')
+                        .Append(';').Append(NewLine);
+                }
+
+                var ranges = signal.MultiplexerRanges.Count > 0
+                    ? signal.MultiplexerRanges
+                    : signal.MultiplexerIds.Count > 1
+                        ? signal.MultiplexerIds.Select(id => new DbcMultiplexerRange(
+                            message.Signals.FirstOrDefault(static item => item.IsMultiplexer)?.Name ?? "Multiplexer",
+                            checked((uint)id), checked((uint)id))).ToList()
+                        : [];
+                if (ranges.Count == 0) continue;
+                var muxName = SanitizeIdentifier(ranges[0].MultiplexerSignalName, "Multiplexer");
+                builder.Append("SG_MUL_VAL_ ")
+                    .Append(diskId.ToString(CultureInfo.InvariantCulture)).Append(' ')
+                    .Append(SanitizeIdentifier(signal.Name, "Signal")).Append(' ')
+                    .Append(muxName).Append(' ')
+                    .Append(string.Join(",", ranges.Select(range => $"{range.Minimum.ToString(CultureInfo.InvariantCulture)}-{range.Maximum.ToString(CultureInfo.InvariantCulture)}")))
+                    .Append(';').Append(NewLine);
+            }
+        }
     }
 
     private static void AppendMessage(StringBuilder builder, DbcMessage message)

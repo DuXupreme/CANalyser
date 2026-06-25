@@ -19,14 +19,16 @@ public sealed class CoreBehaviorTests
                 "Timestamp;Type;ID;Data\n01T000000001;0;123;0102\n01T000000011;1;18FF50E5;A1B2C3\n");
 
             var parser = new CssSemicolonParser();
-            var rows = await parser.ParseAsync(tempFile, null, CancellationToken.None);
+            var result = await parser.ParseAsync(tempFile, ImportMode.Partial, null, CancellationToken.None);
 
-            Assert.NotNull(rows);
-            Assert.Equal(2, rows!.Count);
-            Assert.Equal(0d, rows[0].TimeSeconds, 6);
-            Assert.Equal(0.010d, rows[1].TimeSeconds, 6);
-            Assert.False(rows[0].IsExtended);
-            Assert.True(rows[1].IsExtended);
+            Assert.NotNull(result);
+            Assert.Equal(2, result!.Frames.Count);
+            Assert.Equal(0L, result.Frames[0].TimestampNanoseconds);
+            Assert.Equal(10_000_000L, result.Frames[1].TimestampNanoseconds);
+            Assert.False(result.Frames[0].IsExtended);
+            Assert.True(result.Frames[1].IsExtended);
+            Assert.True(result.Report.IsConsistent);
+            (result.Frames as IDisposable)?.Dispose();
         }
         finally
         {
@@ -37,8 +39,8 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void Downsampling_MinMax_RespectsPointBudget()
     {
-        var x = Enumerable.Range(0, 10_000).Select(v => (float)v).ToArray();
-        var y = x.Select(v => (float)Math.Sin(v * 0.01)).ToArray();
+        var x = Enumerable.Range(0, 10_000).Select(v => (double)v).ToArray();
+        var y = x.Select(v => Math.Sin(v * 0.01)).ToArray();
         var (xs, ys) = Downsampling.MinMax(x, y, 4000);
 
         Assert.Equal(xs.Length, ys.Length);
@@ -83,9 +85,10 @@ public sealed class CoreBehaviorTests
         Assert.Single(result.Samples);
         Assert.Equal("ExampleMessage", result.Samples[0].MessageName);
         Assert.Equal("ExampleSignal", result.Samples[0].SignalName);
-        Assert.Equal(42f, result.Samples[0].Value);
+        Assert.Equal(42d, result.Samples[0].Value);
         Assert.Equal("0x2A", result.Samples[0].RawValueHex);
         Assert.Equal("count", result.Samples[0].Unit);
+        (result.Samples as IDisposable)?.Dispose();
     }
 
     [Fact]

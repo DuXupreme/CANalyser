@@ -2,25 +2,32 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser (.NET 8 WPF MVVM)
+# CANalyser 2.0 beta (.NET 8 WPF)
 
-Production-oriented Windows desktop migration of the Python `Gyrari CANalyser.py` tool.
+CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-## 1. Python Source Functionality Inventory
-Behavior inferred from the migration source:
+> De huidige versie is `2.0.0-beta.1`. Publiceer nog geen stabiele 2.0-release voordat de praktijk-golden-suite en de 10M-framebenchmark op de doelhardware zijn geslaagd.
 
-- CAN log import (`.trc`, `.log`, `.txt`)
-- DBC import + permissive decode behavior
-- Format detection/parsing priority by extension:
+## 1. Data-integriteitscontract
+
+- Exacte relatieve tijd als signed 64-bit nanoseconden; seconden zijn uitsluitend een weergave/projectie.
+- Exacte raw signaalwaarden als `BigInteger` en fysieke waarden als `double`.
+- Iedere bronregel wordt verklaard als non-data, geaccepteerd of afgewezen.
+- Strikte import is standaard; PARTIAL vereist expliciete bevestiging en synthetiseert nooit waarden.
+- Bronregel, frame-index, kanaal, richting, frameformat, DLC/payload en FD-flags blijven bewaard.
+- Append-only disk-backed frame- en samplestores voorkomen zware frame-/sampleobjectlijsten in RAM.
+- SHA-256 van bron en DBC, appversie en datasetstatus gaan mee in diagnostics en CSV.
+- Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
+- Ondersteunde invoer:
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
-  - candump fallback
-  - generic free-text fallback parser
-- DBC decode matching logic:
+  - candump Classic/FD
+- DBC-decoding is fail-closed:
   - exact ID match (standard + extended)
   - extended fallback on J1939 PGN
-  - permissive/manual signal decode fallback
+  - ambigue PGN-matches en lengtefouten leveren geen waarden
+  - Intel/Motorola, signed/unsigned, IEEE float/double en multiplex-ranges
 - Decode diagnostics:
   - unmatched IDs
   - manual/permissive decode counts
@@ -43,10 +50,10 @@ Behavior inferred from the migration source:
 CanAnalyzer.sln
 src/
   CanAnalyzer.Core/
-    Domain/         # raw frames, decoded samples, summaries, presets, dataset cache
+    Domain/         # exacte frames, samples, identities, provenance en presets
     Interfaces/     # parser/decode/pipeline/export contracts
     Parsing/        # format parsers + parser orchestration
-    Decoding/       # DBC loader + permissive decoder
+    Decoding/       # DbcParserLib 1.8.0 + strikte decoder
     Analysis/       # downsampling, dataset builder, raw frame filtering, pipeline
     Export/         # CSV export + preset JSON serialization
     Utilities/      # hex parsing, timestamp parsing, CAN/J1939 ID helpers
@@ -155,16 +162,19 @@ This is the one-file installer you can forward to operators/colleagues.
 
 - App settings are stored in:
   - `%APPDATA%\CanAnalyzer\settings.json`
-- Saved:
+- Opgeslagen:
   - last used log/dbc paths
   - recent files
   - last window state
   - last plot options
   - last raw frame filters
-- Plot presets can be exported/imported as JSON.
+- Plot presets worden als JSON versie 2 met `SignalIdentity` geëxporteerd. V1-labels migreren alleen bij één unieke match.
 
-## 8. Known Approximations vs Python Dash UI
+## 8. Releaseblokkades voor 2.0.0
 
-- The Python Plotly-specific **rangeslider** and dynamic client-side **cursor annotation overlay** are approximated by native OxyPlot zoom/pan + tracker behavior.
-- DBC parser targets common `BO_` + `SG_` definitions and multiplexing patterns; highly exotic DBC constructs may require parser extensions.
-- Desktop app keeps decoded/cache state in-memory for responsiveness (equivalent user outcome to server-side cache in Dash).
+- representatieve, bij voorkeur geanonimiseerde praktijklogs en DBC's als golden suite;
+- onafhankelijke vergelijking met een tweede DBC-decoder;
+- 10 miljoen frames importeren, filteren en exporteren zonder truncatie of `OutOfMemoryException`;
+- Release-build, tests en afgesproken coverage-drempels groen.
+
+Release- en uploadscripts worden nooit automatisch uitgevoerd tijdens ontwikkeling.

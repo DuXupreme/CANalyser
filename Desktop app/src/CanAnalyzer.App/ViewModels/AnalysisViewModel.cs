@@ -296,7 +296,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             FrameIdFilter = FrameIdFilter,
             TimeStart = TimeStart,
             TimeEnd = TimeEnd,
-            MaxPointsPerTrace = Math.Clamp(MaxPointsPerTrace, 200, 20_000),
+            MaxPointsPerTrace = Math.Clamp(MaxPointsPerTrace, 200, 200_000),
             UseDownsampling = UseDownsampling,
             SubplotHeight = Math.Clamp(SubplotHeight, 160, 1200),
             SignalListHeight = Math.Clamp(SignalListHeight, 180, 1200),
@@ -483,6 +483,21 @@ public sealed partial class AnalysisViewModel : ObservableObject
         }
 
         var options = CaptureViewOptions();
+        if (!options.UseDownsampling)
+        {
+            var oversized = groups.SelectMany(static group => group.Signals)
+                .Distinct(StringComparer.Ordinal)
+                .Select(label => _dataset.SignalSeriesByLabel.TryGetValue(label, out var series)
+                    ? (Label: label, Count: CountVisible(series.Time, options.TimeStart, options.TimeEnd))
+                    : (Label: label, Count: 0))
+                .FirstOrDefault(static item => item.Count > 200_000);
+            if (oversized.Count > 200_000)
+            {
+                PresetStatus = $"Volledige resolutie geblokkeerd: '{oversized.Label}' bevat {oversized.Count:N0} zichtbare punten. Zoom via begin/eindtijd in of schakel expliciet LOD in.";
+                return;
+            }
+        }
+
         var panels = _plotModelBuilder.Build(_dataset, groups, options);
 
         PlotPanels.Clear();
@@ -504,6 +519,20 @@ public sealed partial class AnalysisViewModel : ObservableObject
         ApplyAxisSyncConfiguration();
         _xAxisSyncService.Bind(PlotPanels.Select(panel => panel.PlotModel));
         RefreshCursorAnnotations();
+    }
+
+    private static int CountVisible(double[] times, double? start, double? end)
+    {
+        var count = 0;
+        foreach (var time in times)
+        {
+            if ((!start.HasValue || time >= start.Value) && (!end.HasValue || time <= end.Value))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private void TriggerLiveRebuild()
@@ -606,11 +635,22 @@ public sealed partial class AnalysisViewModel : ObservableObject
             var preset = new PlotPreset
             {
                 PresetType = "can-log-viewer-layout",
-                Version = 1,
+                Version = 2,
                 SavedAtUtc = DateTime.UtcNow,
                 PlotGroups = CapturePlotGroups().ToList(),
                 View = CaptureViewOptions()
             };
+
+            if (_dataset is not null)
+            {
+                foreach (var group in preset.PlotGroups)
+                {
+                    group.SignalIdentities = group.Signals
+                        .Where(_dataset.SignalSeriesByLabel.ContainsKey)
+                        .Select(label => PresetSignalReference.From(_dataset.SignalSeriesByLabel[label]))
+                        .ToList();
+                }
+            }
 
             var json = _presetSerializer.Serialize(preset);
             await File.WriteAllTextAsync(filePath, json);
@@ -635,10 +675,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
             var json = await File.ReadAllTextAsync(filePath);
             var preset = _presetSerializer.Deserialize(json);
-            LoadPlotGroups(preset.PlotGroups);
+            var resolvedGroups = ResolvePresetGroups(preset);
+            LoadPlotGroups(resolvedGroups);
             ApplyViewOptions(preset.View);
 
-            var selectedLabels = preset.PlotGroups
+            var selectedLabels = resolvedGroups
                 .SelectMany(group => group.Signals)
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var signal in AvailableSignals)
@@ -654,6 +695,80 @@ public sealed partial class AnalysisViewModel : ObservableObject
             _logger.LogError(ex, "Layout import failed");
             PresetStatus = $"Import mislukt: {ex.Message}";
         }
+    }
+
+    private IReadOnlyList<PlotGroup> ResolvePresetGroups(PlotPreset preset)
+    {
+        if (_dataset is null)
+        {
+            throw new InvalidOperationException("Laad eerst een dataset voordat je een preset toepast.");
+        }
+
+        var result = new List<PlotGroup>(preset.PlotGroups.Count);
+        foreach (var source in preset.PlotGroups)
+        {
+            var resolvedLabels = new List<string>();
+            if (preset.Version >= 2 && source.SignalIdentities.Count > 0)
+            {
+                foreach (var reference in source.SignalIdentities)
+                {
+                    var matches = _dataset.SignalSeriesByLabel.Values
+                        .Where(series => series.Identity == reference.ToIdentity())
+                        .Select(static series => series.Label)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    if (matches.Length != 1)
+                    {
+                        throw new InvalidDataException(
+                            $"Preset-signaal '{reference.DisplayLabel}' heeft {matches.Length} exacte matches; de preset is niet toegepast.");
+                    }
+
+                    resolvedLabels.Add(matches[0]);
+                }
+            }
+            else
+            {
+                foreach (var legacyLabel in source.Signals)
+                {
+                    var semanticName = legacyLabel.Split(" [", 2, StringSplitOptions.None)[0];
+                    var matches = _dataset.SignalSeriesByLabel.Values
+                        .Where(series => string.Equals(
+                            $"{series.Identity.MessageName}.{series.Identity.SignalName}",
+                            semanticName,
+                            StringComparison.Ordinal))
+                        .Select(static series => series.Label)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    if (matches.Length != 1)
+                    {
+                        throw new InvalidDataException(
+                            $"V1-label '{legacyLabel}' heeft {matches.Length} mogelijke matches. Kies het juiste kanaal/signaal handmatig; er wordt niets gegokt.");
+                    }
+
+                    resolvedLabels.Add(matches[0]);
+                }
+            }
+
+            var remappedOffsets = new Dictionary<string, double>(StringComparer.Ordinal);
+            for (var i = 0; i < resolvedLabels.Count; i++)
+            {
+                var legacy = i < source.Signals.Count ? source.Signals[i] : null;
+                remappedOffsets[resolvedLabels[i]] = legacy is not null && source.Offsets.TryGetValue(legacy, out var offset)
+                    ? offset
+                    : 0d;
+            }
+
+            result.Add(new PlotGroup
+            {
+                Title = source.Title,
+                Signals = resolvedLabels,
+                SignalIdentities = source.SignalIdentities,
+                Offsets = remappedOffsets,
+                LockYAxis = source.LockYAxis
+            });
+        }
+
+        return result;
     }
 
     private void OpenPlotsInWindow()
@@ -712,7 +827,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         CursorTime = snappedTime;
         CursorValueInfo = nearestLabel is null
             ? "Signaalwaarde: -"
-            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("0.###", CultureInfo.InvariantCulture)}";
+            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("G17", CultureInfo.InvariantCulture)}";
         RefreshCursorAnnotations();
         UpdateCursorInfo();
     }
@@ -730,7 +845,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         CursorTime = snappedTime;
         CursorValueInfo = nearestLabel is null
             ? "Signaalwaarde: -"
-            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("0.###", CultureInfo.InvariantCulture)}";
+            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("G17", CultureInfo.InvariantCulture)}";
         RefreshCursorAnnotations();
         UpdateCursorInfo();
     }
@@ -748,7 +863,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         CursorTime = snappedTime;
         CursorValueInfo = nearestLabel is null
             ? "Signaalwaarde: -"
-            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("0.###", CultureInfo.InvariantCulture)}";
+            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("G17", CultureInfo.InvariantCulture)}";
         RefreshCursorAnnotations();
         UpdateCursorInfo();
     }
@@ -830,7 +945,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         }
 
         SetFlagBAt(next.Value);
-        PresetStatus = $"Flag B verplaatst naar volgende verandering op t={next.Value:F6}s.";
+        PresetStatus = $"Flag B verplaatst naar volgende verandering op t={next.Value:G17}s.";
     }
 
     private void ClearFlags()
@@ -844,11 +959,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private void UpdateCursorInfo()
     {
-        var cursorText = CursorTime.HasValue ? $"{CursorTime.Value:F6}s" : "-";
-        var aText = FlagATime.HasValue ? $"{FlagATime.Value:F6}s" : "-";
-        var bText = FlagBTime.HasValue ? $"{FlagBTime.Value:F6}s" : "-";
+        var cursorText = CursorTime.HasValue ? $"{CursorTime.Value:G17}s" : "-";
+        var aText = FlagATime.HasValue ? $"{FlagATime.Value:G17}s" : "-";
+        var bText = FlagBTime.HasValue ? $"{FlagBTime.Value:G17}s" : "-";
         var dtText = FlagATime.HasValue && FlagBTime.HasValue
-            ? $"{Math.Abs(FlagBTime.Value - FlagATime.Value):F6}s"
+            ? $"{Math.Abs(FlagBTime.Value - FlagATime.Value):G17}s"
             : "-";
         CursorInfo = $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}";
     }
@@ -897,14 +1012,14 @@ public sealed partial class AnalysisViewModel : ObservableObject
         return bestTime;
     }
 
-    private static int FindNearestIndex(float[] values, double target)
+    private static int FindNearestIndex(double[] values, double target)
     {
         if (values.Length == 0)
         {
             return -1;
         }
 
-        var upper = UpperBound(values, (float)target);
+        var upper = UpperBound(values, target);
         if (upper <= 0)
         {
             return 0;
@@ -953,7 +1068,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                     continue;
                 }
 
-                var start = UpperBound(series.Time, (float)fromTime);
+                var start = UpperBound(series.Time, fromTime);
                 if (start <= 0)
                 {
                     start = 1;
@@ -980,7 +1095,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         return best;
     }
 
-    private static int UpperBound(float[] values, float threshold)
+    private static int UpperBound(double[] values, double threshold)
     {
         var lo = 0;
         var hi = values.Length;
@@ -1072,7 +1187,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
                     var x = series.Time[index];
                     var y = series.Value[index];
-                    var label = $"{ShortSignalLabel(series.Label)}={y.ToString("0.###", CultureInfo.InvariantCulture)}";
+                    var label = $"{ShortSignalLabel(series.Label)}={y.ToString("G17", CultureInfo.InvariantCulture)}";
 
                     model.Annotations.Add(new PointAnnotation
                     {

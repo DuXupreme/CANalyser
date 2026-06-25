@@ -41,7 +41,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
-        _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 20_000);
+        _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 200_000);
         _useDownsampling = useDownsampling;
 
         foreach (var panel in panels)
@@ -70,7 +70,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         get => _maxPointsPerTrace;
         set
         {
-            if (SetField(ref _maxPointsPerTrace, Math.Clamp(value, 200, 20_000)))
+            if (SetField(ref _maxPointsPerTrace, Math.Clamp(value, 200, 200_000)))
             {
                 ApplyVisualOptionsPreservingView();
             }
@@ -82,6 +82,23 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         get => _useDownsampling;
         set
         {
+            if (!value)
+            {
+                var oversized = Panels.SelectMany(panel => panel.SeriesData.Select(series =>
+                {
+                    var xAxis = panel.PlotModel.Axes.FirstOrDefault(static axis => axis.Position == AxisPosition.Bottom);
+                    return CountVisible(series.Time, xAxis?.ActualMinimum, xAxis?.ActualMaximum);
+                })).FirstOrDefault(static count => count > 200_000);
+                if (oversized > 200_000)
+                {
+                    MessageBox.Show(this,
+                        $"Volledige resolutie bevat {oversized:N0} zichtbare punten. Zoom eerst verder in of laat de expliciete LOD-weergave actief.",
+                        "Volledige resolutie geblokkeerd", MessageBoxButton.OK, MessageBoxImage.Information);
+                    OnPropertyChanged(nameof(UseDownsampling));
+                    return;
+                }
+            }
+
             if (SetField(ref _useDownsampling, value))
             {
                 ApplyVisualOptionsPreservingView();
@@ -271,7 +288,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         }
 
         SetFlagBAt(next.Value, panel: null);
-        CursorValueText.Text = $"Signaalwaarde: Flag B op t={next.Value:F6}s";
+        CursorValueText.Text = $"Signaalwaarde: Flag B op t={next.Value:G17}s";
     }
 
     private void OnClearFlagsClick(object sender, RoutedEventArgs e)
@@ -293,7 +310,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         var snappedTime = SnapTimeToNearestData(panel, requestedTime, out var nearestLabel, out var nearestValue);
         var newValueText = nearestLabel is null
             ? "Signaalwaarde: -"
-            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("0.###", CultureInfo.InvariantCulture)}";
+            : $"Signaalwaarde: {ShortSignalLabel(nearestLabel)} = {nearestValue?.ToString("G17", CultureInfo.InvariantCulture)}";
 
         if (_cursorTime.HasValue &&
             Math.Abs(_cursorTime.Value - snappedTime) < 1e-6 &&
@@ -368,11 +385,11 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     private void UpdateCursorInfo()
     {
-        var cursorText = _cursorTime.HasValue ? $"{_cursorTime.Value:F6}s" : "-";
-        var aText = _flagATime.HasValue ? $"{_flagATime.Value:F6}s" : "-";
-        var bText = _flagBTime.HasValue ? $"{_flagBTime.Value:F6}s" : "-";
+        var cursorText = _cursorTime.HasValue ? $"{_cursorTime.Value:G17}s" : "-";
+        var aText = _flagATime.HasValue ? $"{_flagATime.Value:G17}s" : "-";
+        var bText = _flagBTime.HasValue ? $"{_flagBTime.Value:G17}s" : "-";
         var dtText = _flagATime.HasValue && _flagBTime.HasValue
-            ? $"{Math.Abs(_flagBTime.Value - _flagATime.Value):F6}s"
+            ? $"{Math.Abs(_flagBTime.Value - _flagATime.Value):G17}s"
             : "-";
         CursorInfoText.Text = $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}";
     }
@@ -451,7 +468,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
                         var x = series.Time[index];
                         var y = series.Value[index];
-                        var label = $"{ShortSignalLabel(series.Label)}={y.ToString("0.###", CultureInfo.InvariantCulture)}";
+                        var label = $"{ShortSignalLabel(series.Label)}={y.ToString("G17", CultureInfo.InvariantCulture)}";
 
                         model.Annotations.Add(new PointAnnotation
                         {
@@ -532,7 +549,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                     continue;
                 }
 
-                var start = UpperBound(series.Time, (float)fromTime);
+                var start = UpperBound(series.Time, fromTime);
                 if (start <= 0)
                 {
                     start = 1;
@@ -603,14 +620,14 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         return bestTime;
     }
 
-    private static int FindNearestIndex(float[] values, double target)
+    private static int FindNearestIndex(double[] values, double target)
     {
         if (values.Length == 0)
         {
             return -1;
         }
 
-        var upper = UpperBound(values, (float)target);
+        var upper = UpperBound(values, target);
         if (upper <= 0)
         {
             return 0;
@@ -628,7 +645,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         return lowerDistance <= upperDistance ? lowerIndex : upperIndex;
     }
 
-    private static int UpperBound(float[] values, float threshold)
+    private static int UpperBound(double[] values, double threshold)
     {
         var lo = 0;
         var hi = values.Length;
@@ -734,12 +751,15 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         foreach (var panel in Panels)
         {
             var model = panel.PlotModel;
+            var xAxis = model.Axes.FirstOrDefault(static axis => axis.Position == AxisPosition.Bottom);
+            var visibleMinimum = xAxis?.ActualMinimum;
+            var visibleMaximum = xAxis?.ActualMaximum;
             model.IsLegendVisible = ShowLegend;
             model.Series.Clear();
 
             foreach (var series in panel.SeriesData)
             {
-                var rendered = BuildSeries(series);
+                var rendered = BuildSeries(series, visibleMinimum, visibleMaximum);
                 model.Series.Add(rendered);
             }
         }
@@ -750,22 +770,31 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         RefreshCursorAnnotations();
     }
 
-    private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series)
+    private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series, double? visibleMinimum, double? visibleMaximum)
     {
-        (float[] x, float[] y) = UseDownsampling
-            ? Downsampling.MinMax(series.Time, series.Value, Math.Clamp(MaxPointsPerTrace, 200, 20_000))
-            : (series.Time, series.Value);
+        var start = FindFirstAtOrAfter(series.Time, visibleMinimum);
+        var end = FindFirstAfter(series.Time, visibleMaximum);
+        if (end <= start) { start = 0; end = series.Time.Length; }
+        var visibleTime = start == 0 && end == series.Time.Length ? series.Time : series.Time[start..end];
+        var visibleValue = start == 0 && end == series.Value.Length ? series.Value : series.Value[start..end];
+        (double[] x, double[] y) = UseDownsampling
+            ? Downsampling.MinMax(visibleTime, visibleValue, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
+            : (visibleTime, visibleValue);
+        var title = x.Length < visibleTime.Length
+            ? $"{series.Label} — weergegeven {x.Length:N0} / zichtbaar {visibleTime.Length:N0} / totaal {series.Time.Length:N0}"
+            : series.Label;
         if (MarkersOnly)
         {
             var scatter = new ScatterSeries
             {
-                Title = series.Label,
+                Title = title,
                 MarkerFill = series.Color,
                 MarkerStroke = series.Color,
                 MarkerType = MarkerType.Circle,
                 MarkerSize = 2.5,
                 YAxisKey = series.YAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed
+                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
+                TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -780,12 +809,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         {
             var stair = new StairStepSeries
             {
-                Title = series.Label,
+                Title = title,
                 Color = series.Color,
                 StrokeThickness = 1.2,
                 YAxisKey = series.YAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                Decimator = Decimator.Decimate
+                Decimator = UseDownsampling ? Decimator.Decimate : null,
+                TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -798,12 +828,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
         var line = new LineSeries
         {
-            Title = series.Label,
+            Title = title,
             Color = series.Color,
             StrokeThickness = 1.2,
             YAxisKey = series.YAxisKey,
             EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-            Decimator = Decimator.Decimate
+            Decimator = UseDownsampling ? Decimator.Decimate : null,
+            TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
         };
 
         for (var i = 0; i < x.Length; i++)
@@ -812,6 +843,37 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         }
 
         return line;
+    }
+
+    private static int CountVisible(double[] values, double? minimum, double? maximum) =>
+        Math.Max(0, FindFirstAfter(values, maximum) - FindFirstAtOrAfter(values, minimum));
+
+    private static int FindFirstAtOrAfter(double[] values, double? threshold)
+    {
+        if (!threshold.HasValue || double.IsNaN(threshold.Value) || double.IsInfinity(threshold.Value)) return 0;
+        var low = 0;
+        var high = values.Length;
+        while (low < high)
+        {
+            var middle = low + ((high - low) / 2);
+            if (values[middle] < threshold.Value) low = middle + 1; else high = middle;
+        }
+
+        return low;
+    }
+
+    private static int FindFirstAfter(double[] values, double? threshold)
+    {
+        if (!threshold.HasValue || double.IsNaN(threshold.Value) || double.IsInfinity(threshold.Value)) return values.Length;
+        var low = 0;
+        var high = values.Length;
+        while (low < high)
+        {
+            var middle = low + ((high - low) / 2);
+            if (values[middle] <= threshold.Value) low = middle + 1; else high = middle;
+        }
+
+        return low;
     }
 
     private List<PanelViewSnapshot> CapturePanelSnapshots()

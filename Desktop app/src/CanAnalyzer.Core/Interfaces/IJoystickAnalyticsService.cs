@@ -40,7 +40,6 @@ public interface IJoystickAnalyticsService
         SignalSeries commandSeries,
         SignalSeries responseSeries,
         double searchRangeSeconds = 1.5,
-        int resamplePoints = 2000,
         double thresholdFraction = 0.2,
         int maxPlotPoints = 5000);
 

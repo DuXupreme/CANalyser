@@ -9,4 +9,6 @@ public sealed record DecoderDiagnostics(
     int DbcMessageCount,
     int ManualDecodeFrameCount,
     int ManualDecodeUniqueIds,
-    string DecodeNote);
+    string DecodeNote,
+    int DecodeErrorFrameCount = 0,
+    int AmbiguousFrameCount = 0);

@@ -23,7 +23,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
                 []);
         }
 
-        var v = series.Value.Select(static x => (double)x).ToArray();
+        var v = series.Value.ToArray();
         var sorted = v.OrderBy(static x => x).ToArray();
         var mean = v.Average();
         var p01 = Percentile(sorted, 0.01);
@@ -43,10 +43,10 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             v[^1] - v[0]);
 
         var eventStats = BuildEventStats(series.Time, v, threshold, changeThreshold);
-        var hist = Histogram(v, histogramBins, p01, p99);
+        var hist = Histogram(v, histogramBins, sorted[0], sorted[^1]);
         var d = Deltas(v);
         var dp95 = Percentile(d.Select(Math.Abs).OrderBy(static x => x).ToArray(), 0.95);
-        var dHist = d.Length == 0 ? [] : Histogram(d, deltaHistogramBins, -dp95, dp95);
+        var dHist = d.Length == 0 ? [] : Histogram(d, deltaHistogramBins, d.Min(), d.Max());
         return new SignalAnalyticsResult(series.Label, stats, eventStats, hist, dHist);
     }
 
@@ -66,7 +66,8 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
                 ySeries.Label,
                 new JoystickPairStatistics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 [],
-                []);
+                [],
+                aligned.Report);
         }
 
         var sx = aligned.Left.OrderBy(static x => x).ToArray();
@@ -79,15 +80,18 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var radii = new double[aligned.Time.Length];
         var xValues = new double[aligned.Time.Length];
         var yValues = new double[aligned.Time.Length];
-        var dead = 0;
-        var sat = 0;
+        var deadWeight = 0.0;
+        var satWeight = 0.0;
+        var totalWeight = 0.0;
         var path = 0.0;
         var maxSpeed = 0.0;
         var sumR = 0.0;
-        var q1 = 0;
-        var q2 = 0;
-        var q3 = 0;
-        var q4 = 0;
+        var weightedX = 0.0;
+        var weightedY = 0.0;
+        var q1 = 0.0;
+        var q2 = 0.0;
+        var q3 = 0.0;
+        var q4 = 0.0;
         for (var i = 0; i < aligned.Time.Length; i++)
         {
             var nx = (aligned.Left[i] - cx) / scale;
@@ -97,21 +101,26 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             points.Add(new NormalizedPoint(nx, ny));
             var r = Math.Sqrt((nx * nx) + (ny * ny));
             radii[i] = r;
-            sumR += r;
-            if (r <= deadzoneThreshold) dead++;
-            if (r >= saturationThreshold) sat++;
-            if (nx >= 0 && ny >= 0) q1++;
-            else if (nx < 0 && ny >= 0) q2++;
-            else if (nx < 0 && ny < 0) q3++;
-            else q4++;
+            var weight = i + 1 < aligned.Time.Length ? Math.Max(0, aligned.Time[i + 1] - aligned.Time[i]) : 0;
+            if (aligned.Time.Length == 1) weight = 1;
+            totalWeight += weight;
+            sumR += r * weight;
+            weightedX += nx * weight;
+            weightedY += ny * weight;
+            if (r <= deadzoneThreshold) deadWeight += weight;
+            if (r >= saturationThreshold) satWeight += weight;
+            if (nx >= 0 && ny >= 0) q1 += weight;
+            else if (nx < 0 && ny >= 0) q2 += weight;
+            else if (nx < 0 && ny < 0) q3 += weight;
+            else q4 += weight;
             if (i > 0)
             {
                 var dx = nx - points[i - 1].X;
                 var dy = ny - points[i - 1].Y;
-                var dt = Math.Max(1e-9, aligned.Time[i] - aligned.Time[i - 1]);
+                var dt = aligned.Time[i] - aligned.Time[i - 1];
                 var len = Math.Sqrt((dx * dx) + (dy * dy));
                 path += len;
-                maxSpeed = Math.Max(maxSpeed, len / dt);
+                if (dt > 0) maxSpeed = Math.Max(maxSpeed, len / dt);
             }
         }
 
@@ -125,23 +134,23 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             Math.Max(0, aligned.Time[^1] - aligned.Time[0]),
             cx,
             cy,
-            sumR / Math.Max(1, aligned.Time.Length),
+            sumR / totalWeight,
             radii.Max(),
             p95Radius,
-            (dead / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
-            (sat / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
+            (deadWeight / totalWeight) * 100.0,
+            (satWeight / totalWeight) * 100.0,
             usedXRangePercent,
             usedYRangePercent,
-            xValues.Average(),
-            yValues.Average(),
-            (q1 / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
-            (q2 / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
-            (q3 / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
-            (q4 / (double)Math.Max(1, aligned.Time.Length)) * 100.0,
+            weightedX / totalWeight,
+            weightedY / totalWeight,
+            (q1 / totalWeight) * 100.0,
+            (q2 / totalWeight) * 100.0,
+            (q3 / totalWeight) * 100.0,
+            (q4 / totalWeight) * 100.0,
             path,
             maxSpeed);
-        var rh = Histogram(radii, radiusHistogramBins, 0, Math.Max(1.2, Percentile(radii.OrderBy(static x => x).ToArray(), 0.99)));
-        return new JoystickPairAnalyticsResult(xSeries.Label, ySeries.Label, pairStats, rh, Reduce(points, maxPathPoints));
+        var rh = Histogram(radii, radiusHistogramBins, 0, radii.Max());
+        return new JoystickPairAnalyticsResult(xSeries.Label, ySeries.Label, pairStats, rh, Reduce(points, maxPathPoints), aligned.Report);
     }
 
     public IReadOnlyList<SignalRankingRow> RankSignals(IReadOnlyDictionary<string, SignalSeries> seriesByLabel, double changeThreshold = 0.01, int topN = 20)
@@ -152,7 +161,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         {
             var s = kv.Value;
             if (s.Time.Length < 2 || s.Value.Length < 2) continue;
-            var v = s.Value.Select(static x => (double)x).ToArray();
+            var v = s.Value.ToArray();
             var sorted = v.OrderBy(static x => x).ToArray();
             var mean = v.Average();
             var std = Std(v, mean);
@@ -220,7 +229,6 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         SignalSeries commandSeries,
         SignalSeries responseSeries,
         double searchRangeSeconds = 1.5,
-        int resamplePoints = 2000,
         double thresholdFraction = 0.2,
         int maxPlotPoints = 5000)
     {
@@ -233,7 +241,18 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var end = Math.Min(commandSeries.Time[^1], responseSeries.Time[^1]);
         if (end <= start) return CreateEmptyDelayResult(commandSeries.Label, responseSeries.Label, searchRangeSeconds);
 
-        var n = Math.Clamp(resamplePoints, 300, 12000);
+        var slowMedian = Math.Max(
+            EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length),
+            EstimateMedianDt(responseSeries.Time, responseSeries.Time.Length));
+        var maximumGap = Math.Max(MaximumPositiveInterval(commandSeries.Time), MaximumPositiveInterval(responseSeries.Time));
+        if (slowMedian > 0 && maximumGap > 5d * slowMedian)
+            throw new InvalidOperationException($"Delayanalyse ongeldig: sampleafstand {maximumGap:G15}s overschrijdt 5× de mediane interval van de traagste reeks ({5d * slowMedian:G15}s)." );
+
+        var finestDt = Math.Min(EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length), EstimateMedianDt(responseSeries.Time, responseSeries.Time.Length));
+        var nLong = checked((long)Math.Ceiling((end - start) / Math.Max(1e-9, finestDt)) + 1L);
+        if (nLong > 2_000_000)
+            throw new InvalidOperationException($"Delayanalyse vereist {nLong:N0} punten op bronresolutie; beperk het tijdvenster in plaats van data stil te reduceren.");
+        var n = (int)Math.Max(3, nLong);
         var dt = (end - start) / (n - 1);
         var t = new double[n];
         var cRaw = new double[n];
@@ -272,18 +291,22 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         }
 
         var lag = bestK * dt;
-        var rsNormalized = new double[n];
-        var rsRaw = new double[n];
-        var err = new double[n];
+        var shiftedTimes = new List<double>(n);
+        var rsRaw = new List<double>(n);
+        var errors = new List<double>(n);
         for (var i = 0; i < n; i++)
         {
-            var shiftedRaw = Lerp(responseSeries.Time, responseSeries.Value, t[i] + lag);
-            rsRaw[i] = shiftedRaw;
-            rsNormalized[i] = NormalizeValue(shiftedRaw, responseCenter, responseScale);
-            err[i] = Math.Abs(rsNormalized[i] - c[i]);
+            var shiftedTimestamp = t[i] + lag;
+            if (shiftedTimestamp < responseSeries.Time[0] || shiftedTimestamp > responseSeries.Time[^1])
+                continue;
+            var shiftedRaw = Lerp(responseSeries.Time, responseSeries.Value, shiftedTimestamp);
+            shiftedTimes.Add(t[i]);
+            rsRaw.Add(shiftedRaw);
+            errors.Add(Math.Abs(NormalizeValue(shiftedRaw, responseCenter, responseScale) - c[i]));
         }
 
-        var se = err.OrderBy(static x => x).ToArray();
+        if (errors.Count == 0) return CreateEmptyDelayResult(commandSeries.Label, responseSeries.Label, searchRangeSeconds);
+        var se = errors.OrderBy(static x => x).ToArray();
         var dth = DelayByThreshold(t, c, r, thresholdFraction);
         var delayEventMatches = CollectDelayEvents(t, c, r, Math.Max(0.01, searchRangeSeconds));
         var delayValues = delayEventMatches.Select(static match => match.DelaySeconds).ToArray();
@@ -295,13 +318,13 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         return new DelayAnalysisResult(
             commandSeries.Label,
             responseSeries.Label,
-            n,
+            errors.Count,
             Math.Max(0.01, searchRangeSeconds),
             lag,
             bestCorr,
-            err.Average(),
+            errors.Average(),
             Percentile(se, 0.95),
-            err.Max(),
+            errors.Max(),
             dth,
             delayEvents.MatchedEventCount,
             delayEvents.MeanDelaySeconds,
@@ -314,7 +337,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             curve,
             ReduceTV(t, cRaw, maxPlotPoints),
             ReduceTV(t, rRaw, maxPlotPoints),
-            ReduceTV(t, rsRaw, maxPlotPoints));
+            ReduceTV(shiftedTimes, rsRaw, maxPlotPoints));
     }
 
     public FirstResponseDelayResult AnalyzeFirstResponseDelay(
@@ -333,17 +356,17 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var window = Math.Max(0.01, searchRangeSeconds);
 
         // Command step detection: a real edge moves a sizeable fraction of the command swing.
-        var cmdValues = commandSeries.Value.Select(static v => (double)v).ToArray();
+        var cmdValues = commandSeries.Value.ToArray();
         var cmdSorted = cmdValues.OrderBy(static v => v).ToArray();
         var cmdRange = Math.Max(1e-9, Percentile(cmdSorted, 0.99) - Percentile(cmdSorted, 0.01));
         var stepThreshold = cmdRange * 0.30;
 
         // Feedback reaction threshold: a small fraction of the feedback range above the resting value.
-        var rspSorted = responseSeries.Value.Select(static v => (double)v).OrderBy(static v => v).ToArray();
+        var rspSorted = responseSeries.Value.OrderBy(static v => v).ToArray();
         var rspRange = Math.Max(1e-9, Percentile(rspSorted, 0.99) - Percentile(rspSorted, 0.01));
         var responseThreshold = Math.Max(1e-9, rspRange * frac);
 
-        var medianDt = EstimateMedianDt(commandSeries.Time.Select(static t => (double)t).ToArray(), commandSeries.Time.Length);
+        var medianDt = EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length);
         var minGap = Math.Max(0.02, Math.Min(window * 0.5, medianDt * 4.0));
 
         var deadTimes = new List<double>();
@@ -379,7 +402,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             var target = baseline + (direction * responseThreshold);
 
             // First feedback sample after the edge that deviates past the threshold in the command direction.
-            var startIdx = UpperBound(responseSeries.Time, (float)edgeTime);
+            var startIdx = UpperBound(responseSeries.Time, edgeTime);
             for (var j = startIdx; j < responseSeries.Time.Length; j++)
             {
                 var reactionTime = responseSeries.Time[j];
@@ -400,7 +423,17 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
                     continue;
                 }
 
-                var deadTime = reactionTime - edgeTime;
+                var previousTime = j > 0 ? Math.Max(edgeTime, responseSeries.Time[j - 1]) : edgeTime;
+                var previousValue = previousTime == edgeTime ? baseline : responseSeries.Value[j - 1];
+                var interval = reactionTime - previousTime;
+                var allowedGap = 5d * Math.Max(
+                    EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length),
+                    EstimateMedianDt(responseSeries.Time, responseSeries.Time.Length));
+                if (allowedGap > 0 && interval > allowedGap) break;
+                var valueDelta = value - previousValue;
+                var fraction = Math.Abs(valueDelta) <= 1e-15 ? 1d : Math.Clamp((target - previousValue) / valueDelta, 0d, 1d);
+                var crossingTime = previousTime + (interval * fraction);
+                var deadTime = crossingTime - edgeTime;
                 if (deadTime < 0)
                 {
                     break;
@@ -498,7 +531,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             Histogram(frontDelayValues, delayHistogramBins, 0, SafeDelayHistogramHigh(frontDelayValues)));
     }
 
-    private static SignalEventStatistics BuildEventStats(float[] time, IReadOnlyList<double> value, double threshold, double changeThreshold)
+    private static SignalEventStatistics BuildEventStats(double[] time, IReadOnlyList<double> value, double threshold, double changeThreshold)
     {
         var safe = Math.Max(0, changeThreshold);
         var rise = 0;
@@ -520,8 +553,8 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             var d = value[i] - value[i - 1];
             var ad = Math.Abs(d);
             absD.Add(ad);
-            absS.Add(ad / Math.Max(1e-9, dt));
-            if (ad >= safe) changes++;
+            if (dt > 0) absS.Add(ad / dt);
+            if (ad > 0 && ad >= safe) changes++;
             if (ad <= 1e-12) flat++;
             var nowAbove = value[i] >= threshold;
             if (!prevAbove && nowAbove) rise++;
@@ -552,13 +585,13 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         // Butterfly mapping supplied by operator:
         // Left IN for joystick backward (Y-) and yaw left.
         var aligned = Align(joystickY, joystickYaw);
-        var values = new float[aligned.Time.Length];
+        var values = new double[aligned.Time.Length];
         for (var i = 0; i < aligned.Time.Length; i++)
         {
-            values[i] = (float)(-aligned.Left[i] - aligned.Right[i]);
+            values[i] = -aligned.Left[i] - aligned.Right[i];
         }
 
-        return new SignalSeries("Expected.Left.FromJoystick", aligned.Time.Select(static t => (float)t).ToArray(), values);
+        return new SignalSeries("Expected.Left.FromJoystick", aligned.Time, values);
     }
 
     private static SignalSeries BuildButterflyRightCommand(SignalSeries joystickY, SignalSeries joystickYaw)
@@ -566,13 +599,13 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         // Butterfly mapping supplied by operator:
         // Right IN for joystick backward (Y-) and yaw right.
         var aligned = Align(joystickY, joystickYaw);
-        var values = new float[aligned.Time.Length];
+        var values = new double[aligned.Time.Length];
         for (var i = 0; i < aligned.Time.Length; i++)
         {
-            values[i] = (float)(-aligned.Left[i] + aligned.Right[i]);
+            values[i] = -aligned.Left[i] + aligned.Right[i];
         }
 
-        return new SignalSeries("Expected.Right.FromJoystick", aligned.Time.Select(static t => (float)t).ToArray(), values);
+        return new SignalSeries("Expected.Right.FromJoystick", aligned.Time, values);
     }
 
     private static SignalSeries BuildButterflyFrontCommand(SignalSeries joystickX)
@@ -935,24 +968,65 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
 
     private static AlignedData Align(SignalSeries left, SignalSeries right)
     {
-        if (left.Time.Length == 0 || right.Time.Length == 0 || left.Value.Length == 0 || right.Value.Length == 0) return new AlignedData([], [], []);
-        var useLeft = left.Time.Length <= right.Time.Length;
-        var bt = useLeft ? left.Time : right.Time;
-        var bv = useLeft ? left.Value : right.Value;
-        var ot = useLeft ? right.Time : left.Time;
-        var ov = useLeft ? right.Value : left.Value;
-        var t = new double[bt.Length];
-        var l = new double[bt.Length];
-        var r = new double[bt.Length];
-        for (var i = 0; i < bt.Length; i++)
+        var sourceCount = left.Time.Length + right.Time.Length;
+        var duplicateCount = CountDuplicateIntervals(left.Time) + CountDuplicateIntervals(right.Time);
+        if (left.Time.Length == 0 || right.Time.Length == 0 || left.Value.Length == 0 || right.Value.Length == 0)
+            return new AlignedData([], [], [], new AlignmentReport(AnalysisStatus.InsufficientOverlap, sourceCount, 0, 0, 0, 0, duplicateCount, "Een of beide reeksen zijn leeg."));
+        var start = Math.Max(left.Time[0], right.Time[0]);
+        var end = Math.Min(left.Time[^1], right.Time[^1]);
+        if (end < start)
+            return new AlignedData([], [], [], new AlignmentReport(AnalysisStatus.InsufficientOverlap, sourceCount, 0, 0, 0, 0, duplicateCount, "De reeksen hebben geen gemeenschappelijke tijdsperiode."));
+        var times = left.Time.Concat(right.Time)
+            .Where(time => time >= start && time <= end)
+            .Distinct()
+            .OrderBy(static time => time)
+            .ToArray();
+        var l = new double[times.Length];
+        var r = new double[times.Length];
+        var slowMedianInterval = Math.Max(EstimateMedianDt(left.Time, left.Time.Length), EstimateMedianDt(right.Time, right.Time.Length));
+        var maximumAllowedGap = 5d * slowMedianInterval;
+        var maximumObservedGap = Math.Max(MaximumPositiveInterval(left.Time), MaximumPositiveInterval(right.Time));
+        var validCount = 0;
+        for (var i = 0; i < times.Length; i++)
         {
-            var ti = bt[i];
-            var idx = Nearest(ot, ti);
-            t[i] = ti;
-            if (useLeft) { l[i] = bv[i]; r[i] = ov[idx]; } else { l[i] = ov[idx]; r[i] = bv[i]; }
+            var leftGap = BracketDistance(left.Time, times[i]);
+            var rightGap = BracketDistance(right.Time, times[i]);
+            var gap = Math.Max(leftGap, rightGap);
+            maximumObservedGap = Math.Max(maximumObservedGap, gap);
+            if (maximumAllowedGap <= 0 || gap <= maximumAllowedGap) validCount++;
+            l[i] = Lerp(left.Time, left.Value, times[i]);
+            r[i] = Lerp(right.Time, right.Value, times[i]);
         }
 
-        return new AlignedData(t, l, r);
+        var coverage = times.Length == 0 ? 0 : validCount * 100d / times.Length;
+        var overlapNanoseconds = checked((long)Math.Round((end - start) * 1_000_000_000d, MidpointRounding.AwayFromZero));
+        if (maximumAllowedGap > 0 && maximumObservedGap > maximumAllowedGap)
+        {
+            var report = new AlignmentReport(
+                AnalysisStatus.GapExceeded, sourceCount, validCount, overlapNanoseconds, coverage,
+                maximumObservedGap, duplicateCount,
+                $"Maximale sampleafstand {maximumObservedGap:G6}s overschrijdt 5× de mediane interval van de traagste reeks ({maximumAllowedGap:G6}s)." );
+            return new AlignedData([], [], [], report);
+        }
+
+        return new AlignedData(times, l, r, new AlignmentReport(
+            AnalysisStatus.Valid, sourceCount, times.Length, overlapNanoseconds, coverage,
+            maximumObservedGap, duplicateCount, "Lineaire interpolatie binnen uitsluitend de gemeenschappelijke tijdsperiode."));
+    }
+
+    private static double BracketDistance(double[] times, double target)
+    {
+        var upper = UpperBound(times, target);
+        if (upper > 0 && times[upper - 1] == target) return 0;
+        if (upper <= 0 || upper >= times.Length) return 0;
+        return times[upper] - times[upper - 1];
+    }
+
+    private static int CountDuplicateIntervals(double[] times)
+    {
+        var count = 0;
+        for (var i = 1; i < times.Length; i++) if (times[i] == times[i - 1]) count++;
+        return count;
     }
 
     private static IReadOnlyList<NormalizedPoint> ToPoints(IReadOnlyList<double> x, IReadOnlyList<double> y)
@@ -1027,12 +1101,12 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         return den <= 1e-12 ? 0 : cov / den;
     }
 
-    private static double Lerp(float[] t, float[] v, double x)
+    private static double Lerp(double[] t, double[] v, double x)
     {
         if (t.Length == 0 || v.Length == 0) return 0;
         if (x <= t[0]) return v[0];
         if (x >= t[^1]) return v[^1];
-        var up = UpperBound(t, (float)x);
+        var up = UpperBound(t, x);
         if (up <= 0) return v[0];
         if (up >= t.Length) return v[^1];
         var i0 = up - 1;
@@ -1069,14 +1143,6 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         return null;
     }
 
-    private static int Nearest(float[] v, double x)
-    {
-        var up = UpperBound(v, (float)x);
-        if (up <= 0) return 0;
-        if (up >= v.Length) return v.Length - 1;
-        return Math.Abs(v[up - 1] - x) <= Math.Abs(v[up] - x) ? up - 1 : up;
-    }
-
     private static int Nearest(double[] v, double x)
     {
         if (v.Length == 0) return -1;
@@ -1093,7 +1159,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         return Math.Abs(v[lo - 1] - x) <= Math.Abs(v[lo] - x) ? lo - 1 : lo;
     }
 
-    private static int UpperBound(float[] values, float threshold)
+    private static int UpperBound(double[] values, double threshold)
     {
         var lo = 0;
         var hi = values.Length;
@@ -1110,8 +1176,8 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
     {
         if (values.Count == 0) return [];
         var n = Math.Clamp(bins, 8, 200);
-        var l = low;
-        var h = high;
+        var l = Math.Min(low, values.Min());
+        var h = Math.Max(high, values.Max());
         if (double.IsNaN(l) || double.IsInfinity(l) || double.IsNaN(h) || double.IsInfinity(h) || h <= l)
         {
             l = values.Min();
@@ -1148,13 +1214,17 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         return d;
     }
 
-    private static double[] Slopes(float[] t, IReadOnlyList<double> v)
+    private static double[] Slopes(double[] t, IReadOnlyList<double> v)
     {
         if (v.Count < 2 || t.Length < 2) return [];
         var n = Math.Min(v.Count, t.Length) - 1;
-        var s = new double[n];
-        for (var i = 1; i <= n; i++) s[i - 1] = (v[i] - v[i - 1]) / Math.Max(1e-9, t[i] - t[i - 1]);
-        return s;
+        var s = new List<double>(n);
+        for (var i = 1; i <= n; i++)
+        {
+            var dt = t[i] - t[i - 1];
+            if (dt > 0) s.Add((v[i] - v[i - 1]) / dt);
+        }
+        return s.ToArray();
     }
 
     private static double Std(IReadOnlyList<double> values, double mean)
@@ -1163,6 +1233,18 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var sum = 0.0;
         for (var i = 0; i < values.Count; i++) { var d = values[i] - mean; sum += d * d; }
         return Math.Sqrt(sum / values.Count);
+    }
+
+    private static double MaximumPositiveInterval(double[] times)
+    {
+        var maximum = 0d;
+        for (var i = 1; i < times.Length; i++)
+        {
+            var interval = times[i] - times[i - 1];
+            if (interval > maximum) maximum = interval;
+        }
+
+        return maximum;
     }
 
     private static double Percentile(IReadOnlyList<double> sorted, double q)
@@ -1217,7 +1299,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             []);
     }
 
-    private sealed record AlignedData(double[] Time, double[] Left, double[] Right);
+    private sealed record AlignedData(double[] Time, double[] Left, double[] Right, AlignmentReport Report);
     private sealed record PathData(double[] Time, double[] X, double[] Y, double CenterX, double CenterY, double Scale);
     private sealed record DelayMatchEvent(double DelaySeconds, int CommandDirection);
     private sealed record EdgeEvent(int Index, double Time, double Value, int Direction, double Magnitude);

@@ -55,6 +55,17 @@ public sealed record SignalAnalyticsResult(
 /// </summary>
 public sealed record NormalizedPoint(double X, double Y);
 
+/// <summary>Traceable alignment validity for analyses that combine two sampled signals.</summary>
+public sealed record AlignmentReport(
+    AnalysisStatus Status,
+    int SourceSampleCount,
+    int AlignedSampleCount,
+    long OverlapNanoseconds,
+    double CoveragePercent,
+    double MaximumSampleDistanceSeconds,
+    int DuplicateTimestampIntervalsSkipped,
+    string Note);
+
 /// <summary>
 /// Joint statistics for a joystick X/Y signal pair.
 /// </summary>
@@ -87,7 +98,8 @@ public sealed record JoystickPairAnalyticsResult(
     string YSignalLabel,
     JoystickPairStatistics Statistics,
     IReadOnlyList<HistogramBin> RadiusHistogram,
-    IReadOnlyList<NormalizedPoint> PathPoints);
+    IReadOnlyList<NormalizedPoint> PathPoints,
+    AlignmentReport Alignment);
 
 /// <summary>
 /// Ranking row for quickly identifying dynamic/noisy signals.

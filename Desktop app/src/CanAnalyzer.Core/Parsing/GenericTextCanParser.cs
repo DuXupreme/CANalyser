@@ -1,145 +1,83 @@
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Storage;
 using CanAnalyzer.Core.Utilities;
 
 namespace CanAnalyzer.Core.Parsing;
 
-/// <summary>
-/// Generic fallback parser that infers columns from free-form text lines.
-/// </summary>
+/// <summary>Explicit-only fallback parser. It is never selected by automatic probing.</summary>
 public sealed class GenericTextCanParser : ICanLogParser
 {
-    public string Name => "Generic text";
+    public string Name => "Generic fallback";
+    public int Probe(string filePath, IReadOnlyList<string> sampleLines) => 0;
 
-    public async Task<IReadOnlyList<RawCanFrame>?> ParseAsync(
-        string filePath,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancellationToken)
+    public async Task<CanLogParseResult?> ParseAsync(
+        string filePath, ImportMode mode, IProgress<LoadProgress>? progress, CancellationToken cancellationToken)
     {
-        var rows = new List<RawCanFrame>();
-
+        var rows = new DiskBackedFrameStore();
+        var report = new ParseReportBuilder(Name);
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = new StreamReader(stream);
         var length = stream.Length;
-        var lineCounter = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is null)
-            {
-                break;
-            }
-
-            lineCounter++;
-            if (lineCounter % 2000 == 0)
-            {
+            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            if (line is null) break;
+            var lineNumber = report.NextLine();
+            if (lineNumber % 2000 == 0)
                 ParserUtilities.ReportFileProgress(stream, length, progress, "Parser: generic fallback...", 5, 10);
-            }
-
             var trimmed = line.Trim();
-            if (trimmed.Length == 0 || ParserUtilities.IsCommonHeaderOrComment(trimmed))
+            if (trimmed.Length == 0 || ParserUtilities.IsCommonHeaderOrComment(trimmed)) { report.NonData(); continue; }
+            if (TryParseLine(trimmed, rows.Count, lineNumber, out var frame, out var error))
             {
-                continue;
+                rows.Append(frame!);
+                report.Accepted();
             }
-
-            var parsed = TryParseLine(trimmed);
-            if (parsed is not null)
+            else
             {
-                rows.Add(parsed);
+                report.Reject(lineNumber, "GENERIC_SYNTAX", error, line);
             }
         }
 
-        if (rows.Count == 0)
-        {
-            return null;
-        }
-
-        return rows.OrderBy(frame => frame.TimeSeconds).ToList();
+        if (rows.Count == 0) { rows.Dispose(); return null; }
+        rows.Complete();
+        var built = report.Build(mode);
+        return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete);
     }
 
-    private static RawCanFrame? TryParseLine(string line)
+    private static bool TryParseLine(string line, long frameIndex, long lineNumber, out RawCanFrame? frame, out string error)
     {
+        frame = null;
+        error = "Geen eenduidige tijd/ID/DLC/payloadcombinatie gevonden.";
         var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 4)
+        if (parts.Length < 4) return false;
+        for (var timeIdx = 0; timeIdx < Math.Min(5, parts.Length); timeIdx++)
         {
-            return null;
-        }
-
-        int? timeIdx = null;
-        double time = 0;
-        for (var i = 0; i < Math.Min(5, parts.Length); i++)
-        {
-            if (double.TryParse(parts[i].Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            long timeNs;
+            try { timeNs = TimestampParsers.ParseDecimalSecondsToNanoseconds(parts[timeIdx]); }
+            catch { continue; }
+            for (var idIdx = timeIdx + 1; idIdx < Math.Min(parts.Length, timeIdx + 8); idIdx++)
             {
-                time = parsed;
-                timeIdx = i;
-                break;
-            }
-        }
-
-        if (!timeIdx.HasValue)
-        {
-            return null;
-        }
-
-        for (var idIdx = timeIdx.Value + 1; idIdx < Math.Min(parts.Length, timeIdx.Value + 8); idIdx++)
-        {
-            var tokenId = parts[idIdx];
-            if (tokenId.Equals("rx", StringComparison.OrdinalIgnoreCase) ||
-                tokenId.Equals("tx", StringComparison.OrdinalIgnoreCase) ||
-                tokenId.Equals("dt", StringComparison.OrdinalIgnoreCase) ||
-                tokenId.Equals("fd", StringComparison.OrdinalIgnoreCase) ||
-                tokenId.Equals("ch", StringComparison.OrdinalIgnoreCase) ||
-                tokenId.Equals("channel", StringComparison.OrdinalIgnoreCase) ||
-                tokenId == "-")
-            {
-                continue;
-            }
-
-            uint frameId;
-            try
-            {
-                frameId = HexUtilities.ParseIntAuto(tokenId);
-            }
-            catch
-            {
-                continue;
-            }
-
-            for (var dlcIdx = idIdx + 1; dlcIdx < Math.Min(parts.Length, idIdx + 6); dlcIdx++)
-            {
-                if (!byte.TryParse(parts[dlcIdx], out var dlc) || dlc > 64)
+                if (parts[idIdx].Equals("rx", StringComparison.OrdinalIgnoreCase) || parts[idIdx].Equals("tx", StringComparison.OrdinalIgnoreCase)) continue;
+                uint id;
+                try { id = HexUtilities.ParseIntAuto(parts[idIdx]); }
+                catch { continue; }
+                for (var dlcIdx = idIdx + 1; dlcIdx < Math.Min(parts.Length, idIdx + 6); dlcIdx++)
                 {
-                    continue;
+                    if (!int.TryParse(parts[dlcIdx], out var declared) || declared is < 0 or > 64) continue;
+                    var tokens = parts.Skip(dlcIdx + 1).Take(declared).ToArray();
+                    var data = HexUtilities.ParseDataBytes(tokens);
+                    if (data is null || data.Length != declared) continue;
+                    var extended = id > 0x7FF;
+                    if (!CanFrameValidation.TryNormalize(id, extended, declared, data.Length, data.Length > 8, out var dlc, out var format, out error)) continue;
+                    var directionText = parts.FirstOrDefault(part => part.Equals("rx", StringComparison.OrdinalIgnoreCase) || part.Equals("tx", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+                    frame = new RawCanFrame(timeNs, id, dlc, data, directionText, string.Empty, extended,
+                        frameIndex, lineNumber, format, CanFrameValidation.ParseDirection(directionText));
+                    return true;
                 }
-
-                var dataTokens = parts.Skip(dlcIdx + 1).Take(dlc).ToArray();
-                if (dataTokens.Length != dlc)
-                {
-                    continue;
-                }
-
-                var data = HexUtilities.ParseDataBytes(dataTokens);
-                if (data is null)
-                {
-                    continue;
-                }
-
-                var lower = parts.Select(token => token.ToLowerInvariant()).ToArray();
-                var type = lower.Contains("rx") ? "Rx" : lower.Contains("tx") ? "Tx" : string.Empty;
-
-                return new RawCanFrame(
-                    TimeSeconds: time,
-                    Id: frameId,
-                    Dlc: dlc,
-                    Data: data,
-                    Type: type,
-                    Channel: string.Empty,
-                    IsExtended: frameId > 0x7FF);
             }
         }
-
-        return null;
+        return false;
     }
 }

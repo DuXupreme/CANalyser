@@ -16,6 +16,7 @@ public sealed partial class RawFramesViewModel : ObservableObject
 {
     private readonly IRawFrameFilterService _filterService;
     private CanDataset? _dataset;
+    private IFrameSampleLookup? _sampleLookup;
 
     [ObservableProperty]
     private string? _idFilter;
@@ -47,11 +48,16 @@ public sealed partial class RawFramesViewModel : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<RawFrameRow> _filteredFrames = Array.Empty<RawFrameRow>();
 
+    [ObservableProperty]
+    private int _pageNumber = 1;
+
     public RawFramesViewModel(IRawFrameFilterService filterService)
     {
         _filterService = filterService;
-        ApplyFiltersCommand = new RelayCommand(ApplyFilters);
+        ApplyFiltersCommand = new RelayCommand(() => ApplyFilters(resetPage: true));
         ResetFiltersCommand = new RelayCommand(ResetFilters);
+        PreviousPageCommand = new RelayCommand(PreviousPage, () => PageNumber > 1);
+        NextPageCommand = new RelayCommand(NextPage, () => FilteredFrames.Count >= Math.Max(1, MaxRows));
     }
 
     public IReadOnlyList<string> ExtendedFilterModes { get; } = ["All", "Extended only", "Standard only"];
@@ -60,10 +66,15 @@ public sealed partial class RawFramesViewModel : ObservableObject
 
     public IRelayCommand ResetFiltersCommand { get; }
 
+    public IRelayCommand PreviousPageCommand { get; }
+
+    public IRelayCommand NextPageCommand { get; }
+
     public void LoadDataset(CanDataset dataset)
     {
         _dataset = dataset;
-        ApplyFilters();
+        _sampleLookup = dataset.DecodedSamples as IFrameSampleLookup;
+        ApplyFilters(resetPage: true);
     }
 
     public void ApplyFilterOptions(RawFrameFilterOptions options)
@@ -99,7 +110,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
                 "Extended only" => true,
                 "Standard only" => false,
                 _ => null
-            }
+            },
+            Offset = checked((Math.Max(1, PageNumber) - 1) * Math.Clamp(MaxRows, 1, 2_000_000))
         };
     }
 
@@ -107,7 +119,10 @@ public sealed partial class RawFramesViewModel : ObservableObject
     {
         var frame = row.Source;
         var builder = new StringBuilder()
-            .AppendLine($"Tijd [s]: {frame.TimeSeconds:F6}")
+            .AppendLine($"Tijd [s]: {frame.TimeSeconds:G17}")
+            .AppendLine($"Tijd [ns]: {frame.TimestampNanoseconds}")
+            .AppendLine($"Frame-index: {frame.FrameIndex}")
+            .AppendLine($"Bronregel: {frame.SourceLineNumber}")
             .AppendLine($"Type: {frame.Type}")
             .AppendLine($"Kanaal: {frame.Channel}")
             .AppendLine($"ID: {frame.IdHex} ({frame.Id})")
@@ -137,7 +152,7 @@ public sealed partial class RawFramesViewModel : ObservableObject
             builder.AppendLine($"- Message: {messageGroup.Key}");
             foreach (var sample in messageGroup.OrderBy(item => item.SignalName, StringComparer.Ordinal))
             {
-                builder.AppendLine($"  {sample.SignalName} = {sample.Value.ToString("0.######", CultureInfo.InvariantCulture)}");
+                builder.AppendLine($"  {sample.SignalName} = {sample.Value.ToString("G17", CultureInfo.InvariantCulture)} ({sample.RawValueHex})");
             }
         }
 
@@ -151,41 +166,13 @@ public sealed partial class RawFramesViewModel : ObservableObject
             return [];
         }
 
-        var normalizedId = CanIdUtilities.NormalizeDbcFrameId(frame.Id, frame.IsExtended || frame.Id > 0x7FF);
-        var frameTime = (float)frame.TimeSeconds;
-        const float exactTolerance = 0.0005f;
-
-        var exactMatches = _dataset.DecodedSamples
-            .Where(sample =>
-                sample.FrameId == normalizedId &&
-                Math.Abs(sample.TimeSeconds - frameTime) <= exactTolerance)
-            .ToList();
-        if (exactMatches.Count > 0)
-        {
-            return exactMatches;
-        }
-
-        var candidates = _dataset.DecodedSamples
-            .Where(sample => sample.FrameId == normalizedId)
-            .ToList();
-        if (candidates.Count == 0)
-        {
-            return [];
-        }
-
-        var nearestTime = candidates
-            .OrderBy(sample => Math.Abs(sample.TimeSeconds - frameTime))
-            .Select(sample => sample.TimeSeconds)
-            .First();
-
-        const float nearestTolerance = 0.002f;
-        return candidates
-            .Where(sample => Math.Abs(sample.TimeSeconds - nearestTime) <= nearestTolerance)
-            .ToList();
+        return _sampleLookup?.GetFrameSamples(frame.FrameIndex).ToList()
+               ?? _dataset.DecodedSamples.Where(sample => sample.FrameIndex == frame.FrameIndex).ToList();
     }
 
-    private void ApplyFilters()
+    private void ApplyFilters(bool resetPage = false)
     {
+        if (resetPage) PageNumber = 1;
         if (_dataset is null)
         {
             FilteredFrames = Array.Empty<RawFrameRow>();
@@ -198,7 +185,9 @@ public sealed partial class RawFramesViewModel : ObservableObject
 
         FilteredFrames = rows.Select(frame => new RawFrameRow(frame)).ToList();
 
-        FrameStatistics = $"Tonen: {FilteredFrames.Count:N0} / {_dataset.RawCount:N0} frames";
+        FrameStatistics = $"Pagina {PageNumber:N0}: weergegeven {FilteredFrames.Count:N0} frames vanaf gefilterde offset {options.Offset:N0}; dataset totaal {_dataset.RawCount:N0}. De dataset zelf is niet afgekapt.";
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
     }
 
     private void ResetFilters()
@@ -211,6 +200,20 @@ public sealed partial class RawFramesViewModel : ObservableObject
         TimeEnd = null;
         MaxRows = 50_000;
         ExtendedFilterMode = "All";
+        ApplyFilters(resetPage: true);
+    }
+
+    private void PreviousPage()
+    {
+        if (PageNumber <= 1) return;
+        PageNumber--;
+        ApplyFilters();
+    }
+
+    private void NextPage()
+    {
+        if (FilteredFrames.Count < Math.Max(1, MaxRows)) return;
+        PageNumber++;
         ApplyFilters();
     }
 }

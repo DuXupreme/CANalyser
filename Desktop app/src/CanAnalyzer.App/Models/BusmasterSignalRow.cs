@@ -11,7 +11,7 @@ public sealed class BusmasterSignalRow
     public BusmasterSignalRow(DecodedSignalSample sample)
     {
         Name = sample.SignalName;
-        PhysicalValue = sample.Value.ToString("0.######", CultureInfo.CurrentCulture);
+        PhysicalValue = sample.Value.ToString("G15", CultureInfo.CurrentCulture);
         RawValue = sample.RawValueHex;
         Unit = sample.Unit;
     }

@@ -13,6 +13,9 @@ public sealed class PlotGroup
     [JsonPropertyName("signals")]
     public List<string> Signals { get; set; } = [];
 
+    [JsonPropertyName("signal_identities")]
+    public List<PresetSignalReference> SignalIdentities { get; set; } = [];
+
     [JsonPropertyName("offsets")]
     public Dictionary<string, double> Offsets { get; set; } = [];
 
@@ -29,4 +32,43 @@ public sealed class PlotGroup
             LockYAxis = false
         };
     }
+}
+
+/// <summary>Stable version-2 preset reference; label is informational only.</summary>
+public sealed class PresetSignalReference
+{
+    [JsonPropertyName("channel")]
+    public string Channel { get; set; } = string.Empty;
+
+    [JsonPropertyName("frame_format")]
+    public CanFrameFormat FrameFormat { get; set; }
+
+    [JsonPropertyName("extended")]
+    public bool IsExtended { get; set; }
+
+    [JsonPropertyName("frame_id")]
+    public uint FrameId { get; set; }
+
+    [JsonPropertyName("message")]
+    public string MessageName { get; set; } = string.Empty;
+
+    [JsonPropertyName("signal")]
+    public string SignalName { get; set; } = string.Empty;
+
+    [JsonPropertyName("display_label")]
+    public string DisplayLabel { get; set; } = string.Empty;
+
+    public SignalIdentity ToIdentity() =>
+        new(Channel, FrameFormat, IsExtended, FrameId, MessageName, SignalName);
+
+    public static PresetSignalReference From(SignalSeries series) => new()
+    {
+        Channel = series.Identity.Channel,
+        FrameFormat = series.Identity.FrameFormat,
+        IsExtended = series.Identity.IsExtended,
+        FrameId = series.Identity.FrameId,
+        MessageName = series.Identity.MessageName,
+        SignalName = series.Identity.SignalName,
+        DisplayLabel = series.Label
+    };
 }

@@ -6,3 +6,9 @@ artifacts/
 *.user
 *.suo
 *.cache
+coverage.json
+coverage.cobertura.xml
+
+# Private practice/golden data. These files may contain customer/machine data
+# and must stay local. Golden tests read an optional ignored manifest from here.
+testdata/golden/

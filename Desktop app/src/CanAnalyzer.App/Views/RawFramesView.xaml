@@ -60,6 +60,11 @@
                                     Margin="0,0,6,0" />
                             <Button Content="Reset"
                                     Command="{Binding ResetFiltersCommand}" />
+                            <Button Content="Vorige pagina"
+                                    Command="{Binding PreviousPageCommand}"
+                                    Margin="12,0,6,0" />
+                            <Button Content="Volgende pagina"
+                                    Command="{Binding NextPageCommand}" />
                         </StackPanel>
                     </StackPanel>
                 </WrapPanel>
@@ -79,12 +84,15 @@
                   VirtualizingPanel.ScrollUnit="Pixel"
                   ScrollViewer.CanContentScroll="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=F6}" Width="120" />
+                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=G17}" Width="150" />
                 <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="70" />
                 <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="70" />
                 <DataGridTextColumn Header="ID" Binding="{Binding IdHex}" Width="100" />
                 <DataGridTextColumn Header="ID (dec)" Binding="{Binding Id}" Width="100" />
                 <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="60" />
+                <DataGridTextColumn Header="Bytes" Binding="{Binding PayloadLength}" Width="60" />
+                <DataGridTextColumn Header="Format" Binding="{Binding FrameFormat}" Width="70" />
+                <DataGridTextColumn Header="Direction" Binding="{Binding Direction}" Width="80" />
                 <DataGridTextColumn Header="Data" Binding="{Binding DataHex}" Width="300" />
                 <DataGridTextColumn Header="ASCII" Binding="{Binding DataAscii}" Width="160" />
             </DataGrid.Columns>

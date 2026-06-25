@@ -29,6 +29,9 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private string _decodeDiagnostics = string.Empty;
 
     [ObservableProperty]
+    private string _integritySummary = "Nog geen dataset geladen.";
+
+    [ObservableProperty]
     private string _lastErrorDetails = string.Empty;
 
     [ObservableProperty]
@@ -113,6 +116,18 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     public void UpdateDataset(CanDataset dataset)
     {
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
+        var report = dataset.ImportReport;
+        IntegritySummary =
+            $"DATASETSTATUS: {dataset.Completeness.ToString().ToUpperInvariant()}\n" +
+            $"Appversie: {dataset.ApplicationVersion}\n" +
+            $"Bron SHA-256: {dataset.SourceLogSha256}\n" +
+            $"DBC SHA-256: {dataset.DbcSha256}\n" +
+            (report is null
+                ? "Importverslag: niet beschikbaar"
+                : $"Parser: {report.ParserName}\nImportmodus: {report.Mode.ToString().ToUpperInvariant()}\n" +
+                  $"Regels: {report.TotalLines:N0} = non-data {report.NonDataLines:N0} + geaccepteerd {report.AcceptedLines:N0} + afgewezen {report.RejectedLines:N0}\n" +
+                  $"Invariant geldig: {(report.IsConsistent ? "JA" : "NEE")}\n" +
+                  $"Diagnoses: {report.Issues.Count:N0} ({report.Issues.Count(static issue => issue.Severity == ImportIssueSeverity.Error):N0} fouten)");
 
         MessageSummaries.Clear();
         foreach (var summary in dataset.MessageSummaries)
@@ -123,7 +138,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void WriteBackToSettings(AppSettings settings)
     {
-        settings.LastPlotViewOptions.MaxPointsPerTrace = Math.Clamp(DefaultMaxPointsPerTrace, 200, 20_000);
+        settings.LastPlotViewOptions.MaxPointsPerTrace = Math.Clamp(DefaultMaxPointsPerTrace, 200, 200_000);
         settings.LastPlotViewOptions.SubplotHeight = Math.Clamp(DefaultSubplotHeight, 160, 1200);
         settings.LastPlotViewOptions.SignalListHeight = Math.Clamp(DefaultSignalListHeight, 180, 1500);
         settings.LastPlotViewOptions.UseDownsampling = DefaultUseDownsampling;

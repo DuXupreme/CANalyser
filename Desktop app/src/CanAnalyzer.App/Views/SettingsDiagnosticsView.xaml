@@ -81,6 +81,7 @@
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
@@ -94,7 +95,15 @@
                          TextWrapping="Wrap" />
             </GroupBox>
 
-            <GroupBox Grid.Row="1" Header="Gedecodeerde berichten" Margin="0,0,0,8">
+            <GroupBox Grid.Row="1" Header="Integriteit / validatie" Margin="0,0,0,8">
+                <TextBox Margin="8"
+                         IsReadOnly="True"
+                         FontFamily="Consolas"
+                         Text="{Binding IntegritySummary}"
+                         TextWrapping="Wrap" />
+            </GroupBox>
+
+            <GroupBox Grid.Row="2" Header="Gedecodeerde berichten" Margin="0,0,0,8">
                 <DataGrid ItemsSource="{Binding MessageSummaries}"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
@@ -112,7 +121,7 @@
                 </DataGrid>
             </GroupBox>
 
-            <GroupBox Grid.Row="2" Header="Debug / decode-details" Margin="0,0,0,8">
+            <GroupBox Grid.Row="3" Header="Debug / decode-details" Margin="0,0,0,8">
                 <TextBox Margin="8"
                          IsReadOnly="True"
                          FontFamily="Consolas"
@@ -121,7 +130,7 @@
                          TextWrapping="Wrap" />
             </GroupBox>
 
-            <GroupBox Grid.Row="3" Header="Laatste foutdetails">
+            <GroupBox Grid.Row="4" Header="Laatste foutdetails">
                 <TextBox Margin="8"
                          IsReadOnly="True"
                          FontFamily="Consolas"

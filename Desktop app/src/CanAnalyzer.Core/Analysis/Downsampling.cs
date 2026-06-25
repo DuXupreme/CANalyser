@@ -5,7 +5,7 @@ namespace CanAnalyzer.Core.Analysis;
 /// </summary>
 public static class Downsampling
 {
-    public static (float[] X, float[] Y) MinMax(float[] x, float[] y, int maxPoints)
+    public static (double[] X, double[] Y) MinMax(double[] x, double[] y, int maxPoints)
     {
         var n = x.Length;
         if (n != y.Length)
@@ -25,8 +25,8 @@ public static class Downsampling
             return (SliceWithStep(x, step), SliceWithStep(y, step));
         }
 
-        var xs = new List<float>(maxPoints + 8);
-        var ys = new List<float>(maxPoints + 8);
+        var xs = new List<double>(maxPoints + 8);
+        var ys = new List<double>(maxPoints + 8);
         for (var i = 0; i < bucketCount; i++)
         {
             var start = (int)Math.Floor(i * (n / (double)bucketCount));
@@ -76,9 +76,9 @@ public static class Downsampling
         return (xs.ToArray(), ys.ToArray());
     }
 
-    private static float[] SliceWithStep(float[] source, int step)
+    private static double[] SliceWithStep(double[] source, int step)
     {
-        var data = new List<float>((source.Length / step) + 1);
+        var data = new List<double>((source.Length / step) + 1);
         for (var i = 0; i < source.Length; i += step)
         {
             data.Add(source[i]);

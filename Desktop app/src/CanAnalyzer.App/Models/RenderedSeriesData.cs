@@ -7,7 +7,7 @@ namespace CanAnalyzer.App.Models;
 /// </summary>
 public sealed record RenderedSeriesData(
     string Label,
-    float[] Time,
-    float[] Value,
+    double[] Time,
+    double[] Value,
     string YAxisKey,
     OxyColor Color);

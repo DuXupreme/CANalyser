@@ -1,8 +1,8 @@
-using System.Globalization;
 using System.Numerics;
 using System.Text;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Storage;
 using CanAnalyzer.Core.Utilities;
 
 namespace CanAnalyzer.Core.Decoding;
@@ -16,10 +16,11 @@ public sealed class CanDecodingService : ICanDecodingService
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var decodedSamples = new List<DecodedSignalSample>(rawFrames.Count * 2);
+        var decodedSamples = new DiskBackedDecodedSampleStore();
         var summaryCounts = new Dictionary<(uint FrameId, string MessageName), int>();
         var unmatchedCounter = new Dictionary<uint, int>();
-        var manualDecodeCounter = new Dictionary<uint, int>();
+        var decodeErrorCounter = new Dictionary<uint, int>();
+        var ambiguousCounter = new Dictionary<uint, int>();
 
         var exactMap = new Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>>();
         var pgnToMessages = new Dictionary<uint, List<DbcMessage>>();
@@ -53,16 +54,17 @@ public sealed class CanDecodingService : ICanDecodingService
         }
 
         var reportStride = Math.Max(500, rawFrames.Count / 100);
-        for (var i = 0; i < rawFrames.Count; i++)
+        var i = 0;
+        foreach (var frame in rawFrames)
         {
+            var frameNumber = i++;
             cancellationToken.ThrowIfCancellationRequested();
-            if (i % reportStride == 0)
+            if (frameNumber % reportStride == 0)
             {
-                var percent = Math.Clamp(20 + (int)Math.Round((i / (double)Math.Max(1, rawFrames.Count)) * 60.0), 20, 80);
-                progress?.Report(new LoadProgress($"DBC decode: frame {i:N0} / {rawFrames.Count:N0}", percent));
+                var percent = Math.Clamp(20 + (int)Math.Round((frameNumber / (double)Math.Max(1, rawFrames.Count)) * 60.0), 20, 80);
+                progress?.Report(new LoadProgress($"DBC decode: frame {frameNumber:N0} / {rawFrames.Count:N0}", percent));
             }
 
-            var frame = rawFrames[i];
             var rawFrameId = frame.Id;
             var isExtended = frame.IsExtended || rawFrameId > 0x7FF;
             var normalizedFrameId = CanIdUtilities.NormalizeDbcFrameId(rawFrameId, isExtended);
@@ -77,7 +79,15 @@ public sealed class CanDecodingService : ICanDecodingService
                 var pgn = CanIdUtilities.ExtractJ1939Pgn(normalizedFrameId);
                 if (pgn.HasValue && pgnToMessages.TryGetValue(pgn.Value, out var pgnMatches))
                 {
-                    candidates.AddRange(pgnMatches);
+                    if (pgnMatches.Count == 1)
+                    {
+                        candidates.Add(pgnMatches[0]);
+                    }
+                    else
+                    {
+                        Count(ambiguousCounter, rawFrameId);
+                        continue;
+                    }
                 }
             }
 
@@ -89,41 +99,35 @@ public sealed class CanDecodingService : ICanDecodingService
 
             Dictionary<string, DecodedSignalValue>? decoded = null;
             DbcMessage? decodedMessage = null;
-            var manualUsed = false;
-
             foreach (var message in candidates)
             {
+                if (message.SuppressDecoding)
+                {
+                    continue;
+                }
+
                 if (message.IsExtendedFrame != isExtended)
                 {
                     continue;
                 }
 
-                if (TryDecodeMessage(message, frame.Data, permissive: false, out var strict))
+                if (message.Dlc != frame.PayloadLength)
+                {
+                    continue;
+                }
+
+                if (TryDecodeMessage(message, frame.Data, out var strict))
                 {
                     decoded = strict;
                     decodedMessage = message;
-                    manualUsed = false;
-                    break;
-                }
-
-                if (TryDecodeMessage(message, frame.Data, permissive: true, out var permissiveResult))
-                {
-                    decoded = permissiveResult;
-                    decodedMessage = message;
-                    manualUsed = true;
                     break;
                 }
             }
 
             if (decodedMessage is null || decoded is null)
             {
-                Count(unmatchedCounter, rawFrameId);
+                Count(decodeErrorCounter, rawFrameId);
                 continue;
-            }
-
-            if (manualUsed)
-            {
-                Count(manualDecodeCounter, rawFrameId);
             }
 
             Count(summaryCounts, (normalizedFrameId, decodedMessage.Name));
@@ -135,17 +139,20 @@ public sealed class CanDecodingService : ICanDecodingService
                     continue;
                 }
 
-                decodedSamples.Add(
+                decodedSamples.Append(
                     new DecodedSignalSample(
-                        TimeSeconds: (float)frame.TimeSeconds,
-                        FrameId: normalizedFrameId,
-                        MessageName: decodedMessage.Name,
-                        SignalName: pair.Key,
-                        Value: (float)pair.Value.PhysicalValue,
-                        RawValueHex: FormatRawValue(pair.Value.RawValue),
+                        TimestampNanoseconds: frame.TimestampNanoseconds,
+                        FrameIndex: frame.FrameIndex,
+                        SourceLineNumber: frame.SourceLineNumber,
+                        Identity: new SignalIdentity(frame.Channel, frame.FrameFormat, isExtended, normalizedFrameId, decodedMessage.Name, pair.Key),
+                        Value: pair.Value.PhysicalValue,
+                        RawValue: pair.Value.RawValue,
                         Unit: pair.Value.Unit));
             }
+
         }
+
+        decodedSamples.Complete();
 
         progress?.Report(new LoadProgress("Bouw berichtsamenvatting...", 85));
 
@@ -159,15 +166,17 @@ public sealed class CanDecodingService : ICanDecodingService
             UnmatchedFrameCount: unmatchedCounter.Values.Sum(),
             UnmatchedUniqueIds: unmatchedCounter.Count,
             DbcMessageCount: database.Messages.Count,
-            ManualDecodeFrameCount: manualDecodeCounter.Values.Sum(),
-            ManualDecodeUniqueIds: manualDecodeCounter.Count,
+            ManualDecodeFrameCount: 0,
+            ManualDecodeUniqueIds: 0,
             DecodeNote: BuildDecodeDiagnostics(
                 rawFrames,
                 database,
                 unmatchedCounter,
                 decodedSamples.Count,
                 exactMap,
-                manualDecodeCounter));
+                decodeErrorCounter),
+            DecodeErrorFrameCount: decodeErrorCounter.Values.Sum(),
+            AmbiguousFrameCount: ambiguousCounter.Values.Sum());
 
         progress?.Report(new LoadProgress("Decode klaar.", 90));
         return new DecodeResult(decodedSamples, summaries, diagnostics);
@@ -176,47 +185,50 @@ public sealed class CanDecodingService : ICanDecodingService
     private static bool TryDecodeMessage(
         DbcMessage message,
         byte[] data,
-        bool permissive,
         out Dictionary<string, DecodedSignalValue> decoded)
     {
         decoded = new Dictionary<string, DecodedSignalValue>(StringComparer.Ordinal);
-        var multiplexerValues = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (message.Signals.Count == 0)
+        {
+            return true;
+        }
+
+        var multiplexerValues = new Dictionary<string, BigInteger>(StringComparer.Ordinal);
 
         foreach (var signal in message.Signals.Where(s => s.IsMultiplexer))
         {
-            if (!TryDecodeSignalValue(signal, data, permissive, out var value))
+            if (!TryDecodeSignalValue(signal, data, out var value))
             {
-                if (!permissive)
-                {
-                    return false;
-                }
-
-                continue;
+                return false;
             }
 
             decoded[signal.Name] = value;
-            multiplexerValues[signal.Name] = (int)Math.Round(value.PhysicalValue);
+            multiplexerValues[signal.Name] = value.RawValue;
         }
 
         foreach (var signal in message.Signals.Where(s => !s.IsMultiplexer))
         {
             if (signal.MultiplexerIds.Count > 0)
             {
-                var matched = multiplexerValues.Values.Any(muxValue => signal.MultiplexerIds.Contains(muxValue));
+                var matched = multiplexerValues.Values.Any(muxValue =>
+                    muxValue >= int.MinValue && muxValue <= int.MaxValue && signal.MultiplexerIds.Contains((int)muxValue));
                 if (!matched)
                 {
                     continue;
                 }
             }
 
-            if (!TryDecodeSignalValue(signal, data, permissive, out var value))
+            if (signal.MultiplexerRanges.Count > 0)
             {
-                if (!permissive)
-                {
-                    return false;
-                }
+                var matched = signal.MultiplexerRanges.Any(range =>
+                    multiplexerValues.TryGetValue(range.MultiplexerSignalName, out var muxValue) &&
+                    muxValue >= range.Minimum && muxValue <= range.Maximum);
+                if (!matched) continue;
+            }
 
-                continue;
+            if (!TryDecodeSignalValue(signal, data, out var value))
+            {
+                return false;
             }
 
             decoded[signal.Name] = value;
@@ -228,11 +240,10 @@ public sealed class CanDecodingService : ICanDecodingService
     private static bool TryDecodeSignalValue(
         DbcSignal signal,
         byte[] data,
-        bool permissive,
         out DecodedSignalValue value)
     {
         value = default;
-        if (!TryExtractRaw(signal, data, permissive, out var raw))
+        if (!TryExtractRaw(signal, data, out var raw))
         {
             return false;
         }
@@ -244,20 +255,12 @@ public sealed class CanDecodingService : ICanDecodingService
         return true;
     }
 
-    private static string FormatRawValue(BigInteger rawValue)
-    {
-        var hex = rawValue
-            .ToString("X", CultureInfo.InvariantCulture)
-            .TrimStart('0');
-        return $"0x{(hex.Length == 0 ? "0" : hex)}";
-    }
-
-    private static bool TryExtractRaw(DbcSignal signal, byte[] data, bool permissive, out BigInteger rawValue)
+    private static bool TryExtractRaw(DbcSignal signal, byte[] data, out BigInteger rawValue)
     {
         rawValue = BigInteger.Zero;
         if (signal.Length <= 0)
         {
-            return true;
+            return false;
         }
 
         if (signal.IsLittleEndian)
@@ -267,7 +270,7 @@ public sealed class CanDecodingService : ICanDecodingService
             Buffer.BlockCopy(data, 0, unsignedBytes, 0, data.Length);
             var payload = new BigInteger(unsignedBytes);
 
-            if (!permissive && (signal.StartBit + signal.Length > data.Length * 8))
+            if (signal.StartBit < 0 || signal.StartBit + signal.Length > data.Length * 8)
             {
                 return false;
             }
@@ -280,7 +283,7 @@ public sealed class CanDecodingService : ICanDecodingService
         var raw = BigInteger.Zero;
         foreach (var bitIndex in DbcBitLayout.GetOccupiedLsb0Bits(signal.StartBit, signal.Length, isLittleEndian: false))
         {
-            if (!TryGetBitLsb0(data, bitIndex, permissive, out var bit))
+            if (!TryGetBitLsb0(data, bitIndex, out var bit))
             {
                 return false;
             }
@@ -294,6 +297,20 @@ public sealed class CanDecodingService : ICanDecodingService
 
     private static double ApplySignalScaling(BigInteger rawValue, DbcSignal signal)
     {
+        if (signal.ValueKind == DbcSignalValueKind.IeeeFloat32)
+        {
+            if (signal.Length != 32 || rawValue < uint.MinValue || rawValue > uint.MaxValue) return double.NaN;
+            var rawFloat = BitConverter.Int32BitsToSingle(unchecked((int)(uint)rawValue));
+            return (rawFloat * signal.Scale) + signal.Offset;
+        }
+
+        if (signal.ValueKind == DbcSignalValueKind.IeeeFloat64)
+        {
+            if (signal.Length != 64 || rawValue < ulong.MinValue || rawValue > ulong.MaxValue) return double.NaN;
+            var rawDouble = BitConverter.Int64BitsToDouble(unchecked((long)(ulong)rawValue));
+            return (rawDouble * signal.Scale) + signal.Offset;
+        }
+
         var value = rawValue;
         if (signal.IsSigned && signal.Length > 0)
         {
@@ -308,20 +325,14 @@ public sealed class CanDecodingService : ICanDecodingService
         return (asDouble * signal.Scale) + signal.Offset;
     }
 
-    private static bool TryGetBitLsb0(byte[] data, int bitIndex, bool permissive, out BigInteger bit)
+    private static bool TryGetBitLsb0(byte[] data, int bitIndex, out BigInteger bit)
     {
         var byteIndex = bitIndex / 8;
         var bitInByte = bitIndex % 8;
         if (byteIndex < 0 || byteIndex >= data.Length)
         {
-            if (!permissive)
-            {
-                bit = BigInteger.Zero;
-                return false;
-            }
-
             bit = BigInteger.Zero;
-            return true;
+            return false;
         }
 
         bit = (data[byteIndex] >> bitInByte) & 1;
@@ -334,7 +345,7 @@ public sealed class CanDecodingService : ICanDecodingService
         Dictionary<uint, int> unmatchedCounter,
         int decodedRowsCount,
         Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>> exactMap,
-        Dictionary<uint, int> manualDecodeCounter)
+        Dictionary<uint, int> decodeErrorCounter)
     {
         var totalFrames = rawFrames.Count;
         var uniqueRawIds = rawFrames.Select(frame => frame.Id).Distinct().Count();
@@ -352,8 +363,8 @@ public sealed class CanDecodingService : ICanDecodingService
             $"Gedecodeerde meetpunten: {decodedRowsCount}",
             $"Niet-gematchte frames: {unmatchedTotal}",
             $"Niet-gematchte unieke IDs: {unmatchedUnique}",
-            $"Permissief/handmatig gedecodeerde frames: {manualDecodeCounter.Values.Sum()}",
-            $"Permissief/handmatig gedecodeerde unieke IDs: {manualDecodeCounter.Count}",
+            $"Frames met decode-/lengtefout: {decodeErrorCounter.Values.Sum()}",
+            $"Unieke IDs met decode-/lengtefout: {decodeErrorCounter.Count}",
             $"DBC standaard berichten: {stdMessages.Count}",
             $"DBC extended berichten: {extMessages.Count}"
         };
@@ -385,11 +396,11 @@ public sealed class CanDecodingService : ICanDecodingService
             }
         }
 
-        if (manualDecodeCounter.Count > 0)
+        if (decodeErrorCounter.Count > 0)
         {
             lines.Add(string.Empty);
-            lines.Add("Frames die alleen via permissieve fallback decodeerden:");
-            foreach (var pair in manualDecodeCounter
+            lines.Add("Frames die strict niet konden worden gedecodeerd:");
+            foreach (var pair in decodeErrorCounter
                          .OrderByDescending(kv => kv.Value)
                          .ThenBy(kv => kv.Key)
                          .Take(12))
