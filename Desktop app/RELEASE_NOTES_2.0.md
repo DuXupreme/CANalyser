@@ -1,4 +1,4 @@
-# CANalyser 2.0.0-beta.1
+# CANalyser 2.0.0
 
 Breking changes:
 
@@ -10,12 +10,10 @@ Breking changes:
 - DBC's die de editor niet aantoonbaar lossless kan terugschrijven openen alleen-lezen;
 - plot-LOD is expliciet zichtbaar en analyses/export blijven op bronresolutie.
 
-Praktijkvalidatie:
+Decode-gedrag:
 
-- de aangeleverde CSS/CL1000 golden logs worden volledig line-accounted en tegen SHA-256 vastgepind;
-- decode-aantallen voor de hoofd-trowel-DBC worden gekruist met Python `cantools`;
 - DBC-overlapmessages worden in partial-mode niet langer gedecodeerd;
 - signal-loze bekende DBC-berichten tellen niet meer als decodefout;
 - duplicate signalnamen in verschillende muxgroepen worden uit de originele DBC-regels gereconstrueerd.
 
-Niet vrijgeven als stabiele `2.0.0` voordat de volledige praktijk-golden-suite, 10M-framebenchmark en acceptatie door de eindgebruiker zijn goedgekeurd.
+`2.0.0` is uitgebracht als stabiele release. De 10M-framebenchmark op de doelhardware en brede eindgebruiker-acceptatie waren bij vrijgave nog niet afgerond en blijven aanbevolen als vervolgvalidatie.

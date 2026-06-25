@@ -2,11 +2,11 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.0 beta (.NET 8 WPF)
+# CANalyser 2.0 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> De huidige versie is `2.0.0-beta.1`. Publiceer nog geen stabiele 2.0-release voordat de praktijk-golden-suite en de 10M-framebenchmark op de doelhardware zijn geslaagd.
+> De huidige stabiele versie is `2.0.0`. De 10M-framebenchmark op de doelhardware en brede eindgebruiker-acceptatie blijven aanbevolen als doorlopende validatie.
 
 ## 1. Data-integriteitscontract
 
@@ -172,8 +172,6 @@ This is the one-file installer you can forward to operators/colleagues.
 
 ## 8. Releaseblokkades voor 2.0.0
 
-- representatieve, bij voorkeur geanonimiseerde praktijklogs en DBC's als golden suite;
-- onafhankelijke vergelijking met een tweede DBC-decoder;
 - 10 miljoen frames importeren, filteren en exporteren zonder truncatie of `OutOfMemoryException`;
 - Release-build, tests en afgesproken coverage-drempels groen.
 

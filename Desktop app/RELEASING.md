@@ -1,6 +1,6 @@
 # CanAnalyzer releasen (Velopack)
 
-> **CANalyser 2.0 releaseblokkade:** `2.0.0-beta.1` mag niet als stabiele release worden gepubliceerd voordat de synthetische suite, 10M-framebenchmark en praktijk-golden-suite slagen. De implementatie voert nooit automatisch een upload of release uit.
+> **CANalyser 2.0:** `2.0.0` is uitgebracht als stabiele release. De 10M-framebenchmark op de doelhardware blijft aanbevolen als doorlopende validatie. De implementatie voert nooit automatisch een upload of release uit.
 
 CanAnalyzer gebruikt [Velopack](https://velopack.io) voor de installer én voor
 automatische updates. De update-feed loopt via **GitHub Releases** van

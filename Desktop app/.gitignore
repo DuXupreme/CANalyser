@@ -9,6 +9,6 @@ artifacts/
 coverage.json
 coverage.cobertura.xml
 
-# Private practice/golden data. These files may contain customer/machine data
-# and must stay local. Golden tests read an optional ignored manifest from here.
+# Private practice data. These files may contain customer/machine data
+# and must stay local; never commit them.
 testdata/golden/
