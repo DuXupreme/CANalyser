@@ -1,6 +1,6 @@
 # CanAnalyzer releasen (Velopack)
 
-> **CANalyser 2.0:** `2.0.0` is uitgebracht als stabiele release. De 10M-framebenchmark op de doelhardware blijft aanbevolen als doorlopende validatie. De implementatie voert nooit automatisch een upload of release uit.
+> **CANalyser 2.0:** `2.0.1` is uitgebracht als stabiele release. De 10M-framebenchmark op de doelhardware blijft aanbevolen als doorlopende validatie. De implementatie voert nooit automatisch een upload of release uit.
 
 CanAnalyzer gebruikt [Velopack](https://velopack.io) voor de installer én voor
 automatische updates. De update-feed loopt via **GitHub Releases** van

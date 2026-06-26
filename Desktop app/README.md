@@ -6,7 +6,7 @@
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> De huidige stabiele versie is `2.0.0`. De 10M-framebenchmark op de doelhardware en brede eindgebruiker-acceptatie blijven aanbevolen als doorlopende validatie.
+> De huidige stabiele versie is `2.0.1`. De 10M-framebenchmark op de doelhardware en brede eindgebruiker-acceptatie blijven aanbevolen als doorlopende validatie.
 
 ## 1. Data-integriteitscontract
 
