@@ -12,6 +12,9 @@ namespace CanAnalyzer.App.Services;
 /// <inheritdoc />
 public sealed class PlotModelBuilder : IPlotModelBuilder
 {
+    private const string AxisNumberFormat = "0.###";
+    private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
+
     private static readonly OxyColor[] ColorCycle =
     [
         OxyColor.Parse("#1F77B4"),
@@ -78,7 +81,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             {
                 Position = AxisPosition.Bottom,
                 Title = "Tijd [s]",
-                StringFormat = "0.###############",
+                StringFormat = AxisNumberFormat,
                 MinimumPadding = 0.01,
                 MaximumPadding = 0.01,
                 MajorGridlineStyle = LineStyle.Solid,
@@ -93,7 +96,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 Position = AxisPosition.Left,
                 Key = "Y1",
                 Title = group.Signals[0],
-                StringFormat = "0.###############",
+                StringFormat = AxisNumberFormat,
                 MinimumPadding = 0.05,
                 MaximumPadding = 0.08,
                 MajorGridlineStyle = LineStyle.Solid,
@@ -131,8 +134,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                         MinimumPadding = 0.05,
                         MaximumPadding = 0.08,
                         TextColor = ColorCycle[colorIndex % ColorCycle.Length],
-                        AxislineColor = ColorCycle[colorIndex % ColorCycle.Length]
-                        ,StringFormat = "0.###############"
+                        AxislineColor = ColorCycle[colorIndex % ColorCycle.Length],
+                        StringFormat = AxisNumberFormat
                     };
                     model.Axes.Add(rightAxis);
                 }
@@ -149,10 +152,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                     ? Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
                     : (filtered.X, filtered.Y);
 
-                var displayTitle = x.Length < filtered.X.Length
-                    ? $"{label} — weergegeven {x.Length:N0} / totaal {filtered.X.Length:N0}"
-                    : label;
-                AddSeries(model, x, y, displayTitle, yAxisKey, seriesColor, viewOptions);
+                AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions);
                 colorIndex++;
             }
 
@@ -245,8 +245,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 MarkerType = MarkerType.Circle,
                 MarkerSize = 2.5,
                 YAxisKey = yAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed
-                ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
+                TrackerFormatString = PreciseTrackerFormat
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -267,8 +267,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 StrokeThickness = 1.2,
                 YAxisKey = yAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                Decimator = options.UseDownsampling ? Decimator.Decimate : null
-                ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+                Decimator = options.UseDownsampling ? Decimator.Decimate : null,
+                TrackerFormatString = PreciseTrackerFormat
             };
             for (var i = 0; i < x.Length; i++)
             {
@@ -286,8 +286,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             StrokeThickness = 1.2,
             YAxisKey = yAxisKey,
             EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-            Decimator = options.UseDownsampling ? Decimator.Decimate : null
-            ,TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+            Decimator = options.UseDownsampling ? Decimator.Decimate : null,
+            TrackerFormatString = PreciseTrackerFormat
         };
         for (var i = 0; i < x.Length; i++)
         {

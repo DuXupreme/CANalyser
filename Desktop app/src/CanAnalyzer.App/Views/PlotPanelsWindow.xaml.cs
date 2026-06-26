@@ -17,6 +17,8 @@ namespace CanAnalyzer.App.Views;
 
 public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 {
+    private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
+
     private readonly XAxisSyncService _xAxisSyncService = new();
     private DateTime _lastCursorUpdateUtc = DateTime.MinValue;
     private double? _cursorTime;
@@ -28,6 +30,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private bool _stepPlot;
     private bool _markersOnly;
     private bool _showLegend = true;
+    private bool _linkXAxisAcrossPanels = true;
     private bool _linkYAxisAcrossPanels = true;
     private bool _showCursorValueLabels = true;
     private bool _suppressVisualRefresh;
@@ -37,12 +40,16 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         IReadOnlyList<PlotPanelModel> panels,
         int subplotHeight,
         int maxPointsPerTrace,
-        bool useDownsampling)
+        bool useDownsampling,
+        bool linkXAxisAcrossPanels,
+        bool linkYAxisAcrossPanels)
     {
         InitializeComponent();
         _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
         _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 200_000);
         _useDownsampling = useDownsampling;
+        _linkXAxisAcrossPanels = linkXAxisAcrossPanels;
+        _linkYAxisAcrossPanels = linkYAxisAcrossPanels;
 
         foreach (var panel in panels)
         {
@@ -154,6 +161,18 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         }
     }
 
+    public bool LinkXAxisAcrossPanels
+    {
+        get => _linkXAxisAcrossPanels;
+        set
+        {
+            if (SetField(ref _linkXAxisAcrossPanels, value))
+            {
+                ApplyAxisSyncConfiguration();
+            }
+        }
+    }
+
     public bool LinkYAxisAcrossPanels
     {
         get => _linkYAxisAcrossPanels;
@@ -161,7 +180,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         {
             if (SetField(ref _linkYAxisAcrossPanels, value))
             {
-                _xAxisSyncService.Configure(syncXAxis: true, syncYAxis: _linkYAxisAcrossPanels);
+                ApplyAxisSyncConfiguration();
             }
         }
     }
@@ -169,7 +188,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _activeCursorPanel ??= Panels.FirstOrDefault();
-        _xAxisSyncService.Configure(syncXAxis: true, syncYAxis: LinkYAxisAcrossPanels);
+        ApplyAxisSyncConfiguration();
         _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
         RefreshCursorAnnotations();
     }
@@ -351,7 +370,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
             panel.PlotModel.InvalidatePlot(false);
         }
 
-        _xAxisSyncService.Configure(syncXAxis: true, syncYAxis: LinkYAxisAcrossPanels);
+        ApplyAxisSyncConfiguration();
         _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
         RefreshCursorAnnotations();
     }
@@ -731,6 +750,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
             OnPropertyChanged(nameof(SubplotHeight));
             OnPropertyChanged(nameof(MaxPointsPerTrace));
             OnPropertyChanged(nameof(UseDownsampling));
+            OnPropertyChanged(nameof(LinkXAxisAcrossPanels));
             OnPropertyChanged(nameof(LinkYAxisAcrossPanels));
             OnPropertyChanged(nameof(ShowCursorValueLabels));
         }
@@ -765,9 +785,14 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         }
 
         RestorePanelSnapshots(snapshots);
-        _xAxisSyncService.Configure(syncXAxis: true, syncYAxis: LinkYAxisAcrossPanels);
+        ApplyAxisSyncConfiguration();
         _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
         RefreshCursorAnnotations();
+    }
+
+    private void ApplyAxisSyncConfiguration()
+    {
+        _xAxisSyncService.Configure(syncXAxis: LinkXAxisAcrossPanels, syncYAxis: LinkYAxisAcrossPanels);
     }
 
     private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series, double? visibleMinimum, double? visibleMaximum)
@@ -780,21 +805,18 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         (double[] x, double[] y) = UseDownsampling
             ? Downsampling.MinMax(visibleTime, visibleValue, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
             : (visibleTime, visibleValue);
-        var title = x.Length < visibleTime.Length
-            ? $"{series.Label} — weergegeven {x.Length:N0} / zichtbaar {visibleTime.Length:N0} / totaal {series.Time.Length:N0}"
-            : series.Label;
         if (MarkersOnly)
         {
             var scatter = new ScatterSeries
             {
-                Title = title,
+                Title = series.Label,
                 MarkerFill = series.Color,
                 MarkerStroke = series.Color,
                 MarkerType = MarkerType.Circle,
                 MarkerSize = 2.5,
                 YAxisKey = series.YAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+                TrackerFormatString = PreciseTrackerFormat
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -809,13 +831,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         {
             var stair = new StairStepSeries
             {
-                Title = title,
+                Title = series.Label,
                 Color = series.Color,
                 StrokeThickness = 1.2,
                 YAxisKey = series.YAxisKey,
                 EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
                 Decimator = UseDownsampling ? Decimator.Decimate : null,
-                TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+                TrackerFormatString = PreciseTrackerFormat
             };
 
             for (var i = 0; i < x.Length; i++)
@@ -828,13 +850,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
         var line = new LineSeries
         {
-            Title = title,
+            Title = series.Label,
             Color = series.Color,
             StrokeThickness = 1.2,
             YAxisKey = series.YAxisKey,
             EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
             Decimator = UseDownsampling ? Decimator.Decimate : null,
-            TrackerFormatString = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}"
+            TrackerFormatString = PreciseTrackerFormat
         };
 
         for (var i = 0; i < x.Length; i++)

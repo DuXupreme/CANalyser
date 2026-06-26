@@ -37,7 +37,18 @@ public sealed partial class BusmasterViewModel : ObservableObject
     private IReadOnlyList<BusmasterSignalRow> _selectedSignals = Array.Empty<BusmasterSignalRow>();
 
     [ObservableProperty]
+    private string? _signalWatchSearchText;
+
+    [ObservableProperty]
+    private IReadOnlyList<BusmasterSignalWatchRow> _signalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
+
+    [ObservableProperty]
+    private string _signalWatchStatistics = "Geen dataset geladen.";
+
+    [ObservableProperty]
     private int _pageNumber = 1;
+
+    private IReadOnlyList<BusmasterSignalWatchRow> _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
 
     public BusmasterViewModel()
     {
@@ -61,6 +72,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
         _sampleLookup = dataset.DecodedSamples as IFrameSampleLookup;
 
         ApplyFilters(resetPage: true);
+        BuildSignalWatchRows(dataset);
     }
 
     partial void OnSelectedMessageChanged(BusmasterMessageRow? value)
@@ -73,6 +85,11 @@ public sealed partial class BusmasterViewModel : ObservableObject
                 .ToList();
     }
 
+    partial void OnSignalWatchSearchTextChanged(string? value)
+    {
+        ApplySignalWatchFilter();
+    }
+
     private void ApplyFilters(bool resetPage = false)
     {
         if (resetPage) PageNumber = 1;
@@ -81,6 +98,9 @@ public sealed partial class BusmasterViewModel : ObservableObject
             Messages = Array.Empty<BusmasterMessageRow>();
             SelectedMessage = null;
             MessageStatistics = "Geen dataset geladen.";
+            _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
+            SignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
+            SignalWatchStatistics = "Geen dataset geladen.";
             return;
         }
 
@@ -138,7 +158,63 @@ public sealed partial class BusmasterViewModel : ObservableObject
         SearchText = null;
         ShowOnlyDecoded = false;
         MaxRows = 50_000;
+        SignalWatchSearchText = null;
         ApplyFilters(resetPage: true);
+    }
+
+    private void BuildSignalWatchRows(CanDataset dataset)
+    {
+        if (dataset.DecodedSamples.Count == 0)
+        {
+            _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
+            SignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
+            SignalWatchStatistics = "Geen gedecodeerde signalen beschikbaar.";
+            return;
+        }
+
+        var stats = new Dictionary<SignalIdentity, SignalWatchAccumulator>();
+        foreach (var sample in dataset.DecodedSamples)
+        {
+            if (!stats.TryGetValue(sample.Identity, out var accumulator))
+            {
+                stats[sample.Identity] = new SignalWatchAccumulator(sample);
+                continue;
+            }
+
+            accumulator.Update(sample);
+        }
+
+        _allSignalWatchRows = stats.Values
+            .Select(static item => item.ToRow())
+            .OrderBy(static row => row.MessageName, StringComparer.Ordinal)
+            .ThenBy(static row => row.Name, StringComparer.Ordinal)
+            .ThenBy(static row => row.Channel, StringComparer.Ordinal)
+            .ThenBy(static row => row.FrameIdHex, StringComparer.Ordinal)
+            .ToList();
+
+        ApplySignalWatchFilter();
+    }
+
+    private void ApplySignalWatchFilter()
+    {
+        var search = SignalWatchSearchText?.Trim();
+        var rows = _allSignalWatchRows;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            rows = rows
+                .Where(row =>
+                    row.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    row.MessageName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    row.FrameIdHex.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    row.Channel.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    row.Unit.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        SignalWatchRows = rows;
+        SignalWatchStatistics = _dataset is null
+            ? "Geen dataset geladen."
+            : $"Signal Watch: {SignalWatchRows.Count:N0} / {_allSignalWatchRows.Count:N0} signalen, {_dataset.DecodedSamples.Count:N0} gedecodeerde meetpunten.";
     }
 
     private void PreviousPage()
@@ -173,4 +249,66 @@ public sealed partial class BusmasterViewModel : ObservableObject
         }
     }
 
+    private sealed class SignalWatchAccumulator
+    {
+        private readonly SignalIdentity _identity;
+        private long _lastTimestampNanoseconds;
+        private long _lastFrameIndex;
+        private double _lastValue;
+        private string _rawValueHex;
+        private string _unit;
+        private int _count = 1;
+        private double _minimum;
+        private double _maximum;
+
+        public SignalWatchAccumulator(DecodedSignalSample sample)
+        {
+            _identity = sample.Identity;
+            _lastTimestampNanoseconds = sample.TimestampNanoseconds;
+            _lastFrameIndex = sample.FrameIndex;
+            _lastValue = sample.Value;
+            _rawValueHex = sample.RawValueHex;
+            _unit = sample.Unit;
+            _minimum = sample.Value;
+            _maximum = sample.Value;
+        }
+
+        public void Update(DecodedSignalSample sample)
+        {
+            _count++;
+            if (sample.Value < _minimum)
+            {
+                _minimum = sample.Value;
+            }
+
+            if (sample.Value > _maximum)
+            {
+                _maximum = sample.Value;
+            }
+
+            if (sample.TimestampNanoseconds < _lastTimestampNanoseconds ||
+                (sample.TimestampNanoseconds == _lastTimestampNanoseconds && sample.FrameIndex < _lastFrameIndex))
+            {
+                return;
+            }
+
+            _lastTimestampNanoseconds = sample.TimestampNanoseconds;
+            _lastFrameIndex = sample.FrameIndex;
+            _lastValue = sample.Value;
+            _rawValueHex = sample.RawValueHex;
+            _unit = sample.Unit;
+        }
+
+        public BusmasterSignalWatchRow ToRow() =>
+            new(
+                _identity,
+                _lastTimestampNanoseconds,
+                _lastFrameIndex,
+                _lastValue,
+                _rawValueHex,
+                _unit,
+                _count,
+                _minimum,
+                _maximum);
+    }
 }

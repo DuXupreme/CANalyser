@@ -53,6 +53,9 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private bool _defaultShowLegend = true;
 
     [ObservableProperty]
+    private bool _defaultLinkXAxisAcrossPanels = true;
+
+    [ObservableProperty]
     private int _defaultRawMaxRows = 50_000;
 
     [ObservableProperty]
@@ -110,6 +113,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         DefaultSignalListHeight = settings.LastPlotViewOptions.SignalListHeight;
         DefaultUseDownsampling = settings.LastPlotViewOptions.UseDownsampling;
         DefaultShowLegend = settings.LastPlotViewOptions.ShowLegend;
+        DefaultLinkXAxisAcrossPanels = settings.LastPlotViewOptions.LinkXAxisAcrossPanels;
         DefaultRawMaxRows = settings.LastRawFrameFilter.MaxRows <= 0 ? 50_000 : settings.LastRawFrameFilter.MaxRows;
     }
 
@@ -143,6 +147,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         settings.LastPlotViewOptions.SignalListHeight = Math.Clamp(DefaultSignalListHeight, 180, 1500);
         settings.LastPlotViewOptions.UseDownsampling = DefaultUseDownsampling;
         settings.LastPlotViewOptions.ShowLegend = DefaultShowLegend;
+        settings.LastPlotViewOptions.LinkXAxisAcrossPanels = DefaultLinkXAxisAcrossPanels;
         settings.LastRawFrameFilter.MaxRows = Math.Clamp(DefaultRawMaxRows, 1, 2_000_000);
     }
 

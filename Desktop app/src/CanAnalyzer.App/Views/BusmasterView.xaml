@@ -94,39 +94,91 @@
                       VerticalAlignment="Center"
                       Background="#D6DEE8" />
 
-        <GroupBox Grid.Row="3" Header="Message-interpretatie" Margin="0,8,0,0">
-            <Grid Margin="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+        <TabControl Grid.Row="3" Margin="0,8,0,0">
+            <TabItem Header="Message-interpretatie">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-                <WrapPanel Grid.Row="0" Margin="0,0,0,8">
-                    <TextBlock Text="Naam:" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedMessage.MessageName}" Margin="6,0,28,0" />
-                    <TextBlock Text="ID:" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedMessage.IdHex}" Margin="6,0,28,0" />
-                    <TextBlock Text="Kanaal:" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedMessage.Channel}" Margin="6,0,28,0" />
-                    <TextBlock Text="DLC:" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedMessage.Dlc}" Margin="6,0,0,0" />
-                </WrapPanel>
+                    <WrapPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="Naam:" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedMessage.MessageName}" Margin="6,0,28,0" />
+                        <TextBlock Text="ID:" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedMessage.IdHex}" Margin="6,0,28,0" />
+                        <TextBlock Text="Kanaal:" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedMessage.Channel}" Margin="6,0,28,0" />
+                        <TextBlock Text="DLC:" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedMessage.Dlc}" Margin="6,0,0,0" />
+                    </WrapPanel>
 
-                <DataGrid Grid.Row="1"
-                          ItemsSource="{Binding SelectedSignals}"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          HeadersVisibility="Column"
-                          EnableRowVirtualization="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-                        <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="*" />
-                        <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="*" />
-                        <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
-        </GroupBox>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding SelectedSignals}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              EnableRowVirtualization="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="*" />
+                            <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="*" />
+                            <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Signal Watch">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock DockPanel.Dock="Right"
+                                   Text="{Binding SignalWatchStatistics}"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Bottom"
+                                   Margin="16,0,0,3" />
+                        <StackPanel Orientation="Horizontal">
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock Text="Zoeken in Signal Watch" />
+                                <TextBox Width="260"
+                                         Text="{Binding SignalWatchSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding SignalWatchRows}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              EnableRowVirtualization="True"
+                              EnableColumnVirtualization="True"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.ScrollUnit="Pixel">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="170" />
+                            <DataGridTextColumn Header="Signal" Binding="{Binding Name}" Width="190" />
+                            <DataGridTextColumn Header="ID" Binding="{Binding FrameIdHex}" Width="90" />
+                            <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="75" />
+                            <DataGridTextColumn Header="Last Time [s]" Binding="{Binding LastTimeSeconds}" Width="150" />
+                            <DataGridTextColumn Header="Last Frame" Binding="{Binding LastFrameIndex}" Width="95" />
+                            <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="120" />
+                            <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="105" />
+                            <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="80" />
+                            <DataGridTextColumn Header="Updates" Binding="{Binding UpdateCount}" Width="85" />
+                            <DataGridTextColumn Header="Min" Binding="{Binding Minimum}" Width="105" />
+                            <DataGridTextColumn Header="Max" Binding="{Binding Maximum}" Width="105" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </UserControl>

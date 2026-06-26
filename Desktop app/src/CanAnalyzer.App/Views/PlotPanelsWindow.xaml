@@ -55,6 +55,9 @@
                             <CheckBox Content="Snelheidsmodus (downsampling)"
                                       IsChecked="{Binding UseDownsampling, Mode=TwoWay}"
                                       Margin="0,0,8,0" />
+                            <CheckBox Content="Koppel X-assen"
+                                      IsChecked="{Binding LinkXAxisAcrossPanels, Mode=TwoWay}"
+                                      Margin="0,0,8,0" />
                             <CheckBox Content="Koppel Y-assen"
                                       IsChecked="{Binding LinkYAxisAcrossPanels, Mode=TwoWay}"
                                       Margin="0,0,8,0" />

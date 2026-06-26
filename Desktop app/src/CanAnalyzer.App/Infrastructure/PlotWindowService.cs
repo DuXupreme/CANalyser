@@ -7,14 +7,26 @@ namespace CanAnalyzer.App.Infrastructure;
 /// <inheritdoc />
 public sealed class PlotWindowService : IPlotWindowService
 {
-    public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, int subplotHeight, int maxPointsPerTrace, bool useDownsampling)
+    public void ShowPlots(
+        IReadOnlyList<PlotPanelModel> panels,
+        int subplotHeight,
+        int maxPointsPerTrace,
+        bool useDownsampling,
+        bool linkXAxisAcrossPanels,
+        bool linkYAxisAcrossPanels)
     {
         if (panels.Count == 0)
         {
             return;
         }
 
-        var window = new PlotPanelsWindow(panels, subplotHeight, maxPointsPerTrace, useDownsampling);
+        var window = new PlotPanelsWindow(
+            panels,
+            subplotHeight,
+            maxPointsPerTrace,
+            useDownsampling,
+            linkXAxisAcrossPanels,
+            linkYAxisAcrossPanels);
         window.Show();
         window.Activate();
     }

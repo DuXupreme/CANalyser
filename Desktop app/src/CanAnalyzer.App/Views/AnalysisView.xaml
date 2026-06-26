@@ -204,6 +204,7 @@
                                 <CheckBox Content="Trapjes" IsChecked="{Binding StepPlot}" Margin="0,0,6,0" />
                                 <CheckBox Content="Markers" IsChecked="{Binding MarkersOnly}" Margin="0,0,6,0" />
                                 <CheckBox Content="Legenda" IsChecked="{Binding ShowLegend}" Margin="0,0,6,0" />
+                                <CheckBox Content="Koppel X-assen" IsChecked="{Binding LinkXAxisAcrossPanels}" Margin="0,0,6,0" />
                                 <CheckBox Content="Koppel Y-assen" IsChecked="{Binding LinkYAxisAcrossPanels}" />
                             </StackPanel>
                             <CheckBox Content="Open bij toepassen direct in apart venster"
@@ -270,4 +271,3 @@
         </Grid>
     </Grid>
 </UserControl>
-

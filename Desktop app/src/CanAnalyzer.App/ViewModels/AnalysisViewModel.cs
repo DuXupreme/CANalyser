@@ -71,6 +71,9 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private bool _showLegend = true;
 
     [ObservableProperty]
+    private bool _linkXAxisAcrossPanels = true;
+
+    [ObservableProperty]
     private bool _linkYAxisAcrossPanels = true;
 
     [ObservableProperty]
@@ -195,6 +198,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnShowLegendChanged(bool value) => TriggerLiveRebuild();
 
+    partial void OnLinkXAxisAcrossPanelsChanged(bool value)
+    {
+        ApplyAxisSyncConfiguration();
+    }
+
     partial void OnLinkYAxisAcrossPanelsChanged(bool value)
     {
         ApplyAxisSyncConfiguration();
@@ -218,12 +226,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
             AvailableSignals.Add(new SignalSelectionItem(label));
         }
 
-        // Match Python default behavior: auto-select first 4 decoded signals.
-        foreach (var item in AvailableSignals.Take(4))
-        {
-            item.IsSelected = true;
-        }
-
         FilteredSignalsView.Refresh();
 
         MessageSummaries.Clear();
@@ -234,7 +236,17 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
 
-        BuildGroupsFromSelection();
+        PlotGroups.Clear();
+        PlotPanels.Clear();
+        SelectedPlotGroup = null;
+        CursorTime = null;
+        FlagATime = null;
+        FlagBTime = null;
+        CursorInfo = "Cursor: - | A: - | B: - | dt: -";
+        CursorValueInfo = "Signaalwaarde: -";
+        _activeCursorPanel = null;
+        _xAxisSyncService.Bind([]);
+        PresetStatus = "Dataset geladen. Kies signalen en maak plotgroepen om grafieken te tonen.";
     }
 
     public void ApplyViewOptions(PlotViewOptions options)
@@ -254,6 +266,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             StepPlot = options.StepPlot || legacyOptions.Contains("step");
             MarkersOnly = options.MarkersOnly || legacyOptions.Contains("markers");
             ShowLegend = options.ShowLegend;
+            LinkXAxisAcrossPanels = options.LinkXAxisAcrossPanels && !legacyOptions.Contains("unlink_x_sync");
             LinkYAxisAcrossPanels = !legacyOptions.Contains("unlink_y_sync");
             AutoOpenDetachedOnApply = options.AutoOpenDetachedOnApply;
         }
@@ -286,6 +299,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
             list.Add("unlink_y_sync");
         }
 
+        if (!LinkXAxisAcrossPanels)
+        {
+            list.Add("unlink_x_sync");
+        }
+
         if (!UseDownsampling)
         {
             list.Add("disable_downsampling");
@@ -304,6 +322,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             StepPlot = StepPlot,
             MarkersOnly = MarkersOnly,
             ShowLegend = ShowLegend,
+            LinkXAxisAcrossPanels = LinkXAxisAcrossPanels,
             AutoOpenDetachedOnApply = AutoOpenDetachedOnApply,
             PlotOptions = list
         };
@@ -792,7 +811,13 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
             var options = CaptureViewOptions();
             var detachedPanels = _plotModelBuilder.Build(_dataset, groups, options);
-            _plotWindowService.ShowPlots(detachedPanels, options.SubplotHeight, options.MaxPointsPerTrace, options.UseDownsampling);
+            _plotWindowService.ShowPlots(
+                detachedPanels,
+                options.SubplotHeight,
+                options.MaxPointsPerTrace,
+                options.UseDownsampling,
+                LinkXAxisAcrossPanels,
+                LinkYAxisAcrossPanels);
         }
         catch (Exception ex)
         {
@@ -910,7 +935,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private void ApplyAxisSyncConfiguration()
     {
-        _xAxisSyncService.Configure(syncXAxis: true, syncYAxis: LinkYAxisAcrossPanels);
+        _xAxisSyncService.Configure(syncXAxis: LinkXAxisAcrossPanels, syncYAxis: LinkYAxisAcrossPanels);
     }
 
     private void SetFlagAFromCursor()

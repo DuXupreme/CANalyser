@@ -71,6 +71,10 @@
                               IsChecked="{Binding DefaultShowLegend}"
                               Margin="0,0,0,8" />
 
+                    <CheckBox Content="Koppel X-assen standaard"
+                              IsChecked="{Binding DefaultLinkXAxisAcrossPanels}"
+                              Margin="0,0,0,8" />
+
                     <Button Content="Instellingen toepassen en opslaan"
                             Command="{Binding ApplyProgramSettingsCommand}" />
                     <TextBlock Text="{Binding SettingsSaveStatus}" Margin="0,6,0,0" />

@@ -60,6 +60,8 @@ public sealed class PlotViewOptions
 
     public bool ShowLegend { get; set; } = true;
 
+    public bool LinkXAxisAcrossPanels { get; set; } = true;
+
     [JsonPropertyName("plot_options")]
     public List<string> PlotOptions { get; set; } = [];
 }

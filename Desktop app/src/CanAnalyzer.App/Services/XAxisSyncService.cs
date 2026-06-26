@@ -42,7 +42,10 @@ public sealed class XAxisSyncService : IXAxisSyncService
             }
         }
 
-        ApplyInitialSharedRange(_xBindings, ref _isSyncingX);
+        if (_syncXAxis)
+        {
+            ApplyInitialSharedRange(_xBindings, ref _isSyncingX);
+        }
     }
 
     private void OnAxisChanged(object? sender, AxisChangedEventArgs e)
