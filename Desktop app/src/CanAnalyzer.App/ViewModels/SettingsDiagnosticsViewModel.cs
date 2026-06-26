@@ -14,6 +14,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 {
     private readonly IUpdateService _updateService;
     private readonly IMessageDialogService _messageDialogService;
+    private readonly ITelemetryService _telemetryService;
     private Func<Task>? _applySettingsAsync;
 
     [ObservableProperty]
@@ -64,10 +65,33 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private string _updateStatus = string.Empty;
 
-    public SettingsDiagnosticsViewModel(IUpdateService updateService, IMessageDialogService messageDialogService)
+    [ObservableProperty]
+    private bool _telemetryEnabled = true;
+
+    [ObservableProperty]
+    private string _telemetryEndpointUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _telemetryEndpointKey = string.Empty;
+
+    [ObservableProperty]
+    private string _telemetryInstallationId = string.Empty;
+
+    [ObservableProperty]
+    private string _telemetryLocalLogPath = string.Empty;
+
+    [ObservableProperty]
+    private int _telemetryRetentionDays = 180;
+
+    public SettingsDiagnosticsViewModel(
+        IUpdateService updateService,
+        IMessageDialogService messageDialogService,
+        ITelemetryService telemetryService)
     {
         _updateService = updateService;
         _messageDialogService = messageDialogService;
+        _telemetryService = telemetryService;
+        TelemetryLocalLogPath = _telemetryService.LocalLogPath;
         ApplyProgramSettingsCommand = new AsyncRelayCommand(ApplyProgramSettingsAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);
     }
@@ -115,6 +139,12 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         DefaultShowLegend = settings.LastPlotViewOptions.ShowLegend;
         DefaultLinkXAxisAcrossPanels = settings.LastPlotViewOptions.LinkXAxisAcrossPanels;
         DefaultRawMaxRows = settings.LastRawFrameFilter.MaxRows <= 0 ? 50_000 : settings.LastRawFrameFilter.MaxRows;
+        TelemetryEnabled = settings.Telemetry.Enabled;
+        TelemetryEndpointUrl = settings.Telemetry.EndpointUrl;
+        TelemetryEndpointKey = settings.Telemetry.EndpointKey;
+        TelemetryInstallationId = settings.Telemetry.InstallationId;
+        TelemetryLocalLogPath = _telemetryService.LocalLogPath;
+        TelemetryRetentionDays = Math.Clamp(settings.Telemetry.RetentionDays, 30, 730);
     }
 
     public void UpdateDataset(CanDataset dataset)
@@ -149,6 +179,13 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         settings.LastPlotViewOptions.ShowLegend = DefaultShowLegend;
         settings.LastPlotViewOptions.LinkXAxisAcrossPanels = DefaultLinkXAxisAcrossPanels;
         settings.LastRawFrameFilter.MaxRows = Math.Clamp(DefaultRawMaxRows, 1, 2_000_000);
+        settings.Telemetry.Enabled = TelemetryEnabled;
+        settings.Telemetry.EndpointUrl = TelemetryEndpointUrl?.Trim() ?? string.Empty;
+        settings.Telemetry.EndpointKey = TelemetryEndpointKey?.Trim() ?? string.Empty;
+        settings.Telemetry.InstallationId = string.IsNullOrWhiteSpace(TelemetryInstallationId)
+            ? Guid.NewGuid().ToString("N")
+            : TelemetryInstallationId.Trim();
+        settings.Telemetry.RetentionDays = Math.Clamp(TelemetryRetentionDays, 30, 730);
     }
 
     private async Task ApplyProgramSettingsAsync()
@@ -167,12 +204,25 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     {
         if (!_updateService.IsInstalled)
         {
+            await _telemetryService.TrackEventAsync("update_check_skipped", new Dictionary<string, object?>
+            {
+                ["source"] = "manual",
+                ["reason"] = "not_installed"
+            });
             UpdateStatus = "Updates zijn alleen beschikbaar in de geïnstalleerde versie.";
             return;
         }
 
         UpdateStatus = "Bezig met controleren op updates...";
         var result = await _updateService.CheckForUpdatesAsync();
+        await _telemetryService.TrackEventAsync("update_check_completed", new Dictionary<string, object?>
+        {
+            ["source"] = "manual",
+            ["update_available"] = result.UpdateAvailable,
+            ["has_error"] = result.Error is not null,
+            ["current_version"] = _updateService.CurrentVersion,
+            ["new_version"] = result.UpdateAvailable ? result.NewVersion : null
+        });
 
         if (result.Error is not null)
         {
@@ -192,6 +242,11 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
             "Nu downloaden en de app herstarten?");
         if (!confirmed)
         {
+            await _telemetryService.TrackEventAsync("update_prompt_declined", new Dictionary<string, object?>
+            {
+                ["source"] = "manual",
+                ["new_version"] = result.NewVersion
+            });
             UpdateStatus = $"Update {result.NewVersion} beschikbaar, nog niet geïnstalleerd.";
             return;
         }
@@ -204,6 +259,11 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         catch (Exception ex)
         {
             UpdateStatus = $"Update mislukt: {ex.Message}";
+            await _telemetryService.TrackEventAsync("update_apply_failed", new Dictionary<string, object?>
+            {
+                ["source"] = "manual",
+                ["exception_type"] = ex.GetType().Name
+            });
         }
     }
 }

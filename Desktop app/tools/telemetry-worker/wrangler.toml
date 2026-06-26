@@ -1,0 +1,10 @@
+name = "canalyser-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-06-26"
+workers_dev = true
+preview_urls = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "canalyser_telemetry"
+database_id = "2dbf16ef-ec57-4656-82d2-6b4ed0e9e352"

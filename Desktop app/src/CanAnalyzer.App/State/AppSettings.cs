@@ -28,4 +28,6 @@ public sealed class AppSettings
     public PlotViewOptions LastPlotViewOptions { get; set; } = new();
 
     public RawFrameFilterOptions LastRawFrameFilter { get; set; } = new();
+
+    public TelemetryOptions Telemetry { get; set; } = new();
 }

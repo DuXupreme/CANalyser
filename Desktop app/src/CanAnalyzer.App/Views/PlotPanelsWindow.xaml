@@ -21,6 +21,11 @@
             <StackPanel>
                 <TextBlock Text="Aparte plotweergave: box-selectie zoom (linkermuisknop), pannen (rechtermuisknop), muiswiel zoom."
                            Foreground="#333333" />
+                <TextBlock Text="LOD/downsampling actief: alleen de getekende grafiek wordt vereenvoudigd. Brondata, analyse, CANalyser-cursors/flags en export blijven volledig; visuele details tussen representatieve punten kunnen minder exact lijken."
+                           Visibility="{Binding UseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
+                           Foreground="#7A4A00"
+                           TextWrapping="Wrap"
+                           Margin="0,3,0,0" />
                 <WrapPanel Margin="0,6,0,0">
                     <StackPanel Margin="0,0,10,0">
                         <TextBlock Text="Subplot hoogte [px]" />

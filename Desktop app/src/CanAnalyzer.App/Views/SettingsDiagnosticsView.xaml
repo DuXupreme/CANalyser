@@ -11,7 +11,10 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Column="0">
+        <ScrollViewer Grid.Column="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
             <GroupBox Header="Actieve bestanden" Margin="0,0,0,8">
                 <StackPanel Margin="8">
                     <TextBlock Text="Logbestand" FontWeight="SemiBold" />
@@ -66,6 +69,11 @@
                     <CheckBox Content="Snelheidsmodus / downsampling standaard aan"
                               IsChecked="{Binding DefaultUseDownsampling}"
                               Margin="0,0,0,6" />
+                    <TextBlock Text="Downsampling geldt alleen voor de plotweergave. Analyse en export blijven brondata gebruiken; bij detailinspectie kun je inzoomen of LOD uitschakelen."
+                               Visibility="{Binding DefaultUseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
+                               TextWrapping="Wrap"
+                               Foreground="#7A4A00"
+                               Margin="0,0,0,6" />
 
                     <CheckBox Content="Toon legenda standaard"
                               IsChecked="{Binding DefaultShowLegend}"
@@ -80,7 +88,19 @@
                     <TextBlock Text="{Binding SettingsSaveStatus}" Margin="0,6,0,0" />
                 </StackPanel>
             </GroupBox>
+
+            <GroupBox Header="Gebruikstelemetrie" Margin="0,8,0,0">
+                <StackPanel Margin="8">
+                    <CheckBox Content="Gebruikstelemetrie delen"
+                              IsChecked="{Binding TelemetryEnabled}"
+                              Margin="0,0,0,6" />
+
+                    <TextBlock Text="Standaard aan. De app deelt alleen technische events en geaggregeerde tellingen; geen CAN-/DBC-inhoud, bestandsnamen, paden, signaalnamen of frame IDs."
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </GroupBox>
         </StackPanel>
+        </ScrollViewer>
 
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>

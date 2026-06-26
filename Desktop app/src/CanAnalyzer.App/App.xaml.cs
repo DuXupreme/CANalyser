@@ -50,12 +50,26 @@ public partial class App : Application
         }
 
         var updateService = _serviceProvider.GetRequiredService<IUpdateService>();
+        var telemetryService = _serviceProvider.GetRequiredService<ITelemetryService>();
         if (!updateService.IsInstalled)
         {
+            await telemetryService.TrackEventAsync("update_check_skipped", new Dictionary<string, object?>
+            {
+                ["source"] = "startup",
+                ["reason"] = "not_installed"
+            });
             return;
         }
 
         var result = await updateService.CheckForUpdatesAsync();
+        await telemetryService.TrackEventAsync("update_check_completed", new Dictionary<string, object?>
+        {
+            ["source"] = "startup",
+            ["update_available"] = result.UpdateAvailable,
+            ["has_error"] = result.Error is not null,
+            ["current_version"] = updateService.CurrentVersion,
+            ["new_version"] = result.UpdateAvailable ? result.NewVersion : null
+        });
         if (!result.UpdateAvailable)
         {
             return;
@@ -68,6 +82,11 @@ public partial class App : Application
             "Nu downloaden en de app herstarten?");
         if (!confirmed)
         {
+            await telemetryService.TrackEventAsync("update_prompt_declined", new Dictionary<string, object?>
+            {
+                ["source"] = "startup",
+                ["new_version"] = result.NewVersion
+            });
             return;
         }
 
@@ -78,6 +97,11 @@ public partial class App : Application
         catch (Exception ex)
         {
             dialogs.ShowError("Update mislukt", ex.Message);
+            await telemetryService.TrackEventAsync("update_apply_failed", new Dictionary<string, object?>
+            {
+                ["source"] = "startup",
+                ["exception_type"] = ex.GetType().Name
+            });
         }
     }
 
@@ -100,6 +124,7 @@ public partial class App : Application
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IAppSettingsStore, AppSettingsStore>();
+        services.AddSingleton<ITelemetryService, TelemetryService>();
         services.AddSingleton<IPlotModelBuilder, PlotModelBuilder>();
         services.AddSingleton<IXAxisSyncService, XAxisSyncService>();
         services.AddSingleton<IPlotWindowService, PlotWindowService>();

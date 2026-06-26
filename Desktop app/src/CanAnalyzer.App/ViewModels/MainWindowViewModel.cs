@@ -20,6 +20,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageDialogService _messageDialogService;
     private readonly IAppSettingsStore _settingsStore;
+    private readonly ITelemetryService _telemetryService;
     private readonly ILogger<MainWindowViewModel> _logger;
     private CancellationTokenSource? _loadCts;
     private CanDataset? _dataset;
@@ -48,6 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IFileDialogService fileDialogService,
         IMessageDialogService messageDialogService,
         IAppSettingsStore settingsStore,
+        ITelemetryService telemetryService,
         AnalysisViewModel analysis,
         JoystickAnalyticsViewModel joystickAnalytics,
         RawFramesViewModel rawFrames,
@@ -61,6 +63,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _fileDialogService = fileDialogService;
         _messageDialogService = messageDialogService;
         _settingsStore = settingsStore;
+        _telemetryService = telemetryService;
         _logger = logger;
 
         Analysis = analysis;
@@ -71,6 +74,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         DbcEditor = dbcEditor;
 
         LoadedSettings = _settingsStore.Load();
+        _telemetryService.Configure(LoadedSettings.Telemetry);
         LogFilePath = LoadedSettings.LastLogFilePath;
         DbcFilePath = LoadedSettings.LastDbcFilePath;
         Analysis.ApplyViewOptions(LoadedSettings.LastPlotViewOptions);
@@ -86,6 +90,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ExportLayoutCommand = new AsyncRelayCommand(ExportLayoutAsync);
         ImportLayoutCommand = new AsyncRelayCommand(ImportLayoutAsync);
         UpdateCommandStates();
+        _ = _telemetryService.TrackEventAsync("app_started", new Dictionary<string, object?>
+        {
+            ["telemetry_configured"] = LoadedSettings.Telemetry.Enabled,
+            ["app_version_display"] = SettingsDiagnostics.AppVersion
+        });
     }
 
     public AppSettings LoadedSettings { get; }
@@ -205,6 +214,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _loadCts = new CancellationTokenSource();
         UpdateCommandStates();
 
+        var importMode = ImportMode.Strict;
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -233,6 +243,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                     return;
                 }
 
+                importMode = ImportMode.Partial;
                 _dataset = await _analysisPipeline.LoadAsync(LogFilePath, DbcFilePath, ImportMode.Partial, progress, _loadCts.Token);
             }
 
@@ -287,11 +298,31 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 _logger.LogWarning(settingsEx, "Could not persist settings after successful load/decode.");
             }
+
+            _ = _telemetryService.TrackEventAsync("load_decode_completed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["duration_bucket"] = TelemetryBuckets.DurationMilliseconds(stopwatch.ElapsedMilliseconds),
+                ["import_mode"] = importMode.ToString(),
+                ["dataset_completeness"] = _dataset.Completeness.ToString(),
+                ["raw_frame_bucket"] = TelemetryBuckets.Count(_dataset.RawCount),
+                ["extended_frame_bucket"] = TelemetryBuckets.Count(_dataset.ExtendedCount),
+                ["decoded_sample_bucket"] = TelemetryBuckets.Count(_dataset.DecodedSamples.Count),
+                ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount),
+                ["message_bucket"] = TelemetryBuckets.Count(_dataset.MessageSummaries.Count),
+                ["unmatched_frame_bucket"] = TelemetryBuckets.Count(_dataset.Diagnostics.UnmatchedFrameCount),
+                ["decode_error_bucket"] = TelemetryBuckets.Count(_dataset.Diagnostics.DecodeErrorFrameCount)
+            });
         }
         catch (OperationCanceledException)
         {
             StatusText = "Laden/decoderen geannuleerd.";
             ProgressLabel = "Geannuleerd.";
+            _ = _telemetryService.TrackEventAsync("load_decode_cancelled", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["duration_bucket"] = TelemetryBuckets.DurationMilliseconds(stopwatch.ElapsedMilliseconds)
+            });
         }
         catch (Exception ex)
         {
@@ -301,6 +332,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ProgressLabel = "Fout tijdens verwerking.";
             ProgressValue = 100;
             _messageDialogService.ShowError("Verwerking mislukt", ex.Message);
+            _ = _telemetryService.TrackEventAsync("load_decode_failed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["duration_bucket"] = TelemetryBuckets.DurationMilliseconds(stopwatch.ElapsedMilliseconds),
+                ["exception_type"] = ex.GetType().Name
+            });
         }
         finally
         {
@@ -334,6 +371,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             await _csvExportService.ExportDecodedSignalsAsync(filePath, _dataset, CancellationToken.None);
             _messageDialogService.ShowInfo("CSV export", $"Gedecodeerde data opgeslagen:\n{filePath}");
+            _ = _telemetryService.TrackEventAsync("export_decoded_csv", new Dictionary<string, object?>
+            {
+                ["decoded_sample_bucket"] = TelemetryBuckets.Count(_dataset.DecodedSamples.Count),
+                ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount),
+                ["dataset_completeness"] = _dataset.Completeness.ToString()
+            });
         }
         catch (Exception ex)
         {
@@ -383,6 +426,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             SettingsDiagnostics.WriteBackToSettings(LoadedSettings);
+            _telemetryService.Configure(LoadedSettings.Telemetry);
             Analysis.ApplyViewOptions(LoadedSettings.LastPlotViewOptions);
             RawFrames.ApplyFilterOptions(LoadedSettings.LastRawFrameFilter);
 
@@ -394,6 +438,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             StatusText = _dataset is null
                 ? "Programma-instellingen toegepast en opgeslagen."
                 : BuildStatusText(_dataset, Analysis.UseDownsampling, Analysis.MaxPointsPerTrace);
+            _ = _telemetryService.TrackEventAsync("settings_applied", new Dictionary<string, object?>
+            {
+                ["telemetry_enabled"] = LoadedSettings.Telemetry.Enabled,
+                ["telemetry_endpoint_configured"] = !string.IsNullOrWhiteSpace(LoadedSettings.Telemetry.EndpointUrl),
+                ["default_use_downsampling"] = LoadedSettings.LastPlotViewOptions.UseDownsampling,
+                ["default_link_x_axis"] = LoadedSettings.LastPlotViewOptions.LinkXAxisAcrossPanels,
+                ["default_max_points_per_trace"] = LoadedSettings.LastPlotViewOptions.MaxPointsPerTrace
+            });
         }
         catch (Exception ex)
         {
@@ -412,7 +464,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
     {
         var speedModeText = useDownsampling
-            ? $"LOD-weergave actief: maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace; analyses en export gebruiken de bronreeks."
+            ? $"LOD/downsampling actief: de grafiek tekent maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace om grote logs soepel te tonen. " +
+              "Dit verandert de brondata, decode, analyse en CSV-export niet. Implicatie: visuele details tussen representatieve punten kunnen minder exact lijken; zoom in of schakel LOD uit voor detailinspectie."
             : "Volledige zichtbare puntweergave actief; er wordt geen verborgen plotdecimator gebruikt.";
 
         var integrity = dataset.Completeness == DatasetCompleteness.Complete

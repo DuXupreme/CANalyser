@@ -8,8 +8,8 @@
     <Product>CANalyser</Product>
     <Company>Gyrari B.V.</Company>
     <ApplicationIcon>Resources\Branding\canalyser-icon.ico</ApplicationIcon>
-    <Version>2.0.1</Version>
-    <FileVersion>2.0.1.0</FileVersion>
+    <Version>2.0.2</Version>
+    <FileVersion>2.0.2.0</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- WPF genereert zelf een Main uit App.xaml; dit wijst het echte entry-point
          aan zodat Velopack's hook als allereerste kan draaien. -->

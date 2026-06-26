@@ -78,7 +78,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         var entryAssembly = Assembly.GetEntryAssembly();
         var version = entryAssembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
                       ?? entryAssembly?.GetName().Version?.ToString(3)
-                      ?? "2.0.1";
+                      ?? "2.0.2";
         var dataset = await Task.Run(() => _datasetBuilder.Build(
             parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
             combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version), cancellationToken).ConfigureAwait(false);

@@ -99,7 +99,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                 if (oversized > 200_000)
                 {
                     MessageBox.Show(this,
-                        $"Volledige resolutie bevat {oversized:N0} zichtbare punten. Zoom eerst verder in of laat de expliciete LOD-weergave actief.",
+                        $"Volledige resolutie bevat {oversized:N0} zichtbare punten en kan de grafiekweergave laten vastlopen.\n\n" +
+                        "Laat LOD/downsampling actief of zoom eerst verder in. Dit verandert de brondata, analyse, cursors/flags en export niet; alleen de getekende grafiek gebruikt representatieve punten.",
                         "Volledige resolutie geblokkeerd", MessageBoxButton.OK, MessageBoxImage.Information);
                     OnPropertyChanged(nameof(UseDownsampling));
                     return;

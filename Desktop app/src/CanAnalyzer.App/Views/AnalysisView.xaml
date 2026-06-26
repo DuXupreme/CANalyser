@@ -176,6 +176,12 @@
                             <CheckBox Content="Snelheidsmodus (downsampling)"
                                       IsChecked="{Binding UseDownsampling}"
                                       Margin="0,4,0,0" />
+                            <TextBlock Text="Alleen plotweergave: brondata, analyse, cursors/flags en export blijven volledig. Visuele details kunnen minder exact lijken; zoom in of zet dit uit voor detailinspectie."
+                                       Visibility="{Binding UseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
+                                       Width="260"
+                                       Margin="0,3,0,0"
+                                       Foreground="#7A4A00"
+                                       TextWrapping="Wrap" />
                         </StackPanel>
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="Subplot hoogte [px]" />

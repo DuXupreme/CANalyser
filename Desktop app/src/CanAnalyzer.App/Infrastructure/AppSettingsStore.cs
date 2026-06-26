@@ -39,6 +39,23 @@ public sealed class AppSettingsStore : IAppSettingsStore
             settings.RecentLogFiles ??= [];
             settings.LastPlotViewOptions ??= new CanAnalyzer.Core.Domain.PlotViewOptions();
             settings.LastRawFrameFilter ??= new CanAnalyzer.Core.Domain.RawFrameFilterOptions();
+            settings.Telemetry ??= new TelemetryOptions();
+            if (string.IsNullOrWhiteSpace(settings.Telemetry.InstallationId))
+            {
+                settings.Telemetry.InstallationId = Guid.NewGuid().ToString("N");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.Telemetry.EndpointUrl))
+            {
+                settings.Telemetry.EndpointUrl = TelemetryOptions.DefaultEndpointUrl;
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.Telemetry.EndpointKey))
+            {
+                settings.Telemetry.EndpointKey = TelemetryOptions.DefaultEndpointKey;
+            }
+
+            settings.Telemetry.RetentionDays = Math.Clamp(settings.Telemetry.RetentionDays, 30, 730);
             return settings;
         }
         catch
