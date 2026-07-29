@@ -15,25 +15,28 @@ public sealed class UpdateService : IUpdateService
     private const string RepoUrl = "https://github.com/DuXupreme/CANalyser";
 
     private readonly ILogger<UpdateService> _logger;
-    private readonly UpdateManager _manager;
+    private readonly UpdateManager? _manager;
     private UpdateInfo? _pendingUpdate;
 
     public UpdateService(ILogger<UpdateService> logger)
     {
         _logger = logger;
+        _manager = null;
+#if !DEBUG
         _manager = new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
+#endif
     }
 
-    public bool IsInstalled => _manager.IsInstalled;
+    public bool IsInstalled => _manager?.IsInstalled == true;
 
     public string CurrentVersion =>
-        _manager.CurrentVersion?.ToString()
+        _manager?.CurrentVersion?.ToString()
         ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
         ?? "onbekend";
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
-        if (!_manager.IsInstalled)
+        if (_manager?.IsInstalled != true)
         {
             return new UpdateCheckResult(false, null, "Niet via de installer geïnstalleerd; updates zijn uitgeschakeld.");
         }
@@ -57,7 +60,7 @@ public sealed class UpdateService : IUpdateService
 
     public async Task DownloadAndApplyAsync(CancellationToken cancellationToken = default)
     {
-        if (_pendingUpdate is null)
+        if (_pendingUpdate is null || _manager is null)
         {
             return;
         }

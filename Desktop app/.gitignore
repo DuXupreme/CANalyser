@@ -2,12 +2,14 @@ bin/
 obj/
 artifacts/
 .dotnet/
+preview/
 node_modules/
 .wrangler/
 
 *.user
 *.suo
 *.cache
+*_wpftmp.csproj
 .dev.vars
 .env
 coverage.json

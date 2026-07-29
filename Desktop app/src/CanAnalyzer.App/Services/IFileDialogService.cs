@@ -7,6 +7,8 @@ public interface IFileDialogService
 {
     string? PickLogFile(string? initialPath);
 
+    IReadOnlyList<string> PickActuatorCsvFiles(string? initialPath);
+
     string? PickDbcFile(string? initialPath);
 
     string? SaveDbcFile(string? initialPath);

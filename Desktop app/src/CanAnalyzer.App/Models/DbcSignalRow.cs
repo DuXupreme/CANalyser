@@ -1,4 +1,5 @@
 using System.Globalization;
+using CanAnalyzer.Core.Decoding;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CanAnalyzer.App.Models;
@@ -44,6 +45,27 @@ public sealed partial class DbcSignalRow : ObservableObject
     [ObservableProperty]
     private int? _multiplexedValue;
 
+    [ObservableProperty]
+    private bool _isRepairTarget;
+
+    [ObservableProperty]
+    private string _repairHint = string.Empty;
+
+    public DbcSignalValueKind ValueKind { get; set; }
+
+    public IReadOnlyList<DbcMultiplexerRange> MultiplexerRanges { get; set; } = [];
+
+    public string Tooltip
+    {
+        get
+        {
+            var endian = LittleEndian ? "Intel / little-endian" : "Motorola / big-endian";
+            var mux = string.IsNullOrWhiteSpace(MuxText) ? "altijd actief" : $"mux {MuxText}";
+            var details = $"{Name}: startbit {StartBit}, {Length} bit, {endian}, {mux}.";
+            return string.IsNullOrWhiteSpace(RepairHint) ? details : $"{RepairHint}\n\n{details}";
+        }
+    }
+
     /// <summary>
     /// DBC-style multiplex token: empty = normal signal, "M" = multiplexer switch,
     /// an integer = multiplexed group (m&lt;n&gt;).
@@ -84,7 +106,25 @@ public sealed partial class DbcSignalRow : ObservableObject
         }
     }
 
-    partial void OnIsMultiplexerSwitchChanged(bool value) => OnPropertyChanged(nameof(MuxText));
+    partial void OnNameChanged(string value) => OnPropertyChanged(nameof(Tooltip));
 
-    partial void OnMultiplexedValueChanged(int? value) => OnPropertyChanged(nameof(MuxText));
+    partial void OnStartBitChanged(int value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnLengthChanged(int value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnLittleEndianChanged(bool value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnRepairHintChanged(string value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnIsMultiplexerSwitchChanged(bool value)
+    {
+        OnPropertyChanged(nameof(MuxText));
+        OnPropertyChanged(nameof(Tooltip));
+    }
+
+    partial void OnMultiplexedValueChanged(int? value)
+    {
+        OnPropertyChanged(nameof(MuxText));
+        OnPropertyChanged(nameof(Tooltip));
+    }
 }

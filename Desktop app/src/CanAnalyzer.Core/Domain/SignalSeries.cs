@@ -21,6 +21,16 @@ public sealed class SignalSeries
         _value = value;
     }
 
+    public SignalSeries(SignalIdentity identity, long[] timestampNanoseconds, double[] value, string labelOverride)
+        : this(identity, timestampNanoseconds, value)
+    {
+        if (string.IsNullOrWhiteSpace(labelOverride))
+        {
+            throw new ArgumentException("Label override cannot be empty.", nameof(labelOverride));
+        }
+        LabelOverride = labelOverride;
+    }
+
     public SignalSeries(SignalIdentity identity, Func<(long[] Timestamps, double[] Values)> loader)
     {
         Identity = identity;

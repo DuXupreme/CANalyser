@@ -63,6 +63,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private double _responseThresholdPercent = 2.0;
     [ObservableProperty] private string _statusText = "Laad eerst log + DBC en open daarna dit tabblad.";
     [ObservableProperty] private string _actuatorSummary = string.Empty;
+    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private string _busyLabel = "Analyses herberekenen...";
 
     [ObservableProperty] private PlotModel _joystickDensityModel = EmptyPlot("Joystick puntenwolk");
     [ObservableProperty] private PlotModel _trajectoryModel = EmptyPlot("Joystick traject");
@@ -81,7 +83,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     public JoystickAnalyticsViewModel(IJoystickAnalyticsService analyticsService)
     {
         _analyticsService = analyticsService;
-        RecomputeCommand = new RelayCommand(Recompute);
+        RecomputeCommand = new AsyncRelayCommand(RecomputeAsync, () => !IsBusy);
         AutoDetectJoystickPairCommand = new RelayCommand(AutoDetectJoystickSignals);
         AutoDetectActuatorPairCommand = new RelayCommand(AutoDetectButterflySignals);
         AutoDetectDelaySignalsCommand = new RelayCommand(AutoDetectDelaySignals);
@@ -102,7 +104,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     public ObservableCollection<MetricRow> ProfessionalCanMetrics { get; } = [];
     public ObservableCollection<CanTopIdRow> ProfessionalTopIdRows { get; } = [];
     public ObservableCollection<CanCycleTimingRow> ProfessionalCycleRows { get; } = [];
-    public IRelayCommand RecomputeCommand { get; }
+    public IAsyncRelayCommand RecomputeCommand { get; }
     public IRelayCommand AutoDetectJoystickPairCommand { get; }
     public IRelayCommand AutoDetectActuatorPairCommand { get; }
     public IRelayCommand AutoDetectDelaySignalsCommand { get; }
@@ -131,6 +133,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             JoystickPlaybackSpeed = 0.1;
         }
     }
+
+    partial void OnIsBusyChanged(bool value) => RecomputeCommand.NotifyCanExecuteChanged();
+
     partial void OnResponseThresholdPercentChanged(double value)
     {
         if (value < 0.1)
@@ -202,11 +207,16 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         foreach (var label in dataset.SignalLabels) AvailableSignals.Add(label);
         AutoDetectButterflySignals();
         AutoDetectDelaySignals();
-        Recompute();
+        _ = RecomputeAsync();
     }
 
-    private void Recompute()
+    private async Task RecomputeAsync()
     {
+        if (IsBusy)
+        {
+            return;
+        }
+
         if (_dataset is null || _dataset.SignalSeriesByLabel.Count == 0)
         {
             ClearOutputs();
@@ -214,13 +224,32 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return;
         }
 
-        BuildJoystickUsageAnalytics();
-        BuildActuatorTrackingAnalytics();
-        BuildDelayAnalytics();
-        BuildProfessionalCanAnalytics();
+        IsBusy = true;
+        try
+        {
+            BusyLabel = "Joystickanalyse herberekenen...";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildJoystickUsageAnalytics();
+
+            BusyLabel = "Actuatoranalyse herberekenen...";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildActuatorTrackingAnalytics();
+
+            BusyLabel = "Vertragingsanalyse herberekenen...";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildDelayAnalytics();
+
+            BusyLabel = "CAN-overzichten herberekenen...";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildProfessionalCanAnalytics();
         StatusText = _dataset.Completeness == DatasetCompleteness.Partial
             ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
             : "COMPLETE — analyses bijgewerkt.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private void RefreshProfessionalCanAnalyticsFromSettings()
@@ -242,13 +271,13 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
         if (!UseJoystickTimeWindow)
         {
-            Recompute();
+            _ = RecomputeAsync();
             return;
         }
 
         if (JoystickTimeEndSeconds > JoystickTimeStartSeconds)
         {
-            Recompute();
+            _ = RecomputeAsync();
         }
     }
 
@@ -872,7 +901,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             _suppressTimeWindowAutoRecompute = false;
         }
 
-        Recompute();
+        _ = RecomputeAsync();
     }
 
     private bool TryGetSeries(string? label, out SignalSeries series)

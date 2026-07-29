@@ -13,6 +13,7 @@ using System.Windows.Data;
 using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Annotations;
+using System.Windows.Threading;
 
 namespace CanAnalyzer.App.ViewModels;
 
@@ -103,6 +104,12 @@ public sealed partial class AnalysisViewModel : ObservableObject
     [ObservableProperty]
     private string _cursorValueInfo = "Signaalwaarde: -";
 
+    [ObservableProperty]
+    private bool _isBusy;
+
+    [ObservableProperty]
+    private string _busyLabel = "Subplots herberekenen...";
+
     public AnalysisViewModel(
         IPlotModelBuilder plotModelBuilder,
         IFileDialogService fileDialogService,
@@ -131,7 +138,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         MoveGroupDownCommand = new RelayCommand(() => MoveGroup(1));
         AddSelectedSignalsToGroupCommand = new RelayCommand(AddSelectedSignalsToGroup);
         RemoveSignalFromGroupCommand = new RelayCommand<GroupSignalItem?>(RemoveSignalFromGroup);
-        ApplyGroupsCommand = new RelayCommand(ApplyGroupsFromUi);
+        ApplyGroupsCommand = new AsyncRelayCommand(ApplyGroupsFromUiAsync, () => !IsBusy);
         OpenPlotsInWindowCommand = new RelayCommand(OpenPlotsInWindow);
         SetFlagAFromCursorCommand = new RelayCommand(SetFlagAFromCursor);
         SetFlagBFromCursorCommand = new RelayCommand(SetFlagBFromCursor);
@@ -177,7 +184,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public IRelayCommand<GroupSignalItem?> RemoveSignalFromGroupCommand { get; }
 
-    public IRelayCommand ApplyGroupsCommand { get; }
+    public IAsyncRelayCommand ApplyGroupsCommand { get; }
 
     public IRelayCommand OpenPlotsInWindowCommand { get; }
 
@@ -216,6 +223,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
     partial void OnMaxPointsPerTraceChanged(int value) => TriggerLiveRebuild();
 
     partial void OnUseDownsamplingChanged(bool value) => TriggerLiveRebuild();
+
+    partial void OnIsBusyChanged(bool value) => ApplyGroupsCommand.NotifyCanExecuteChanged();
 
     partial void OnSignalSearchTextChanged(string value)
     {
@@ -533,6 +542,77 @@ public sealed partial class AnalysisViewModel : ObservableObject
         if (forcedLod is not null)
         {
             ReportForcedLod(forcedLod, options, detachedWindow: false);
+        }
+    }
+
+    private async Task RebuildPlotsAsync(bool preserveView = false)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        var snapshots = preserveView ? CapturePanelSnapshots() : null;
+        var dataset = _dataset;
+        if (dataset is null)
+        {
+            PlotPanels.Clear();
+            _activeCursorPanel = null;
+            _xAxisSyncService.Bind([]);
+            CursorValueInfo = "Signaalwaarde: -";
+            return;
+        }
+
+        var groups = CapturePlotGroups()
+            .Where(group => group.Signals.Count > 0)
+            .ToList();
+        if (groups.Count == 0)
+        {
+            PlotPanels.Clear();
+            _activeCursorPanel = null;
+            _xAxisSyncService.Bind([]);
+            CursorValueInfo = "Signaalwaarde: -";
+            return;
+        }
+
+        var options = CreateInteractivePlotOptions(groups, CaptureViewOptions(), out var forcedLod);
+        BusyLabel = groups.Count == 1
+            ? "Subplot herberekenen..."
+            : $"{groups.Count} subplots herberekenen...";
+        IsBusy = true;
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            var panels = await Task.Run(() => _plotModelBuilder.Build(dataset, groups, options));
+
+            PlotPanels.Clear();
+            foreach (var panel in panels)
+            {
+                PlotPanels.Add(panel);
+            }
+
+            if (_activeCursorPanel is null || !PlotPanels.Contains(_activeCursorPanel))
+            {
+                _activeCursorPanel = PlotPanels.FirstOrDefault();
+            }
+
+            if (snapshots is not null)
+            {
+                RestorePanelSnapshots(snapshots);
+            }
+
+            ApplyAxisSyncConfiguration();
+            _xAxisSyncService.Bind(PlotPanels.Select(panel => panel.PlotModel));
+            RefreshCursorAnnotations();
+
+            if (forcedLod is not null)
+            {
+                ReportForcedLod(forcedLod, options, detachedWindow: false);
+            }
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -924,9 +1004,9 @@ public sealed partial class AnalysisViewModel : ObservableObject
         }
     }
 
-    private void ApplyGroupsFromUi()
+    private async Task ApplyGroupsFromUiAsync()
     {
-        RebuildPlots();
+        await RebuildPlotsAsync();
         var groups = CapturePlotGroups()
             .Where(static group => group.Signals.Count > 0)
             .ToList();

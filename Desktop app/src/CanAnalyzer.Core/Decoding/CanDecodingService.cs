@@ -20,6 +20,8 @@ public sealed class CanDecodingService : ICanDecodingService
         var summaryCounts = new Dictionary<(uint FrameId, string MessageName), int>();
         var unmatchedCounter = new Dictionary<uint, int>();
         var decodeErrorCounter = new Dictionary<uint, int>();
+        var decodeFailureCounter = new Dictionary<DecodeFailureKey, int>();
+        var decodeFailureKeys = new Dictionary<DecodeFailureIdentity, DecodeFailureKey>();
         var ambiguousCounter = new Dictionary<uint, int>();
 
         var exactMap = new Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>>();
@@ -99,34 +101,70 @@ public sealed class CanDecodingService : ICanDecodingService
 
             Dictionary<string, DecodedSignalValue>? decoded = null;
             DbcMessage? decodedMessage = null;
+            string? failingSignalName = null;
+            var hasUsableCandidate = false;
+            var hasMatchingLengthCandidate = false;
             foreach (var message in candidates)
             {
-                if (message.SuppressDecoding)
+                if (message.SuppressDecoding || message.IsExtendedFrame != isExtended)
                 {
                     continue;
                 }
 
-                if (message.IsExtendedFrame != isExtended)
-                {
-                    continue;
-                }
-
+                hasUsableCandidate = true;
                 if (message.Dlc != frame.PayloadLength)
                 {
                     continue;
                 }
 
-                if (TryDecodeMessage(message, frame.Data, out var strict))
+                hasMatchingLengthCandidate = true;
+                if (TryDecodeMessage(message, frame.Data, out var strict, out var candidateFailingSignal))
                 {
                     decoded = strict;
                     decodedMessage = message;
                     break;
                 }
+
+                failingSignalName ??= candidateFailingSignal;
             }
 
             if (decodedMessage is null || decoded is null)
             {
                 Count(decodeErrorCounter, rawFrameId);
+                var failureKind = !hasUsableCandidate
+                    ? candidates.All(message => message.SuppressDecoding)
+                        ? DecodeFailureKind.SuppressedDefinition
+                        : DecodeFailureKind.FrameFormatMismatch
+                    : !hasMatchingLengthCandidate
+                        ? DecodeFailureKind.DlcMismatch
+                        : DecodeFailureKind.SignalExtraction;
+                var failureIdentity = new DecodeFailureIdentity(
+                    rawFrameId,
+                    isExtended,
+                    failureKind,
+                    frame.PayloadLength,
+                    failingSignalName);
+                if (!decodeFailureKeys.TryGetValue(failureIdentity, out var failureKey))
+                {
+                    var diagnosticCandidates = hasUsableCandidate
+                        ? candidates.Where(message => !message.SuppressDecoding && message.IsExtendedFrame == isExtended)
+                        : candidates;
+                    var materializedCandidates = diagnosticCandidates.ToArray();
+                    failureKey = new DecodeFailureKey(
+                        rawFrameId,
+                        isExtended,
+                        materializedCandidates.FirstOrDefault()?.NormalizedFrameId,
+                        string.Join(
+                            "\u001F",
+                            materializedCandidates.Select(message => message.Name).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)),
+                        failureKind,
+                        frame.PayloadLength,
+                        string.Join(",", materializedCandidates.Select(message => message.Dlc).Distinct().Order()),
+                        failingSignalName);
+                    decodeFailureKeys[failureIdentity] = failureKey;
+                }
+
+                Count(decodeFailureCounter, failureKey);
                 continue;
             }
 
@@ -176,7 +214,8 @@ public sealed class CanDecodingService : ICanDecodingService
                 exactMap,
                 decodeErrorCounter),
             DecodeErrorFrameCount: decodeErrorCounter.Values.Sum(),
-            AmbiguousFrameCount: ambiguousCounter.Values.Sum());
+            AmbiguousFrameCount: ambiguousCounter.Values.Sum(),
+            DecodeFailures: BuildDecodeFailureSummaries(decodeFailureCounter));
 
         progress?.Report(new LoadProgress("Decode klaar.", 90));
         return new DecodeResult(decodedSamples, summaries, diagnostics);
@@ -185,9 +224,11 @@ public sealed class CanDecodingService : ICanDecodingService
     private static bool TryDecodeMessage(
         DbcMessage message,
         byte[] data,
-        out Dictionary<string, DecodedSignalValue> decoded)
+        out Dictionary<string, DecodedSignalValue> decoded,
+        out string? failingSignalName)
     {
         decoded = new Dictionary<string, DecodedSignalValue>(StringComparer.Ordinal);
+        failingSignalName = null;
         if (message.Signals.Count == 0)
         {
             return true;
@@ -199,6 +240,7 @@ public sealed class CanDecodingService : ICanDecodingService
         {
             if (!TryDecodeSignalValue(signal, data, out var value))
             {
+                failingSignalName = signal.Name;
                 return false;
             }
 
@@ -228,6 +270,7 @@ public sealed class CanDecodingService : ICanDecodingService
 
             if (!TryDecodeSignalValue(signal, data, out var value))
             {
+                failingSignalName = signal.Name;
                 return false;
             }
 
@@ -235,6 +278,33 @@ public sealed class CanDecodingService : ICanDecodingService
         }
 
         return decoded.Count > 0;
+    }
+
+    private static IReadOnlyList<DecodeFailureSummary> BuildDecodeFailureSummaries(
+        Dictionary<DecodeFailureKey, int> counter)
+    {
+        return counter
+            .Select(pair => new DecodeFailureSummary(
+                pair.Key.ObservedFrameId,
+                pair.Key.IsExtended,
+                pair.Key.DbcFrameId,
+                string.IsNullOrEmpty(pair.Key.MessageNames)
+                    ? []
+                    : pair.Key.MessageNames.Split('\u001F', StringSplitOptions.RemoveEmptyEntries),
+                pair.Key.Kind,
+                pair.Key.ActualPayloadLength,
+                string.IsNullOrEmpty(pair.Key.ExpectedPayloadLengths)
+                    ? []
+                    : pair.Key.ExpectedPayloadLengths
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(static value => int.Parse(value, System.Globalization.CultureInfo.InvariantCulture))
+                        .ToArray(),
+                pair.Value,
+                pair.Key.FailingSignalName))
+            .OrderByDescending(summary => summary.Count)
+            .ThenBy(summary => summary.ObservedFrameId)
+            .ThenBy(summary => summary.ActualPayloadLength)
+            .ToArray();
     }
 
     private static bool TryDecodeSignalValue(
@@ -461,6 +531,23 @@ public sealed class CanDecodingService : ICanDecodingService
         var pgnText = pgn.HasValue ? $" | PGN 0x{pgn.Value:X}" : string.Empty;
         return $"- {message.Name} : raw=0x{rawId:X} -> norm=0x{normalized:X} | {(message.IsExtendedFrame ? "extended" : "standard")}{pgnText}";
     }
+
+    private readonly record struct DecodeFailureKey(
+        uint ObservedFrameId,
+        bool IsExtended,
+        uint? DbcFrameId,
+        string MessageNames,
+        DecodeFailureKind Kind,
+        int ActualPayloadLength,
+        string ExpectedPayloadLengths,
+        string? FailingSignalName);
+
+    private readonly record struct DecodeFailureIdentity(
+        uint ObservedFrameId,
+        bool IsExtended,
+        DecodeFailureKind Kind,
+        int ActualPayloadLength,
+        string? FailingSignalName);
 
     private static void Count<TKey>(Dictionary<TKey, int> dictionary, TKey key)
         where TKey : notnull

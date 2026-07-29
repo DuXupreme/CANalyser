@@ -47,4 +47,51 @@ public static class DbcBitLayout
 
         return bits;
     }
+
+    /// <summary>
+    /// Returns whether two signals can be present in the same decoded payload.
+    /// Signals on disjoint multiplexer values or ranges may reuse payload bits safely.
+    /// </summary>
+    public static bool CanBeActiveTogether(
+        bool leftIsMultiplexer,
+        IReadOnlyList<int> leftMultiplexerIds,
+        IReadOnlyList<DbcMultiplexerRange> leftMultiplexerRanges,
+        bool rightIsMultiplexer,
+        IReadOnlyList<int> rightMultiplexerIds,
+        IReadOnlyList<DbcMultiplexerRange> rightMultiplexerRanges)
+    {
+        if (leftIsMultiplexer || rightIsMultiplexer)
+        {
+            return true;
+        }
+
+        var leftIntervals = GetMuxIntervals(leftMultiplexerIds, leftMultiplexerRanges);
+        var rightIntervals = GetMuxIntervals(rightMultiplexerIds, rightMultiplexerRanges);
+        if (leftIntervals.Count == 0 || rightIntervals.Count == 0)
+        {
+            return true;
+        }
+
+        return leftIntervals.Any(leftInterval =>
+            rightIntervals.Any(rightInterval =>
+                leftInterval.Minimum <= rightInterval.Maximum &&
+                rightInterval.Minimum <= leftInterval.Maximum));
+    }
+
+    private static IReadOnlyList<(uint Minimum, uint Maximum)> GetMuxIntervals(
+        IReadOnlyList<int> multiplexerIds,
+        IReadOnlyList<DbcMultiplexerRange> multiplexerRanges)
+    {
+        if (multiplexerRanges.Count > 0)
+        {
+            return multiplexerRanges
+                .Select(static range => (range.Minimum, range.Maximum))
+                .ToList();
+        }
+
+        return multiplexerIds
+            .Where(static id => id >= 0)
+            .Select(static id => ((uint)id, (uint)id))
+            .ToList();
+    }
 }

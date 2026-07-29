@@ -6,7 +6,10 @@
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> De huidige stabiele versie is `2.0.2`. De 10M-framebenchmark op de doelhardware en brede eindgebruiker-acceptatie blijven aanbevolen als doorlopende validatie.
+> De huidige stabiele versie is `2.0.2`. Release candidate `2.1.0-rc.1` voegt
+> DBC-herstelbegeleiding, Actuator Testbench CSV-import en een responsieve
+> laadindicator toe. Gebruik de RC eerst voor interne acceptatie voordat
+> `2.1.0` als stabiele update wordt gepubliceerd.
 
 ## 1. Data-integriteitscontract
 
@@ -37,6 +40,9 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export
+- Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
+  alignment on the first STEP target transition, and ready-made overlays for
+  position, error, PWM, current, bus voltage, and power (no DBC required)
 - Message summary table
 - Debug/error details panel
 - Performance strategy:
@@ -111,6 +117,15 @@ Why OxyPlot (instead of ScottPlot): this migration prioritizes MVVM-first bindin
    - `dotnet build CanAnalyzer.sln -c Release`
 3. Run:
    - `dotnet run --project src/CanAnalyzer.App/CanAnalyzer.App.csproj`
+
+Actuator Testbench runs vergelijken:
+
+1. Kies in de toolbar **Actuator CSV** en lees de korte uitlegpopup.
+2. Selecteer meerdere `actuator_*.csv`-logs tegelijk.
+3. CANalyser lijnt per bestand de eerste STEP-doelwijziging uit op `t=0`.
+4. De Analyse-tab opent automatisch groepen voor positie, fout, PWM, stroom,
+   busspanning en vermogen. Klik legendanamen om traces aan/uit te zetten.
+5. Negatieve tijd is de aanloop vóór de stap. Een DBC is niet nodig.
 
 Tests:
 

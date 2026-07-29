@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:controls="clr-namespace:CanAnalyzer.App.Controls"
              xmlns:oxy="http://oxyplot.org/wpf"
              mc:Ignorable="d">
     <Grid Margin="8">
@@ -273,6 +274,39 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+
+            <StackPanel Grid.Row="1"
+                        Panel.ZIndex="2"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsHitTestVisible="False">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding DataContext.IsBusyIndicatorVisible, RelativeSource={RelativeSource AncestorType=Window}}"
+                                               Value="True" />
+                                    <Condition Binding="{Binding PlotPanels.Count}" Value="0" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <controls:TwistedWireLoader Width="156"
+                                            Height="64"
+                                            HorizontalAlignment="Center"
+                                            StrokeThickness="7"
+                                            IsActive="{Binding DataContext.IsBusyIndicatorVisible, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <TextBlock Text="{Binding DataContext.ActiveProgressLabel, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           Foreground="#444444" />
+            </StackPanel>
 
         </Grid>
     </Grid>

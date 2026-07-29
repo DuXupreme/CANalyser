@@ -78,7 +78,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         var entryAssembly = Assembly.GetEntryAssembly();
         var version = entryAssembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
                       ?? entryAssembly?.GetName().Version?.ToString(3)
-                      ?? "2.0.2";
+                      ?? "2.1.0-rc.1";
         var dataset = await Task.Run(() => _datasetBuilder.Build(
             parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
             combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version), cancellationToken).ConfigureAwait(false);
@@ -88,16 +88,24 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
 
     private static IReadOnlyList<ImportIssue> BuildDecodeIssues(DecoderDiagnostics diagnostics)
     {
-        var issues = new List<ImportIssue>(2);
+        var issues = new List<ImportIssue>();
         if (diagnostics.DecodeErrorFrameCount > 0)
         {
-            issues.Add(new ImportIssue(
-                ImportIssueSeverity.Error,
-                "DECODE_ERROR",
-                "DBC decoder",
-                -1,
-                $"{diagnostics.DecodeErrorFrameCount:N0} frame(s) konden niet lossless worden gedecodeerd; er zijn geen vervangende waarden aangemaakt.",
-                string.Empty));
+            var failures = diagnostics.DecodeFailures ?? [];
+            if (failures.Count == 0)
+            {
+                issues.Add(new ImportIssue(
+                    ImportIssueSeverity.Error,
+                    "DECODE_ERROR",
+                    "DBC decoder",
+                    -1,
+                    $"{diagnostics.DecodeErrorFrameCount:N0} frame(s) konden niet lossless worden gedecodeerd; er zijn geen vervangende waarden aangemaakt.",
+                    string.Empty));
+            }
+            else
+            {
+                issues.AddRange(failures.Select(BuildDecodeFailureIssue));
+            }
         }
 
         if (diagnostics.AmbiguousFrameCount > 0)
@@ -112,6 +120,38 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         }
 
         return issues;
+    }
+
+    private static ImportIssue BuildDecodeFailureIssue(DecodeFailureSummary failure)
+    {
+        var messageName = failure.MessageNames.FirstOrDefault() ?? "Onbekend DBC-frame";
+        var dbcFrameId = failure.DbcFrameId ?? failure.ObservedFrameId;
+        var prefix = $"{messageName} (0x{dbcFrameId:X}): ";
+        var message = failure.Kind switch
+        {
+            DecodeFailureKind.DlcMismatch =>
+                $"{prefix}{failure.Count:N0} frame(s) hebben payloadlengte {failure.ActualPayloadLength} byte(s); " +
+                $"de DBC verwacht {string.Join(", ", failure.ExpectedPayloadLengths)} byte(s). " +
+                $"De waargenomen log-ID is 0x{failure.ObservedFrameId:X}.",
+            DecodeFailureKind.SignalExtraction =>
+                $"{prefix}{failure.Count:N0} frame(s) hebben de verwachte payloadlengte, maar " +
+                (string.IsNullOrWhiteSpace(failure.FailingSignalName)
+                    ? "geen actief signaal kon betrouwbaar uit de payload worden gelezen."
+                    : $"signaal {failure.FailingSignalName} kon niet uit de payload worden gelezen."),
+            DecodeFailureKind.SuppressedDefinition =>
+                $"{prefix}{failure.Count:N0} frame(s) zijn niet gedecodeerd omdat de bijbehorende DBC-definitie door de semantische validator is geblokkeerd.",
+            DecodeFailureKind.FrameFormatMismatch =>
+                $"{prefix}{failure.Count:N0} frame(s) hebben een ander standaard/extended-formaat dan de bijbehorende DBC-definitie.",
+            _ => $"{prefix}{failure.Count:N0} frame(s) konden niet lossless worden gedecodeerd."
+        };
+
+        return new ImportIssue(
+            ImportIssueSeverity.Error,
+            "DECODE_ERROR",
+            "DBC decoder",
+            -1,
+            message,
+            string.Empty);
     }
 
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)

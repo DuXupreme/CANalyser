@@ -1,6 +1,7 @@
 <Window x:Class="CanAnalyzer.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:CanAnalyzer.App.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:views="clr-namespace:CanAnalyzer.App.Views"
@@ -14,6 +15,7 @@
             <MenuItem Header="_Bestand">
                 <MenuItem Header="Open _CAN-log..." Command="{Binding BrowseLogFileCommand}" />
                 <MenuItem Header="Open _DBC..." Command="{Binding BrowseDbcFileCommand}" />
+                <MenuItem Header="_Actuator CSV..." Command="{Binding ImportActuatorCsvCommand}" />
                 <Separator />
                 <MenuItem Header="_Laden / Decoderen" Command="{Binding LoadAndDecodeCommand}" />
                 <MenuItem Header="_Annuleren" Command="{Binding CancelCommand}" />
@@ -40,6 +42,8 @@
                 <Separator />
                 <Button Content="Open Log" Command="{Binding BrowseLogFileCommand}" />
                 <Button Content="Open DBC" Command="{Binding BrowseDbcFileCommand}" />
+                <Button Content="Actuator CSV" Command="{Binding ImportActuatorCsvCommand}"
+                        ToolTip="Selecteer meerdere Actuator Testbench CSV-logs; CANalyser lijnt hun eerste doelstap uit op t=0." />
                 <Separator />
                 <Button Content="Laden/Decoderen" Command="{Binding LoadAndDecodeCommand}" />
                 <Button Content="Annuleren" Command="{Binding CancelCommand}" />
@@ -52,18 +56,40 @@
 
         <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
-                <TextBlock Text="{Binding ProgressLabel}" />
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                    <controls:TwistedWireLoader Width="52"
+                                                Height="24"
+                                                Margin="0,0,0,2"
+                                                HorizontalAlignment="Center"
+                                                StrokeThickness="3.8"
+                                                IsActive="{Binding IsBusyIndicatorVisible}"
+                                                Visibility="{Binding IsBusyIndicatorVisible, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    <TextBlock Text="{Binding ActiveProgressLabel}"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center" />
+                </StackPanel>
             </StatusBarItem>
             <Separator />
             <StatusBarItem Width="220">
                 <ProgressBar Height="16"
                              Minimum="0"
                              Maximum="100"
+                             IsIndeterminate="{Binding IsBackgroundAnalysisBusy}"
                              Value="{Binding ProgressValue}" />
             </StatusBarItem>
             <Separator />
             <StatusBarItem>
-                <TextBlock Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Fouten oplossen"
+                            Command="{Binding RepairPartialImportCommand}"
+                            Visibility="{Binding HasRepairablePartialImport, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Margin="0,0,10,0"
+                            Padding="10,2"
+                            ToolTip="Open de herstelwizard voor deze PARTIAL-import." />
+                    <TextBlock Text="{Binding StatusText}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
             </StatusBarItem>
         </StatusBar>
 

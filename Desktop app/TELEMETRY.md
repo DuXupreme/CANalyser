@@ -50,7 +50,7 @@ Each line/request contains:
   "event_id": "random-guid",
   "event_name": "load_decode_completed",
   "timestamp_utc": "2026-06-26T12:00:00.0000000+00:00",
-  "app_version": "2.0.2",
+  "app_version": "2.1.0-rc.1",
   "installation_id": "stable-random-install-id",
   "session_id": "random-guid-for-this-run",
   "os_description": "Microsoft Windows ...",

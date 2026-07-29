@@ -104,6 +104,23 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void DbcBitLayout_OnlyConflictsOnCompatibleMuxPaths()
+    {
+        Assert.False(DbcBitLayout.CanBeActiveTogether(
+            false, [0], [],
+            false, [128], []));
+        Assert.True(DbcBitLayout.CanBeActiveTogether(
+            false, [128], [],
+            false, [128], []));
+        Assert.True(DbcBitLayout.CanBeActiveTogether(
+            false, [], [],
+            false, [128], []));
+        Assert.False(DbcBitLayout.CanBeActiveTogether(
+            false, [], [new DbcMultiplexerRange("Mode", 0, 10)],
+            false, [], [new DbcMultiplexerRange("Mode", 20, 30)]));
+    }
+
+    [Fact]
     public async Task DbcWriter_RoundTripsThroughLoader()
     {
         var engine = new DbcMessage

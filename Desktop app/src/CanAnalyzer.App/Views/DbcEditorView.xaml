@@ -1,4 +1,5 @@
 <UserControl x:Class="CanAnalyzer.App.Views.DbcEditorView"
+             x:Name="Root"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -8,6 +9,43 @@
     <UserControl.Resources>
         <infra:FlexibleDoubleConverter x:Key="FlexDouble" />
         <infra:BooleanNegationConverter x:Key="NotBool" />
+        <Style x:Key="RepairRowStyle" TargetType="DataGridRow">
+            <Setter Property="ToolTip" Value="{Binding Tooltip}" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="120" />
+            <Setter Property="ToolTipService.ShowDuration" Value="60000" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#EAF2FB" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsRepairTarget}" Value="True">
+                    <Setter Property="Background" Value="#FFF0D6" />
+                    <Setter Property="BorderBrush" Value="#EC7A2D" />
+                    <Setter Property="BorderThickness" Value="3,0,0,0" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsRepairTarget}" Value="True" />
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="#EC7A2D" />
+                    <Setter Property="Foreground" Value="White" />
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="RepairCellStyle" TargetType="DataGridCell">
+            <Setter Property="ToolTip" Value="{Binding Tooltip}" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="120" />
+            <Setter Property="ToolTipService.ShowDuration" Value="60000" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsRepairTarget}" Value="True">
+                    <Setter Property="Background" Value="#FFE1B5" />
+                    <Setter Property="Foreground" Value="#4A2200" />
+                    <Setter Property="BorderBrush" Value="#EC7A2D" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="8">
@@ -19,6 +57,7 @@
 
         <!-- Toolbar -->
         <Border Grid.Row="0"
+                Visibility="{Binding FileToolbarVisibility, ElementName=Root}"
                 BorderBrush="#DDDDDD"
                 BorderThickness="1"
                 CornerRadius="4"
@@ -36,6 +75,8 @@
 
         <TextBlock Grid.Row="1"
                    Text="{Binding StatusText}"
+                   ToolTip="{Binding StatusText}"
+                   ToolTipService.InitialShowDelay="120"
                    Foreground="#444444"
                    TextTrimming="CharacterEllipsis"
                    Margin="2,0,0,6" />
@@ -50,9 +91,12 @@
 
             <!-- Frame list -->
             <GroupBox Grid.Column="0" Header="Frames (berichten)">
-                <DataGrid ItemsSource="{Binding Frames}"
+                <DataGrid x:Name="FramesGrid"
+                          ItemsSource="{Binding Frames}"
                           IsReadOnly="{Binding IsReadOnly}"
                           SelectedItem="{Binding SelectedFrame, Mode=TwoWay}"
+                          RowStyle="{StaticResource RepairRowStyle}"
+                          CellStyle="{StaticResource RepairCellStyle}"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           HeadersVisibility="Column"
@@ -121,26 +165,53 @@
                 </DockPanel>
 
                 <!-- Signals grid -->
-                <DataGrid Grid.Row="2"
+                <DataGrid x:Name="SignalsGrid"
+                          Grid.Row="2"
                           IsReadOnly="{Binding IsReadOnly}"
                           ItemsSource="{Binding SelectedFrame.Signals}"
                           SelectedItem="{Binding SelectedSignal, Mode=TwoWay}"
+                          RowStyle="{StaticResource RepairRowStyle}"
+                          CellStyle="{StaticResource RepairCellStyle}"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           HeadersVisibility="Column"
                           GridLinesVisibility="All">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Naam" Binding="{Binding Name}" Width="150" />
-                        <DataGridTextColumn Header="Start" Binding="{Binding StartBit}" Width="50" />
-                        <DataGridTextColumn Header="Len" Binding="{Binding Length}" Width="45" />
-                        <DataGridCheckBoxColumn Header="Intel" Binding="{Binding LittleEndian}" Width="45" />
-                        <DataGridCheckBoxColumn Header="±" Binding="{Binding Signed}" Width="35" />
-                        <DataGridTextColumn Header="Scale" Binding="{Binding Scale, Converter={StaticResource FlexDouble}}" Width="65" />
+                        <DataGridTextColumn Binding="{Binding StartBit}" Width="64">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="Startbit" ToolTip="Eerste payloadbit van het signaal, volgens de gekozen bytevolgorde." />
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding Length}" Width="58">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="Lengte" ToolTip="Aantal bits dat dit signaal gebruikt." />
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
+                        <DataGridCheckBoxColumn Binding="{Binding LittleEndian}" Width="52">
+                            <DataGridCheckBoxColumn.Header>
+                                <TextBlock Text="Intel" ToolTip="Aangevinkt: Intel/little-endian. Uit: Motorola/big-endian." />
+                            </DataGridCheckBoxColumn.Header>
+                        </DataGridCheckBoxColumn>
+                        <DataGridCheckBoxColumn Binding="{Binding Signed}" Width="58">
+                            <DataGridCheckBoxColumn.Header>
+                                <TextBlock Text="Signed" ToolTip="Aangevinkt betekent dat negatieve ruwe waarden zijn toegestaan." />
+                            </DataGridCheckBoxColumn.Header>
+                        </DataGridCheckBoxColumn>
+                        <DataGridTextColumn Binding="{Binding Scale, Converter={StaticResource FlexDouble}}" Width="65">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="Factor" ToolTip="Fysieke waarde = ruwe waarde × factor + offset." />
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
                         <DataGridTextColumn Header="Offset" Binding="{Binding Offset, Converter={StaticResource FlexDouble}}" Width="65" />
                         <DataGridTextColumn Header="Min" Binding="{Binding Minimum, Converter={StaticResource FlexDouble}}" Width="65" />
                         <DataGridTextColumn Header="Max" Binding="{Binding Maximum, Converter={StaticResource FlexDouble}}" Width="65" />
                         <DataGridTextColumn Header="Unit" Binding="{Binding Unit}" Width="60" />
-                        <DataGridTextColumn Header="Mux" Binding="{Binding MuxText}" Width="50" />
+                        <DataGridTextColumn Binding="{Binding MuxText}" Width="58">
+                            <DataGridTextColumn.Header>
+                                <TextBlock Text="Mux" ToolTip="M = mux-schakelaar; een getal = alleen actief bij die muxwaarde." />
+                            </DataGridTextColumn.Header>
+                        </DataGridTextColumn>
                     </DataGrid.Columns>
                 </DataGrid>
 
@@ -156,7 +227,10 @@
                 </Border>
 
                 <!-- Bit layout -->
-                <GroupBox Grid.Row="4" Header="Bit-layout (LSB0 — byte 0 boven, MSB links)">
+                <Expander x:Name="BitLayoutExpander"
+                          Grid.Row="4"
+                          Header="Bit-layout tonen (LSB0 - byte 0 boven, MSB links)"
+                          IsExpanded="False">
                     <StackPanel Orientation="Horizontal" Margin="6">
                         <!-- Byte labels -->
                         <StackPanel>
@@ -195,9 +269,21 @@
                                                 Margin="1"
                                                 CornerRadius="2"
                                                 Background="{Binding FillBrush}"
-                                                BorderBrush="#BBBBBB"
-                                                BorderThickness="1"
-                                                ToolTip="{Binding Tooltip}">
+                                                ToolTip="{Binding Tooltip}"
+                                                ToolTipService.InitialShowDelay="100"
+                                                ToolTipService.ShowDuration="60000">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderBrush" Value="#BBBBBB" />
+                                                    <Setter Property="BorderThickness" Value="1" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelectedSignal}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#B94B00" />
+                                                            <Setter Property="BorderThickness" Value="2" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <TextBlock Text="{Binding BitLabel}"
                                                        FontSize="9"
                                                        HorizontalAlignment="Center"
@@ -207,13 +293,13 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="Tip: kleur = signaal, rood = overlap. Beweeg de muis over een cel voor byte.bit en signaalnaam."
+                            <TextBlock Text="Oranje = geselecteerd  |  rood = gelijktijdig conflict  |  gedeelde bits in gescheiden muxpaden zijn toegestaan"
                                        FontSize="10"
                                        Foreground="#888"
                                        Margin="0,4,0,0" />
                         </StackPanel>
                     </StackPanel>
-                </GroupBox>
+                </Expander>
             </Grid>
         </Grid>
     </Grid>

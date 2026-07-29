@@ -122,6 +122,7 @@ public partial class App : Application
 
         services.AddSingleton<IFileDialogService, FileDialogService>();
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
+        services.AddSingleton<IImportRepairWizardService, ImportRepairWizardService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IAppSettingsStore, AppSettingsStore>();
         services.AddSingleton<ITelemetryService, TelemetryService>();
@@ -142,6 +143,8 @@ public partial class App : Application
         services.AddSingleton<IDatasetBuilder, DatasetBuilder>();
         services.AddSingleton<IRawFrameFilterService, RawFrameFilterService>();
         services.AddSingleton<IJoystickAnalyticsService, JoystickAnalyticsService>();
+        services.AddSingleton<IActuatorCsvImportService, ActuatorCsvImportService>();
+        services.AddSingleton<IImportRepairService, ImportRepairService>();
         services.AddSingleton<ICsvExportService, CsvExportService>();
         services.AddSingleton<IPresetSerializer, PresetSerializer>();
         services.AddSingleton<ICanAnalysisPipeline, CanAnalysisPipeline>();

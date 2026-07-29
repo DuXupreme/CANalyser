@@ -38,6 +38,9 @@ public sealed partial class DbcBitCell : ObservableObject
     [ObservableProperty]
     private bool _isOverlap;
 
+    [ObservableProperty]
+    private bool _isSelectedSignal;
+
     /// <summary>Hover text describing which signal (if any) owns the bit.</summary>
     public string Tooltip => string.IsNullOrEmpty(OwnerLabel)
         ? $"bit {Lsb0Index} (byte {ByteIndex}.{7 - Column}) — vrij"

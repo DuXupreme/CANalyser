@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Windows.Media;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.Core.Decoding;
+using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
 using CanAnalyzer.Core.Utilities;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -20,6 +22,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 {
     private static readonly Brush[] Palette = CreatePalette();
     private static readonly Brush OverlapBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0x52, 0x52)));
+    private static readonly Brush SelectedSignalBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xC4, 0x76)));
     private static readonly Brush EmptyBrush = Freeze(new SolidColorBrush(Color.FromRgb(0xF5, 0xF5, 0xF5)));
 
     private readonly IDbcLoader _dbcLoader;
@@ -32,6 +35,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private readonly DbcBitCell[] _cellByLsb0 = new DbcBitCell[64];
     private readonly List<DbcSignalRow> _attachedSignals = [];
     private DbcFrameRow? _attachedFrame;
+    private string? _repairSourcePath;
 
     [ObservableProperty]
     private DbcFrameRow? _selectedFrame;
@@ -50,6 +54,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isReadOnly;
+
+    [ObservableProperty]
+    private bool _hasUnsavedChanges;
 
     public DbcEditorViewModel(
         IDbcLoader dbcLoader,
@@ -120,6 +127,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     partial void OnSelectedSignalChanged(DbcSignalRow? value)
     {
         RemoveSignalCommand.NotifyCanExecuteChanged();
+        RecomputeLayout();
     }
 
     partial void OnIsReadOnlyChanged(bool value)
@@ -143,9 +151,11 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         SelectedFrame = null;
         Frames.Clear();
         CurrentFilePath = null;
+        _repairSourcePath = null;
         IsReadOnly = false;
         StatusText = "Nieuwe lege database.";
         UpdateValidation();
+        HasUnsavedChanges = true;
     }
 
     private async Task OpenDbcAsync()
@@ -167,7 +177,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             var database = await _dbcLoader.LoadAsync(path, CancellationToken.None);
             LoadFromDatabase(database);
             CurrentFilePath = path;
+            _repairSourcePath = null;
             IsReadOnly = !database.IsLosslessWritable;
+            HasUnsavedChanges = false;
             StatusText = IsReadOnly
                 ? $"ALLEEN-LEZEN: {path} — deze geïmporteerde DBC bevat constructies die de editor niet aantoonbaar lossless kan terugschrijven."
                 : $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
@@ -176,6 +188,113 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         {
             _logger.LogError(ex, "DBC open failed");
             _messageDialogService.ShowError("Openen mislukt", ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<ImportIssue>> LoadForRepairAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var database = await _dbcLoader.LoadAsync(path, cancellationToken);
+        LoadFromDatabase(database);
+        _repairSourcePath = Path.GetFullPath(path);
+        CurrentFilePath = GetDefaultRepairPath(path);
+        IsReadOnly = false;
+        HasUnsavedChanges = false;
+        StatusText =
+            $"HERSTELKOPIE van {path} - het origineel blijft ongewijzigd. " +
+            "Niet-ondersteunde opmerkingen/attributen worden niet overgenomen in de genormaliseerde kopie.";
+        return database.Issues;
+    }
+
+    public async Task<IReadOnlyList<ImportIssue>> SaveRepairCopyAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (Frames.Count == 0)
+        {
+            throw new InvalidOperationException("De DBC bevat geen frames om op te slaan.");
+        }
+
+        var destination = Path.GetFullPath(path);
+        if (_repairSourcePath is not null &&
+            string.Equals(destination, _repairSourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("De herstelkopie mag de oorspronkelijke DBC niet overschrijven.");
+        }
+
+        await _dbcWriter.WriteAsync(BuildDatabase(), destination, cancellationToken);
+        var validation = await _dbcLoader.LoadAsync(destination, cancellationToken);
+        CurrentFilePath = destination;
+        HasUnsavedChanges = false;
+        var errors = validation.Issues
+            .Where(static issue => issue.Severity == ImportIssueSeverity.Error)
+            .ToArray();
+        StatusText = errors.Length == 0
+            ? $"Gecorrigeerde DBC opgeslagen en gevalideerd: {destination}"
+            : $"Tussenkopie opgeslagen: {destination} - nog {errors.Length:N0} DBC-fout(en).";
+        return errors;
+    }
+
+    public bool SelectRelatedFrame(
+        uint? frameId,
+        bool? isExtended,
+        string? frameName,
+        IReadOnlyCollection<string> signalNames,
+        string repairHint)
+    {
+        ClearRepairTargets();
+        var frame = Frames.FirstOrDefault(candidate =>
+                        frameId.HasValue &&
+                        candidate.FrameId == frameId.Value &&
+                        (!isExtended.HasValue || candidate.IsExtended == isExtended.Value))
+                    ?? Frames.FirstOrDefault(candidate =>
+                        !string.IsNullOrWhiteSpace(frameName) &&
+                        string.Equals(candidate.Name, frameName, StringComparison.Ordinal));
+        if (frame is null)
+        {
+            return false;
+        }
+
+        frame.IsRepairTarget = true;
+        frame.RepairHint = repairHint;
+        SelectedFrame = frame;
+        if (signalNames.Count > 0)
+        {
+            var names = signalNames.ToHashSet(StringComparer.Ordinal);
+            var matches = frame.Signals.Where(candidate => names.Contains(candidate.Name)).ToList();
+            foreach (var signal in matches)
+            {
+                signal.IsRepairTarget = true;
+                signal.RepairHint = repairHint;
+            }
+
+            SelectedSignal = signalNames.Count == 1 && matches.Count > 1
+                ? matches[^1]
+                : matches.FirstOrDefault();
+        }
+
+        return true;
+    }
+
+    public void ClearRepairSelection()
+    {
+        ClearRepairTargets();
+        SelectedSignal = null;
+        SelectedFrame = null;
+    }
+
+    public void ClearRepairTargets()
+    {
+        foreach (var frame in Frames)
+        {
+            frame.IsRepairTarget = false;
+            frame.RepairHint = string.Empty;
+            foreach (var signal in frame.Signals)
+            {
+                signal.IsRepairTarget = false;
+                signal.RepairHint = string.Empty;
+            }
         }
     }
 
@@ -206,6 +325,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             var database = BuildDatabase();
             await _dbcWriter.WriteAsync(database, path, CancellationToken.None);
             CurrentFilePath = path;
+            HasUnsavedChanges = false;
             var signalCount = Frames.Sum(f => f.Signals.Count);
             StatusText = $"Opgeslagen: {path}  ({Frames.Count} frames, {signalCount} signalen)";
             _messageDialogService.ShowInfo(
@@ -279,6 +399,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private void OnFramesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        HasUnsavedChanges = true;
         SaveDbcCommand.NotifyCanExecuteChanged();
         AddFrameCommand.NotifyCanExecuteChanged();
         RemoveFrameCommand.NotifyCanExecuteChanged();
@@ -318,6 +439,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private void OnSelectedSignalsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        HasUnsavedChanges = true;
         foreach (var signal in _attachedSignals)
         {
             signal.PropertyChanged -= OnSignalRowChanged;
@@ -340,6 +462,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private void OnFramePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        HasUnsavedChanges = true;
         if (e.PropertyName is nameof(DbcFrameRow.Dlc)
             or nameof(DbcFrameRow.FrameId)
             or nameof(DbcFrameRow.IsExtended)
@@ -351,6 +474,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private void OnSignalRowChanged(object? sender, PropertyChangedEventArgs e)
     {
+        HasUnsavedChanges = true;
         if (e.PropertyName is nameof(DbcSignalRow.StartBit)
             or nameof(DbcSignalRow.Length)
             or nameof(DbcSignalRow.LittleEndian)
@@ -368,6 +492,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             cell.FillBrush = EmptyBrush;
             cell.OwnerLabel = string.Empty;
             cell.IsOverlap = false;
+            cell.IsSelectedSignal = false;
         }
 
         var frame = SelectedFrame;
@@ -376,9 +501,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             return;
         }
 
-        var ownerIndex = new int[64];
-        Array.Fill(ownerIndex, -1);
-        var overlap = new bool[64];
+        var ownersByBit = Enumerable.Range(0, 64).Select(static _ => new List<int>()).ToArray();
         var names = new string[frame.Signals.Count];
 
         for (var i = 0; i < frame.Signals.Count; i++)
@@ -392,31 +515,47 @@ public sealed partial class DbcEditorViewModel : ObservableObject
                     continue;
                 }
 
-                if (ownerIndex[bit] == -1)
-                {
-                    ownerIndex[bit] = i;
-                }
-                else
-                {
-                    overlap[bit] = true;
-                }
+                ownersByBit[bit].Add(i);
             }
         }
 
         for (var bit = 0; bit < 64; bit++)
         {
             var cell = _cellByLsb0[bit];
-            if (overlap[bit])
+            var owners = ownersByBit[bit];
+            if (owners.Count == 0)
+            {
+                continue;
+            }
+
+            var activeOverlap = false;
+            for (var leftIndex = 0; leftIndex < owners.Count && !activeOverlap; leftIndex++)
+            {
+                for (var rightIndex = leftIndex + 1; rightIndex < owners.Count; rightIndex++)
+                {
+                    if (CanBeActiveTogether(frame.Signals[owners[leftIndex]], frame.Signals[owners[rightIndex]]))
+                    {
+                        activeOverlap = true;
+                        break;
+                    }
+                }
+            }
+
+            var selectedIndex = SelectedSignal is null ? -1 : frame.Signals.IndexOf(SelectedSignal);
+            cell.IsSelectedSignal = selectedIndex >= 0 && owners.Contains(selectedIndex);
+            var ownerDescriptions = owners.Select(index => DescribeSignal(frame.Signals[index])).Distinct().ToArray();
+            if (activeOverlap)
             {
                 cell.IsOverlap = true;
-                cell.OwnerLabel = "OVERLAP";
+                cell.OwnerLabel = "CONFLICT: " + string.Join(" / ", ownerDescriptions);
                 cell.FillBrush = OverlapBrush;
             }
-            else if (ownerIndex[bit] >= 0)
+            else
             {
-                var owner = ownerIndex[bit];
-                cell.OwnerLabel = names[owner];
-                cell.FillBrush = Palette[owner % Palette.Length];
+                var owner = owners[0];
+                cell.OwnerLabel = string.Join(" / ", ownerDescriptions) +
+                    (owners.Count > 1 ? " (veilig: gescheiden muxpaden)" : string.Empty);
+                cell.FillBrush = cell.IsSelectedSignal ? SelectedSignalBrush : Palette[owner % Palette.Length];
             }
         }
     }
@@ -429,14 +568,16 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         if (frame is not null)
         {
             var window = Math.Clamp(frame.Dlc, 0, 8) * 8;
-            var seen = new bool[64];
             var overlapBits = 0;
             var outOfDlc = 0;
             var outOfPayload = 0;
+            var occupiedBySignal = new List<HashSet<int>>(frame.Signals.Count);
 
             foreach (var signal in frame.Signals)
             {
-                foreach (var bit in DbcBitLayout.GetOccupiedLsb0Bits(signal.StartBit, signal.Length, signal.LittleEndian))
+                var occupied = DbcBitLayout.GetOccupiedLsb0Bits(signal.StartBit, signal.Length, signal.LittleEndian);
+                occupiedBySignal.Add(occupied.Where(static bit => bit is >= 0 and < 64).ToHashSet());
+                foreach (var bit in occupied)
                 {
                     if (bit is < 0 or > 63)
                     {
@@ -449,14 +590,19 @@ public sealed partial class DbcEditorViewModel : ObservableObject
                         outOfDlc++;
                     }
 
-                    if (seen[bit])
+                }
+            }
+
+            for (var leftIndex = 0; leftIndex < frame.Signals.Count; leftIndex++)
+            {
+                for (var rightIndex = leftIndex + 1; rightIndex < frame.Signals.Count; rightIndex++)
+                {
+                    if (!CanBeActiveTogether(frame.Signals[leftIndex], frame.Signals[rightIndex]))
                     {
-                        overlapBits++;
+                        continue;
                     }
-                    else
-                    {
-                        seen[bit] = true;
-                    }
+
+                    overlapBits += occupiedBySignal[leftIndex].Count(occupiedBySignal[rightIndex].Contains);
                 }
             }
 
@@ -479,6 +625,17 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             if (unnamed > 0)
             {
                 issues.Add($"{unnamed} signaal/signalen zonder naam");
+            }
+
+            var duplicateNames = frame.Signals
+                .Where(signal => !string.IsNullOrWhiteSpace(signal.Name))
+                .GroupBy(signal => signal.Name, StringComparer.Ordinal)
+                .Count(group => group.Count() > 1);
+            if (duplicateNames > 0)
+            {
+                issues.Add(duplicateNames == 1
+                    ? "1 dubbele signaalnaam"
+                    : $"{duplicateNames} dubbele signaalnamen");
             }
         }
 
@@ -580,7 +737,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
                     Maximum = signal.Maximum,
                     Unit = signal.Unit,
                     IsMultiplexer = signal.IsMultiplexerSwitch,
-                    MultiplexerIds = signal.MultiplexedValue.HasValue ? [signal.MultiplexedValue.Value] : []
+                    MultiplexerIds = signal.MultiplexedValue.HasValue ? [signal.MultiplexedValue.Value] : [],
+                    MultiplexerRanges = signal.MultiplexerRanges,
+                    ValueKind = signal.ValueKind
                 });
             }
 
@@ -621,7 +780,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
                     Maximum = signal.Maximum,
                     Unit = signal.Unit,
                     IsMultiplexerSwitch = signal.IsMultiplexer,
-                    MultiplexedValue = signal.MultiplexerIds.Count > 0 ? signal.MultiplexerIds[0] : null
+                    MultiplexedValue = signal.MultiplexerIds.Count > 0 ? signal.MultiplexerIds[0] : null,
+                    MultiplexerRanges = signal.MultiplexerRanges,
+                    ValueKind = signal.ValueKind
                 });
             }
 
@@ -629,6 +790,39 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         }
 
         SelectedFrame = Frames.FirstOrDefault();
+        HasUnsavedChanges = false;
+    }
+
+    private static bool CanBeActiveTogether(DbcSignalRow left, DbcSignalRow right)
+    {
+        IReadOnlyList<int> leftIds = left.MultiplexedValue.HasValue ? [left.MultiplexedValue.Value] : [];
+        IReadOnlyList<int> rightIds = right.MultiplexedValue.HasValue ? [right.MultiplexedValue.Value] : [];
+        return DbcBitLayout.CanBeActiveTogether(
+            left.IsMultiplexerSwitch,
+            leftIds,
+            left.MultiplexerRanges,
+            right.IsMultiplexerSwitch,
+            rightIds,
+            right.MultiplexerRanges);
+    }
+
+    private static string DescribeSignal(DbcSignalRow signal)
+    {
+        var mux = string.IsNullOrWhiteSpace(signal.MuxText) ? string.Empty : $", mux {signal.MuxText}";
+        return $"{signal.Name}{mux}";
+    }
+
+    private static string GetDefaultRepairPath(string sourcePath)
+    {
+        var directory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+        var stem = Path.GetFileNameWithoutExtension(sourcePath);
+        var candidate = Path.Combine(directory, $"{stem}.repaired.dbc");
+        for (var suffix = 2; File.Exists(candidate); suffix++)
+        {
+            candidate = Path.Combine(directory, $"{stem}.repaired-{suffix}.dbc");
+        }
+
+        return candidate;
     }
 
     private static Brush[] CreatePalette()

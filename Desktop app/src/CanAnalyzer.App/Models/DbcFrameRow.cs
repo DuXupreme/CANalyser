@@ -22,6 +22,12 @@ public sealed partial class DbcFrameRow : ObservableObject
     [ObservableProperty]
     private int _dlc = 8;
 
+    [ObservableProperty]
+    private bool _isRepairTarget;
+
+    [ObservableProperty]
+    private string _repairHint = string.Empty;
+
     public DbcFrameRow()
     {
         Signals.CollectionChanged += OnSignalsChanged;
@@ -35,6 +41,15 @@ public sealed partial class DbcFrameRow : ObservableObject
 
     /// <summary>Hex display of the (normalized) CAN id, e.g. 0x18FF50E5.</summary>
     public string FrameIdHex => "0x" + FrameId.ToString("X", CultureInfo.InvariantCulture);
+
+    public string Tooltip
+    {
+        get
+        {
+            var details = $"{Name}: CAN ID {FrameIdHex}, DLC {Dlc}, {SignalCount} signalen.";
+            return string.IsNullOrWhiteSpace(RepairHint) ? details : $"{RepairHint}\n\n{details}";
+        }
+    }
 
     /// <summary>Editable id text that accepts hex ("0x..") or decimal.</summary>
     public string FrameIdText
@@ -78,11 +93,21 @@ public sealed partial class DbcFrameRow : ObservableObject
     }
 
     private void OnSignalsChanged(object? sender, NotifyCollectionChangedEventArgs e)
-        => OnPropertyChanged(nameof(SignalCount));
+    {
+        OnPropertyChanged(nameof(SignalCount));
+        OnPropertyChanged(nameof(Tooltip));
+    }
+
+    partial void OnNameChanged(string value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnDlcChanged(int value) => OnPropertyChanged(nameof(Tooltip));
+
+    partial void OnRepairHintChanged(string value) => OnPropertyChanged(nameof(Tooltip));
 
     partial void OnFrameIdChanged(uint value)
     {
         OnPropertyChanged(nameof(FrameIdHex));
         OnPropertyChanged(nameof(FrameIdText));
+        OnPropertyChanged(nameof(Tooltip));
     }
 }

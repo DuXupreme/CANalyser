@@ -327,7 +327,13 @@ public sealed partial class DbcLoader : IDbcLoader
             for (var j = i + 1; j < message.Signals.Count; j++)
             {
                 var right = message.Signals[j];
-                if (!SignalsCanBeActiveTogether(left, right))
+                if (!DbcBitLayout.CanBeActiveTogether(
+                        left.IsMultiplexer,
+                        left.MultiplexerIds,
+                        left.MultiplexerRanges,
+                        right.IsMultiplexer,
+                        right.MultiplexerIds,
+                        right.MultiplexerRanges))
                 {
                     continue;
                 }
@@ -341,47 +347,6 @@ public sealed partial class DbcLoader : IDbcLoader
 
         return null;
     }
-
-    private static bool SignalsCanBeActiveTogether(DbcSignal left, DbcSignal right)
-    {
-        if (left.IsMultiplexer || right.IsMultiplexer)
-        {
-            return true;
-        }
-
-        var leftIntervals = GetMuxIntervals(left);
-        var rightIntervals = GetMuxIntervals(right);
-        if (leftIntervals.Count == 0 || rightIntervals.Count == 0)
-        {
-            return true;
-        }
-
-        return leftIntervals.Any(leftInterval =>
-            rightIntervals.Any(rightInterval =>
-                leftInterval.Minimum <= rightInterval.Maximum &&
-                rightInterval.Minimum <= leftInterval.Maximum));
-    }
-
-    private static IReadOnlyList<(uint Minimum, uint Maximum)> GetMuxIntervals(DbcSignal signal)
-    {
-        if (signal.MultiplexerRanges.Count > 0)
-        {
-            return signal.MultiplexerRanges
-                .Select(static range => (range.Minimum, range.Maximum))
-                .ToList();
-        }
-
-        if (signal.MultiplexerIds.Count > 0)
-        {
-            return signal.MultiplexerIds
-                .Where(static id => id >= 0)
-                .Select(static id => ((uint)id, (uint)id))
-                .ToList();
-        }
-
-        return [];
-    }
-
     private static ImportIssue ToIssue(string error, string source)
     {
         var lineMatch = ObserverLineRegex().Match(error);

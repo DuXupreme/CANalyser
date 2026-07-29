@@ -27,12 +27,21 @@ public sealed class BranchBehaviorTests
         {
             var error = await Assert.ThrowsAsync<ImportIntegrityException>(() =>
                 pipeline.LoadAsync(logPath, dbcPath, ImportMode.Strict, null, CancellationToken.None));
-            Assert.Contains(error.Report.Issues, issue => issue.Code == "DECODE_ERROR");
+            var decodeIssue = Assert.Single(error.Report.Issues, issue => issue.Code == "DECODE_ERROR");
+            Assert.Contains("M (0x123)", decodeIssue.Message);
+            Assert.Contains("payloadlengte 1 byte(s)", decodeIssue.Message);
+            Assert.Contains("DBC verwacht 2 byte(s)", decodeIssue.Message);
 
             using var partial = await pipeline.LoadAsync(logPath, dbcPath, ImportMode.Partial, null, CancellationToken.None);
             Assert.Equal(DatasetCompleteness.Partial, partial.Completeness);
             Assert.Empty(partial.DecodedSamples);
             Assert.Equal(1, partial.Diagnostics.DecodeErrorFrameCount);
+            var failure = Assert.Single(partial.Diagnostics.DecodeFailures ?? []);
+            Assert.Equal(DecodeFailureKind.DlcMismatch, failure.Kind);
+            Assert.Equal(0x123u, failure.ObservedFrameId);
+            Assert.Equal(1, failure.ActualPayloadLength);
+            Assert.Equal([2], failure.ExpectedPayloadLengths);
+            Assert.Equal(["M"], failure.MessageNames);
         }
         finally
         {
@@ -148,6 +157,9 @@ public sealed class BranchBehaviorTests
             new DbcDatabase { Messages = [message] }, null, CancellationToken.None);
         Assert.Empty(failed.Samples);
         Assert.Equal(1, failed.Diagnostics.DecodeErrorFrameCount);
+        var extractionFailure = Assert.Single(failed.Diagnostics.DecodeFailures ?? []);
+        Assert.Equal(DecodeFailureKind.SignalExtraction, extractionFailure.Kind);
+        Assert.Equal("Invalid", extractionFailure.FailingSignalName);
         (failed.Samples as IDisposable)?.Dispose();
 
         var floatMessage = new DbcMessage { RawFrameId = 0x124, IsExtendedFrame = false, Name = "F", Dlc = 4 };

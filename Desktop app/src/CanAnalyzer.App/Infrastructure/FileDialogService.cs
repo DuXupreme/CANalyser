@@ -19,6 +19,18 @@ public sealed class FileDialogService : IFileDialogService
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
+    public IReadOnlyList<string> PickActuatorCsvFiles(string? initialPath)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecteer één of meer Actuator Testbench logs om te vergelijken",
+            Filter = "Actuator Testbench CSV (*.csv)|*.csv|All files (*.*)|*.*",
+            Multiselect = true
+        };
+        ApplyInitialPath(dialog, initialPath);
+        return dialog.ShowDialog() == true ? dialog.FileNames : Array.Empty<string>();
+    }
+
     public string? PickDbcFile(string? initialPath)
     {
         var dialog = new OpenFileDialog
