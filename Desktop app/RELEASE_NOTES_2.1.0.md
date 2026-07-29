@@ -1,7 +1,7 @@
-# CANalyser 2.1.0-rc.1
+# CANalyser 2.1.0
 
-Deze release candidate richt zich op begeleid DBC-herstel, directe analyse van
-Actuator Testbench CSV-bestanden en een responsievere laadervaring.
+Deze release richt zich op begeleid DBC-herstel, directe analyse van Actuator
+Testbench CSV-bestanden en een responsievere laadervaring.
 
 ## Nieuw
 
@@ -26,10 +26,3 @@ Actuator Testbench CSV-bestanden en een responsievere laadervaring.
   herstelvenster geopend is, zodat de interface responsief blijft.
 - Langdurige decode- en herberekenacties tonen consistent voortgang zonder de
   statusregel horizontaal te verdringen.
-
-## Validatie voor stabiele 2.1.0
-
-- Doorloop intern een probleemlog met DBC-herstel van begin tot eind.
-- Importeer en vergelijk minimaal twee representatieve Actuator CSV-runs.
-- Controleer installatie en automatische update op de doelhardware.
-- Publiceer pas daarna dezelfde broncode als `2.1.0`.
