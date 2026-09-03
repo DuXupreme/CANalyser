@@ -13,6 +13,7 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_Bestand">
+                <MenuItem Header="_Online CANedge-logs..." Command="{Binding ImportOnlineLogsCommand}" />
                 <MenuItem Header="Open _CAN-log..." Command="{Binding BrowseLogFileCommand}" />
                 <MenuItem Header="Open _DBC..." Command="{Binding BrowseDbcFileCommand}" />
                 <MenuItem Header="_Actuator CSV..." Command="{Binding ImportActuatorCsvCommand}" />
@@ -40,6 +41,8 @@
                        ToolTip="CANalyser"
                        RenderOptions.BitmapScalingMode="HighQuality" />
                 <Separator />
+                <Button Content="Online logs" Command="{Binding ImportOnlineLogsCommand}"
+                        ToolTip="Kies CANedge-logs per machine en periode, download ze en start direct de analyse." />
                 <Button Content="Open Log" Command="{Binding BrowseLogFileCommand}" />
                 <Button Content="Open DBC" Command="{Binding BrowseDbcFileCommand}" />
                 <Button Content="Actuator CSV" Command="{Binding ImportActuatorCsvCommand}"

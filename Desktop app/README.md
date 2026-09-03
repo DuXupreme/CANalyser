@@ -2,13 +2,13 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.0 (.NET 8 WPF)
+# CANalyser 2.2 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> De huidige stabiele versie is `2.1.0`, met DBC-herstelbegeleiding, Actuator
-> Testbench CSV-import en een responsieve laadindicator. De 10M-framebenchmark
-> op de doelhardware blijft aanbevolen als doorlopende validatie.
+> Versie `2.2.0` voegt directe CANedge MF4/ZIP-import en de workflow **Online logs**
+> toe. De laatst gekozen DBC wordt hergebruikt en de 10M-framebenchmark op de
+> doelhardware blijft aanbevolen als doorlopende validatie.
 
 ## 1. Data-integriteitscontract
 
@@ -21,6 +21,8 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - SHA-256 van bron en DBC, appversie en datasetstatus gaan mee in diagnostics en CSV.
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
+  - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
+  - dashboard-ZIP met maximaal 200 MF4-delen; delen worden op absolute UTC-tijd chronologisch samengevoegd
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
@@ -39,6 +41,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export
+- Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
 - Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
   alignment on the first STEP target transition, and ready-made overlays for
   position, error, PWM, current, bus voltage, and power (no DBC required)

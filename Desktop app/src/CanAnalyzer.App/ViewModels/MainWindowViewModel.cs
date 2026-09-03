@@ -22,6 +22,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IImportRepairService _importRepairService;
     private readonly IImportRepairWizardService _importRepairWizardService;
     private readonly IFileDialogService _fileDialogService;
+    private readonly IOnlineLogDialogService _onlineLogDialogService;
     private readonly IMessageDialogService _messageDialogService;
     private readonly IAppSettingsStore _settingsStore;
     private readonly ITelemetryService _telemetryService;
@@ -60,6 +61,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IImportRepairService importRepairService,
         IImportRepairWizardService importRepairWizardService,
         IFileDialogService fileDialogService,
+        IOnlineLogDialogService onlineLogDialogService,
         IMessageDialogService messageDialogService,
         IAppSettingsStore settingsStore,
         ITelemetryService telemetryService,
@@ -77,6 +79,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _importRepairService = importRepairService;
         _importRepairWizardService = importRepairWizardService;
         _fileDialogService = fileDialogService;
+        _onlineLogDialogService = onlineLogDialogService;
         _messageDialogService = messageDialogService;
         _settingsStore = settingsStore;
         _telemetryService = telemetryService;
@@ -102,6 +105,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SettingsDiagnostics.BindApplySettingsHandler(ApplyProgramSettingsFromUiAsync);
 
         BrowseLogFileCommand = new RelayCommand(BrowseLogFile);
+        ImportOnlineLogsCommand = new AsyncRelayCommand(ImportOnlineLogsAsync, () => !IsAnyBusy);
         BrowseDbcFileCommand = new RelayCommand(BrowseDbcFile);
         LoadAndDecodeCommand = new AsyncRelayCommand(LoadAndDecodeAsync, CanLoadAndDecode);
         ImportActuatorCsvCommand = new AsyncRelayCommand(ImportActuatorCsvAsync, () => !IsAnyBusy);
@@ -147,6 +151,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 : ProgressLabel;
 
     public IRelayCommand BrowseLogFileCommand { get; }
+
+    public IAsyncRelayCommand ImportOnlineLogsCommand { get; }
 
     public IRelayCommand BrowseDbcFileCommand { get; }
 
@@ -259,6 +265,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             DbcFilePath = selected;
         }
+    }
+
+    private async Task ImportOnlineLogsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(DbcFilePath) || !File.Exists(DbcFilePath))
+        {
+            BrowseDbcFile();
+            if (string.IsNullOrWhiteSpace(DbcFilePath) || !File.Exists(DbcFilePath))
+            {
+                _messageDialogService.ShowInfo(
+                    "DBC nodig",
+                    "Kies eerst de DBC die bij deze machines hoort. CANalyser onthoudt deze keuze voor de volgende online analyse.");
+                return;
+            }
+        }
+
+        var archivePath = _onlineLogDialogService.SelectAndDownload();
+        if (string.IsNullOrWhiteSpace(archivePath)) return;
+        LogFilePath = archivePath;
+        await LoadAndDecodeAsync();
     }
 
     private async Task LoadAndDecodeAsync()
@@ -820,6 +846,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void UpdateCommandStates()
     {
         LoadAndDecodeCommand?.NotifyCanExecuteChanged();
+        ImportOnlineLogsCommand?.NotifyCanExecuteChanged();
         ImportActuatorCsvCommand?.NotifyCanExecuteChanged();
         RepairPartialImportCommand?.NotifyCanExecuteChanged();
         ExportDecodedCsvCommand?.NotifyCanExecuteChanged();

@@ -123,6 +123,8 @@ public partial class App : Application
         services.AddSingleton<IFileDialogService, FileDialogService>();
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
         services.AddSingleton<IImportRepairWizardService, ImportRepairWizardService>();
+        services.AddSingleton<IOnlineLogService, OnlineLogService>();
+        services.AddSingleton<IOnlineLogDialogService, OnlineLogDialogService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IAppSettingsStore, AppSettingsStore>();
         services.AddSingleton<ITelemetryService, TelemetryService>();
@@ -133,6 +135,8 @@ public partial class App : Application
         services.AddSingleton<CssSemicolonParser>();
         services.AddSingleton<BusmasterParser>();
         services.AddSingleton<PeakTrcParser>();
+        services.AddSingleton<IMdf4ConversionService, Mdf4ConversionService>();
+        services.AddSingleton<Mdf4Parser>();
         services.AddSingleton<CandumpParser>();
         services.AddSingleton<GenericTextCanParser>();
         services.AddSingleton<ICanLogParsingService, CanLogParsingService>();

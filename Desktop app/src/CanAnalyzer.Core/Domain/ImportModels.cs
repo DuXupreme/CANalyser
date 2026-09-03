@@ -42,7 +42,8 @@ public sealed record ImportReport(
 public sealed record CanLogParseResult(
     IReadOnlyList<RawCanFrame> Frames,
     ImportReport Report,
-    DatasetCompleteness Completeness);
+    DatasetCompleteness Completeness,
+    DateTimeOffset? StartTimeUtc = null);
 
 public sealed class ImportIntegrityException : Exception
 {

@@ -11,8 +11,8 @@ public sealed class FileDialogService : IFileDialogService
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Open CAN log file",
-            Filter = "CAN logs (*.trc;*.log;*.txt)|*.trc;*.log;*.txt|All files (*.*)|*.*",
+            Title = "Open CAN-log, CANedge MF4 of dashboard-ZIP",
+            Filter = "CAN logs (*.mf4;*.zip;*.trc;*.log;*.txt)|*.mf4;*.zip;*.trc;*.log;*.txt|CANedge logs (*.mf4;*.zip)|*.mf4;*.zip|All files (*.*)|*.*",
             Multiselect = false
         };
         ApplyInitialPath(dialog, initialPath);

@@ -16,9 +16,12 @@ public sealed class CanLogParsingService : ICanLogParsingService
         PeakTrcParser peakParser,
         CandumpParser candumpParser,
         GenericTextCanParser genericParser,
-        ILogger<CanLogParsingService> logger)
+        ILogger<CanLogParsingService> logger,
+        Mdf4Parser? mdf4Parser = null)
     {
-        _automaticParsers = [cssParser, busmasterParser, peakParser, candumpParser];
+        _automaticParsers = mdf4Parser is null
+            ? [cssParser, busmasterParser, peakParser, candumpParser]
+            : [mdf4Parser, cssParser, busmasterParser, peakParser, candumpParser];
         _logger = logger;
         GenericParser = genericParser;
     }
@@ -32,10 +35,13 @@ public sealed class CanLogParsingService : ICanLogParsingService
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken)
     {
+        var binaryInput = filePath.EndsWith(".mf4", StringComparison.OrdinalIgnoreCase)
+                          || filePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         var sample = new List<string>(200);
-        await using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-        using (var reader = new StreamReader(stream))
+        if (!binaryInput)
         {
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
             while (sample.Count < 200)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -53,7 +59,7 @@ public sealed class CanLogParsingService : ICanLogParsingService
         if (best.Parser is null || best.Score <= 0)
         {
             throw new InvalidDataException(
-                "Het logformaat kon niet betrouwbaar worden vastgesteld. Kies een ondersteund PEAK, BUSMASTER, CSS/CL1000- of candump-bestand; generieke import is niet automatisch toegestaan.");
+                "Het logformaat kon niet betrouwbaar worden vastgesteld. Kies een ondersteund CANedge MF4/ZIP-, PEAK-, BUSMASTER-, CSS/CL1000- of candump-bestand; generieke import is niet automatisch toegestaan.");
         }
 
         if (probes.Count > 1 && probes[1].Score == best.Score)

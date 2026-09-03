@@ -8,8 +8,8 @@
     <Product>CANalyser</Product>
     <Company>Gyrari B.V.</Company>
     <ApplicationIcon>Resources\Branding\canalyser-icon.ico</ApplicationIcon>
-    <Version>2.1.0</Version>
-    <FileVersion>2.1.0.0</FileVersion>
+    <Version>2.2.0</Version>
+    <FileVersion>2.2.0.0</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- WPF genereert zelf een Main uit App.xaml; dit wijst het echte entry-point
          aan zodat Velopack's hook als allereerste kan draaien. -->
@@ -25,6 +25,12 @@
     <None Remove="Resources\Branding\canalyser-lockup.png" />
     <Resource Include="Resources\Branding\canalyser-icon.ico" />
     <Resource Include="Resources\Branding\canalyser-lockup.png" />
+    <None Include="..\..\tools\mdf4\mdf2peak.exe" Link="Tools\Mdf4\mdf2peak.exe"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\tools\mdf4\LICENSE" Link="Tools\Mdf4\LICENSE"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\tools\mdf4\README.md" Link="Tools\Mdf4\README.md"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

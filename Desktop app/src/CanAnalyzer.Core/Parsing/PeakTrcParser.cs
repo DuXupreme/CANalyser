@@ -24,6 +24,7 @@ public sealed class PeakTrcParser : ICanLogParser
     {
         var rows = new DiskBackedFrameStore();
         var report = new ParseReportBuilder(Name);
+        DateTimeOffset? startTimeUtc = null;
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = new StreamReader(stream);
         var length = stream.Length;
@@ -36,6 +37,27 @@ public sealed class PeakTrcParser : ICanLogParser
             if (lineNumber % 2000 == 0)
                 ParserUtilities.ReportFileProgress(stream, length, progress, "Parser: PEAK .trc...", 5, 10);
             var trimmed = line.Trim();
+            if (trimmed.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase))
+            {
+                report.NonData();
+                var rawStartTime = trimmed[(trimmed.IndexOf('=') + 1)..].Trim();
+                if (double.TryParse(rawStartTime, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
+                {
+                    try
+                    {
+                        startTimeUtc = new DateTimeOffset(DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Utc));
+                    }
+                    catch (ArgumentException)
+                    {
+                        report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd valt buiten het geldige bereik.", line);
+                    }
+                }
+                else
+                {
+                    report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd is ongeldig.", line);
+                }
+                continue;
+            }
             if (trimmed.Length == 0 || ParserUtilities.IsCommonHeaderOrComment(trimmed) || trimmed.StartsWith("@ ", StringComparison.Ordinal))
             {
                 report.NonData();
@@ -65,7 +87,7 @@ public sealed class PeakTrcParser : ICanLogParser
         if (rows.Count == 0) { rows.Dispose(); return null; }
         rows.Complete();
         var built = report.Build(mode);
-        return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete);
+        return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete, startTimeUtc);
     }
 
     private static RawCanFrame ParseMatch(Match match, bool tsv, long frameIndex, long lineNumber)
