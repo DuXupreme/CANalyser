@@ -9,6 +9,12 @@ namespace CanAnalyzer.Tests;
 public sealed class CoreBehaviorTests
 {
     [Fact]
+    public void PlotViewOptions_DefaultsToFiveThousandDownsamplingPoints()
+    {
+        Assert.Equal(5000, new PlotViewOptions().MaxPointsPerTrace);
+    }
+
+    [Fact]
     public async Task CssParser_ParsesRowsAndNormalizesTime()
     {
         var tempFile = Path.GetTempFileName();

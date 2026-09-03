@@ -38,7 +38,7 @@ public sealed class PlotViewOptions
     public double? TimeEnd { get; set; }
 
     [JsonPropertyName("max_points")]
-    public int MaxPointsPerTrace { get; set; } = 4000;
+    public int MaxPointsPerTrace { get; set; } = 5000;
 
     [JsonPropertyName("use_downsampling")]
     public bool UseDownsampling { get; set; } = true;

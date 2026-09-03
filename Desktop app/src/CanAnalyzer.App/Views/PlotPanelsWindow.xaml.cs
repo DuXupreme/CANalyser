@@ -25,7 +25,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private double? _flagATime;
     private double? _flagBTime;
     private int _subplotHeight;
-    private int _maxPointsPerTrace = 4000;
+    private int _maxPointsPerTrace = 5000;
     private bool _useDownsampling = true;
     private bool _stepPlot;
     private bool _markersOnly;
@@ -89,24 +89,6 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         get => _useDownsampling;
         set
         {
-            if (!value)
-            {
-                var oversized = Panels.SelectMany(panel => panel.SeriesData.Select(series =>
-                {
-                    var xAxis = panel.PlotModel.Axes.FirstOrDefault(static axis => axis.Position == AxisPosition.Bottom);
-                    return CountVisible(series.Time, xAxis?.ActualMinimum, xAxis?.ActualMaximum);
-                })).FirstOrDefault(static count => count > 200_000);
-                if (oversized > 200_000)
-                {
-                    MessageBox.Show(this,
-                        $"Volledige resolutie bevat {oversized:N0} zichtbare punten en kan de grafiekweergave laten vastlopen.\n\n" +
-                        "Laat LOD/downsampling actief of zoom eerst verder in. Dit verandert de brondata, analyse, cursors/flags en export niet; alleen de getekende grafiek gebruikt representatieve punten.",
-                        "Volledige resolutie geblokkeerd", MessageBoxButton.OK, MessageBoxImage.Information);
-                    OnPropertyChanged(nameof(UseDownsampling));
-                    return;
-                }
-            }
-
             if (SetField(ref _useDownsampling, value))
             {
                 ApplyVisualOptionsPreservingView();

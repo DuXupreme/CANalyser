@@ -39,7 +39,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private string _settingsFilePath = string.Empty;
 
     [ObservableProperty]
-    private int _defaultMaxPointsPerTrace = 4000;
+    private int _defaultMaxPointsPerTrace = 5000;
 
     [ObservableProperty]
     private int _defaultSubplotHeight = 280;

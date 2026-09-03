@@ -22,8 +22,6 @@ namespace CanAnalyzer.App.ViewModels;
 /// </summary>
 public sealed partial class AnalysisViewModel : ObservableObject
 {
-    private const int FullResolutionInteractiveLimit = 200_000;
-
     private readonly IPlotModelBuilder _plotModelBuilder;
     private readonly IFileDialogService _fileDialogService;
     private readonly IPlotWindowService _plotWindowService;
@@ -48,7 +46,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private double? _timeEnd;
 
     [ObservableProperty]
-    private int _maxPointsPerTrace = 4000;
+    private int _maxPointsPerTrace = 5000;
 
     [ObservableProperty]
     private bool _useDownsampling = true;
@@ -515,7 +513,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             return;
         }
 
-        var options = CreateInteractivePlotOptions(groups, CaptureViewOptions(), out var forcedLod);
+        var options = CaptureViewOptions();
 
         var panels = _plotModelBuilder.Build(_dataset, groups, options);
 
@@ -539,10 +537,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
         _xAxisSyncService.Bind(PlotPanels.Select(panel => panel.PlotModel));
         RefreshCursorAnnotations();
 
-        if (forcedLod is not null)
-        {
-            ReportForcedLod(forcedLod, options, detachedWindow: false);
-        }
     }
 
     private async Task RebuildPlotsAsync(bool preserveView = false)
@@ -575,7 +569,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             return;
         }
 
-        var options = CreateInteractivePlotOptions(groups, CaptureViewOptions(), out var forcedLod);
+        var options = CaptureViewOptions();
         BusyLabel = groups.Count == 1
             ? "Subplot herberekenen..."
             : $"{groups.Count} subplots herberekenen...";
@@ -605,103 +599,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
             _xAxisSyncService.Bind(PlotPanels.Select(panel => panel.PlotModel));
             RefreshCursorAnnotations();
 
-            if (forcedLod is not null)
-            {
-                ReportForcedLod(forcedLod, options, detachedWindow: false);
-            }
         }
         finally
         {
             IsBusy = false;
         }
-    }
-
-    private PlotViewOptions CreateInteractivePlotOptions(
-        IReadOnlyList<PlotGroup> groups,
-        PlotViewOptions requestedOptions,
-        out OversizedSeries? forcedLod)
-    {
-        forcedLod = null;
-        if (_dataset is null || requestedOptions.UseDownsampling)
-        {
-            return requestedOptions;
-        }
-
-        forcedLod = FindFirstOversizedSeries(_dataset, groups, requestedOptions);
-        if (forcedLod is null)
-        {
-            return requestedOptions;
-        }
-
-        var safeOptions = ClonePlotViewOptions(requestedOptions);
-        safeOptions.UseDownsampling = true;
-        safeOptions.PlotOptions = safeOptions.PlotOptions
-            .Where(static option => !string.Equals(option, "disable_downsampling", StringComparison.Ordinal))
-            .ToList();
-        return safeOptions;
-    }
-
-    private static PlotViewOptions ClonePlotViewOptions(PlotViewOptions source)
-    {
-        return new PlotViewOptions
-        {
-            FrameIdFilter = source.FrameIdFilter,
-            TimeStart = source.TimeStart,
-            TimeEnd = source.TimeEnd,
-            MaxPointsPerTrace = source.MaxPointsPerTrace,
-            UseDownsampling = source.UseDownsampling,
-            SubplotHeight = source.SubplotHeight,
-            SignalListHeight = source.SignalListHeight,
-            AutoOpenDetachedOnApply = source.AutoOpenDetachedOnApply,
-            NormalizeSignals = source.NormalizeSignals,
-            StepPlot = source.StepPlot,
-            MarkersOnly = source.MarkersOnly,
-            ShowLegend = source.ShowLegend,
-            LinkXAxisAcrossPanels = source.LinkXAxisAcrossPanels,
-            PlotOptions = [.. source.PlotOptions]
-        };
-    }
-
-    private static OversizedSeries? FindFirstOversizedSeries(
-        CanDataset dataset,
-        IReadOnlyList<PlotGroup> groups,
-        PlotViewOptions options)
-    {
-        return groups.SelectMany(static group => group.Signals)
-            .Distinct(StringComparer.Ordinal)
-            .Select(label => dataset.SignalSeriesByLabel.TryGetValue(label, out var series)
-                ? new OversizedSeries(label, CountVisible(series.Time, options.TimeStart, options.TimeEnd))
-                : new OversizedSeries(label, 0))
-            .FirstOrDefault(static item => item.VisiblePointCount > FullResolutionInteractiveLimit);
-    }
-
-    private void ReportForcedLod(OversizedSeries oversized, PlotViewOptions options, bool detachedWindow)
-    {
-        PresetStatus =
-            $"Volledige resolutie is te groot voor interactieve weergave: '{oversized.Label}' bevat {oversized.VisiblePointCount:N0} zichtbare punten. " +
-            $"CANalyser toont daarom tijdelijk LOD/downsampling met maximaal {options.MaxPointsPerTrace:N0} representatieve punten per trace om vastlopen te voorkomen. " +
-            "Dit verandert de brondata, decode, analyse, CANalyser-cursors/flags en export niet. Implicatie: visuele details tussen representatieve punten kunnen minder exact lijken; zoom in voor volledige detailinspectie.";
-
-        _ = _telemetryService.TrackEventAsync("analysis_lod_forced", new Dictionary<string, object?>
-        {
-            ["detached_window"] = detachedWindow,
-            ["visible_point_bucket"] = TelemetryBuckets.Count(oversized.VisiblePointCount),
-            ["max_points_per_trace"] = options.MaxPointsPerTrace
-        });
-    }
-
-    private static int CountVisible(double[] times, double? start, double? end)
-    {
-        var count = 0;
-        foreach (var time in times)
-        {
-            if ((!start.HasValue || time >= start.Value) && (!end.HasValue || time <= end.Value))
-            {
-                count++;
-            }
-        }
-
-        return count;
     }
 
     private void TriggerLiveRebuild()
@@ -790,8 +692,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private sealed record PanelViewSnapshot(
         IReadOnlyDictionary<string, AxisRange> AxisRanges,
         IReadOnlyDictionary<string, bool> SeriesVisibility);
-
-    private sealed record OversizedSeries(string Label, int VisiblePointCount);
 
     private async Task ExportPresetAsync()
     {
@@ -971,7 +871,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 return;
             }
 
-            var options = CreateInteractivePlotOptions(groups, CaptureViewOptions(), out var forcedLod);
+            var options = CaptureViewOptions();
             var detachedPanels = _plotModelBuilder.Build(_dataset, groups, options);
             _plotWindowService.ShowPlots(
                 detachedPanels,
@@ -981,18 +881,12 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 LinkXAxisAcrossPanels,
                 LinkYAxisAcrossPanels);
 
-            if (forcedLod is not null)
-            {
-                ReportForcedLod(forcedLod, options, detachedWindow: true);
-            }
-
             _ = _telemetryService.TrackEventAsync("analysis_open_detached_plots", new Dictionary<string, object?>
             {
                 ["group_count"] = groups.Count,
                 ["signal_bucket"] = TelemetryBuckets.Count(groups.Sum(static group => group.Signals.Count)),
                 ["subplot_count"] = detachedPanels.Count,
                 ["used_downsampling"] = options.UseDownsampling,
-                ["forced_lod"] = forcedLod is not null,
                 ["link_x_axis"] = LinkXAxisAcrossPanels,
                 ["link_y_axis"] = LinkYAxisAcrossPanels
             });
