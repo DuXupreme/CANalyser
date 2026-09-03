@@ -6,9 +6,10 @@
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.2.0` voegt directe CANedge MF4/ZIP-import en de workflow **Online logs**
-> toe. De laatst gekozen DBC wordt hergebruikt en de 10M-framebenchmark op de
-> doelhardware blijft aanbevolen als doorlopende validatie.
+> Versie `2.2.1` voegt directe CANedge MF4/ZIP-import en de workflow **Online logs**
+> toe. Grote selecties worden rechtstreeks uit S3 gedownload en lokaal samengevoegd,
+> zodat de responslimiet van het dashboard geen logs meer blokkeert. De laatst gekozen
+> DBC wordt hergebruikt en de 10M-framebenchmark op de doelhardware blijft aanbevolen.
 
 ## 1. Data-integriteitscontract
 

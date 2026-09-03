@@ -118,7 +118,9 @@ public partial class OnlineLogsWindow : Window
                     : $"Downloaden: {FormatBytes(value.BytesReceived)}";
             });
             DownloadedArchivePath = await _onlineLogService.DownloadArchiveAsync(
-                selected.Select(static row => row.Key).ToArray(), progress, _windowCts.Token);
+                selected.Select(static row => new OnlineLogSelection(row.Key, row.SizeBytes)).ToArray(),
+                progress,
+                _windowCts.Token);
             DialogResult = true;
         }
         catch (OperationCanceledException) when (_windowCts.IsCancellationRequested)

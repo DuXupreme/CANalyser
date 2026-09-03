@@ -16,6 +16,8 @@ public sealed record OnlineLogQueryResult(
 
 public sealed record OnlineDownloadProgress(long BytesReceived, long? TotalBytes);
 
+public sealed record OnlineLogSelection(string Key, long SizeBytes);
+
 public interface IOnlineLogService
 {
     Task<OnlineLogQueryResult> GetLogsAsync(
@@ -25,7 +27,7 @@ public interface IOnlineLogService
         CancellationToken cancellationToken);
 
     Task<string> DownloadArchiveAsync(
-        IReadOnlyList<string> keys,
+        IReadOnlyList<OnlineLogSelection> files,
         IProgress<OnlineDownloadProgress>? progress,
         CancellationToken cancellationToken);
 }
