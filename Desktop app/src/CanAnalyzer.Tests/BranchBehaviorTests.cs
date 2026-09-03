@@ -14,6 +14,27 @@ namespace CanAnalyzer.Tests;
 public sealed class BranchBehaviorTests
 {
     [Fact]
+    public void Decoder_AllowsTrailingPayloadBytesBeyondDbcMessageLength()
+    {
+        var message = new DbcMessage { RawFrameId = 0x123, IsExtendedFrame = false, Name = "Padded", Dlc = 1 };
+        message.Signals.Add(Signal("Value", 0, 8));
+        var frame = new RawCanFrame(0L, 0x123, 8, [42, 0, 0, 0, 0, 0, 0, 0], "Rx", "1", false);
+
+        var result = new CanDecodingService().Decode(
+            [frame],
+            new DbcDatabase { Messages = [message] },
+            null,
+            CancellationToken.None);
+
+        var sample = Assert.Single(result.Samples);
+        Assert.Equal("Padded", sample.MessageName);
+        Assert.Equal("Value", sample.SignalName);
+        Assert.Equal(42, sample.Value);
+        Assert.Equal(0, result.Diagnostics.DecodeErrorFrameCount);
+        (result.Samples as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task Pipeline_StrictDecodeErrorBlocksAndPartialCarriesPermanentStatus()
     {
         var logPath = Path.GetTempFileName();

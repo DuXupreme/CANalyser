@@ -55,6 +55,18 @@ public sealed class CanDecodingService : ICanDecodingService
             }
         }
 
+        // Prefer the most specific definition when a bus pads a shorter DBC
+        // message to a larger payload (a common pattern for Classic CAN).
+        foreach (var messages in exactMap.Values)
+        {
+            messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
+        }
+
+        foreach (var messages in pgnToMessages.Values)
+        {
+            messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
+        }
+
         var reportStride = Math.Max(500, rawFrames.Count / 100);
         var i = 0;
         foreach (var frame in rawFrames)
@@ -103,7 +115,7 @@ public sealed class CanDecodingService : ICanDecodingService
             DbcMessage? decodedMessage = null;
             string? failingSignalName = null;
             var hasUsableCandidate = false;
-            var hasMatchingLengthCandidate = false;
+            var hasCompatibleLengthCandidate = false;
             foreach (var message in candidates)
             {
                 if (message.SuppressDecoding || message.IsExtendedFrame != isExtended)
@@ -112,12 +124,15 @@ public sealed class CanDecodingService : ICanDecodingService
                 }
 
                 hasUsableCandidate = true;
-                if (message.Dlc != frame.PayloadLength)
+                // Extra trailing payload bytes do not invalidate signals that are
+                // fully described by a shorter DBC message. A shorter frame is
+                // still rejected because signal extraction would be incomplete.
+                if (message.Dlc > frame.PayloadLength)
                 {
                     continue;
                 }
 
-                hasMatchingLengthCandidate = true;
+                hasCompatibleLengthCandidate = true;
                 if (TryDecodeMessage(message, frame.Data, out var strict, out var candidateFailingSignal))
                 {
                     decoded = strict;
@@ -135,7 +150,7 @@ public sealed class CanDecodingService : ICanDecodingService
                     ? candidates.All(message => message.SuppressDecoding)
                         ? DecodeFailureKind.SuppressedDefinition
                         : DecodeFailureKind.FrameFormatMismatch
-                    : !hasMatchingLengthCandidate
+                    : !hasCompatibleLengthCandidate
                         ? DecodeFailureKind.DlcMismatch
                         : DecodeFailureKind.SignalExtraction;
                 var failureIdentity = new DecodeFailureIdentity(
