@@ -98,13 +98,29 @@ public sealed class PeakTrcParser : ICanLogParser
         var data = HexUtilities.ParseDataBytes(match.Groups["data"].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                    ?? throw new FormatException("Payload bevat ongeldige hexbytes.");
         var tail = tsv ? match.Groups["tail"].Value : match.Groups["dir"].Value;
-        var fd = tail.Contains("fd", StringComparison.OrdinalIgnoreCase) || data.Length > 8;
-        var extended = tail.Contains("x", StringComparison.OrdinalIgnoreCase) || id > 0x7FF;
+        var fd = ContainsFlag(tail, "fd") || data.Length > 8;
+        // PEAK TSV uses a standalone `x` flag for an extended frame. Do not search
+        // for the character itself: the receive direction `Rx` also contains `x`.
+        var extended = id > 0x7FF || (tsv && ContainsFlag(tail, "x"));
         if (!CanFrameValidation.TryNormalize(id, extended, declared, data.Length, fd, out var dlc, out var format, out var error))
             throw new FormatException(error);
         var direction = CanFrameValidation.ParseDirection(tail);
         var type = direction == CanFrameDirection.Transmit ? "Tx" : direction == CanFrameDirection.Receive ? "Rx" : string.Empty;
         var channel = tsv ? match.Groups["channel"].Value.Trim() : string.Empty;
         return new RawCanFrame(timeNs, id, dlc, data, type, channel, extended, frameIndex, lineNumber, format, direction);
+    }
+
+    private static bool ContainsFlag(ReadOnlySpan<char> value, ReadOnlySpan<char> expected)
+    {
+        var index = 0;
+        while (index < value.Length)
+        {
+            while (index < value.Length && char.IsWhiteSpace(value[index])) index++;
+            var start = index;
+            while (index < value.Length && !char.IsWhiteSpace(value[index])) index++;
+            if (value[start..index].Equals(expected, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 }

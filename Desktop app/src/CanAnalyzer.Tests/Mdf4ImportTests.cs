@@ -11,6 +11,26 @@ namespace CanAnalyzer.Tests;
 public sealed class Mdf4ImportTests
 {
     [Fact]
+    public async Task PeakParser_DoesNotInterpretReceiveDirectionAsExtendedFlag()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"peak-standard-rx-{Guid.NewGuid():N}.trc");
+        await File.WriteAllTextAsync(path, ";$FILEVERSION=1.1\n1) 0.000 Rx 123 1 AA\n");
+        try
+        {
+            var result = await new PeakTrcParser().ParseAsync(path, ImportMode.Strict, null, CancellationToken.None);
+            Assert.NotNull(result);
+            var frame = Assert.Single(result!.Frames);
+            Assert.Equal(0x123u, frame.Id);
+            Assert.False(frame.IsExtended);
+            (result.Frames as IDisposable)?.Dispose();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task PeakParser_ReadsCssAbsoluteStartTimeAsUtc()
     {
         var path = Path.Combine(Path.GetTempPath(), $"peak-start-{Guid.NewGuid():N}.trc");
