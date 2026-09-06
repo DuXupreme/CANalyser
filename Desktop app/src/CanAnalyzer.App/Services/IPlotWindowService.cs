@@ -13,5 +13,6 @@ public interface IPlotWindowService
         int maxPointsPerTrace,
         bool useDownsampling,
         bool linkXAxisAcrossPanels,
-        bool linkYAxisAcrossPanels);
+        bool linkYAxisAcrossPanels,
+        DateTimeOffset? startTimeUtc);
 }

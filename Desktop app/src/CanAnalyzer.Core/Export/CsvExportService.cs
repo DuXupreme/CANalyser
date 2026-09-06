@@ -1,6 +1,7 @@
 using System.Globalization;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Utilities;
 using CsvHelper;
 
 namespace CanAnalyzer.Core.Export;
@@ -15,7 +16,7 @@ public sealed class CsvExportService : ICsvExportService
         await using var csv = new CsvWriter(writer, CultureInfo.InvariantCulture);
         var headers = new[]
         {
-            "time_s", "frame_id", "message_name", "signal_name", "value", "label",
+            "time_s", "timestamp_utc", "unix_time_ns", "frame_id", "message_name", "signal_name", "value", "label",
             "time_ns", "frame_index", "source_line", "channel", "frame_format", "is_extended",
             "dlc_code", "payload_length", "raw_value", "unit", "decode_quality", "dataset_status",
             "source_log_sha256", "dbc_sha256", "app_version", "import_mode"
@@ -28,6 +29,16 @@ public sealed class CsvExportService : ICsvExportService
             cancellationToken.ThrowIfCancellationRequested();
             var frame = ResolveFrame(dataset.RawFrames, sample.FrameIndex);
             csv.WriteField(sample.TimeSeconds.ToString("R", CultureInfo.InvariantCulture));
+            if (dataset.StartTimeUtc is { } startTimeUtc)
+            {
+                csv.WriteField(MeasurementTimestamp.FormatUtcIso8601(startTimeUtc, sample.TimestampNanoseconds));
+                csv.WriteField(MeasurementTimestamp.ToUnixNanoseconds(startTimeUtc, sample.TimestampNanoseconds));
+            }
+            else
+            {
+                csv.WriteField(string.Empty);
+                csv.WriteField(string.Empty);
+            }
             csv.WriteField(sample.FrameId);
             csv.WriteField(sample.MessageName);
             csv.WriteField(sample.SignalName);

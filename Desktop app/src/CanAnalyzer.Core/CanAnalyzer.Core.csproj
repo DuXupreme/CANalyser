@@ -11,6 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\tools\mdf4\mdf2peak.exe"
+                      LogicalName="CanAnalyzer.Core.Tools.Mdf4.mdf2peak.exe" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>CanAnalyzer.Tests</_Parameter1>
     </AssemblyAttribute>

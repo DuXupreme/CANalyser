@@ -4,6 +4,7 @@ using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Utilities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -49,7 +50,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private int _maxPointsPerTrace = 5000;
 
     [ObservableProperty]
-    private bool _useDownsampling = true;
+    private bool _useDownsampling;
 
     [ObservableProperty]
     private int _subplotHeight = 280;
@@ -879,7 +880,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 options.MaxPointsPerTrace,
                 options.UseDownsampling,
                 LinkXAxisAcrossPanels,
-                LinkYAxisAcrossPanels);
+                LinkYAxisAcrossPanels,
+                _dataset.StartTimeUtc);
 
             _ = _telemetryService.TrackEventAsync("analysis_open_detached_plots", new Dictionary<string, object?>
             {
@@ -1075,7 +1077,29 @@ public sealed partial class AnalysisViewModel : ObservableObject
         var dtText = FlagATime.HasValue && FlagBTime.HasValue
             ? $"{Math.Abs(FlagBTime.Value - FlagATime.Value):G17}s"
             : "-";
-        CursorInfo = $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}";
+        var absoluteText = FormatAbsoluteLocal(CursorTime);
+        CursorInfo = absoluteText is null
+            ? $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}"
+            : $"Cursor: {cursorText} | Datum/tijd lokaal: {absoluteText}\n" +
+              $"A: {FormatFlagTime(FlagATime, aText)} | B: {FormatFlagTime(FlagBTime, bText)} | dt: {dtText}";
+    }
+
+    private string FormatFlagTime(double? timeSeconds, string relativeText)
+    {
+        var absoluteText = FormatAbsoluteLocal(timeSeconds);
+        return absoluteText is null ? relativeText : $"{relativeText} ({absoluteText})";
+    }
+
+    private string? FormatAbsoluteLocal(double? timeSeconds)
+    {
+        if (_dataset?.StartTimeUtc is not { } startTimeUtc ||
+            !timeSeconds.HasValue ||
+            !MeasurementTimestamp.TrySecondsToNanoseconds(timeSeconds.Value, out var nanoseconds))
+        {
+            return null;
+        }
+
+        return MeasurementTimestamp.FormatLocal(startTimeUtc, nanoseconds);
     }
 
     private double SnapTimeToNearestData(

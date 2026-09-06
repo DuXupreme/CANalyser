@@ -8,6 +8,8 @@ namespace CanAnalyzer.App.Infrastructure;
 /// <inheritdoc />
 public sealed class AppSettingsStore : IAppSettingsStore
 {
+    private const int CurrentSettingsVersion = 2;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -30,7 +32,7 @@ public sealed class AppSettingsStore : IAppSettingsStore
         {
             if (!File.Exists(SettingsPath))
             {
-                return new AppSettings();
+                return CreateCurrentSettings();
             }
 
             var json = File.ReadAllText(SettingsPath);
@@ -40,6 +42,13 @@ public sealed class AppSettingsStore : IAppSettingsStore
             settings.LastPlotViewOptions ??= new CanAnalyzer.Core.Domain.PlotViewOptions();
             settings.LastRawFrameFilter ??= new CanAnalyzer.Core.Domain.RawFrameFilterOptions();
             settings.Telemetry ??= new TelemetryOptions();
+            if (settings.SettingsVersion < CurrentSettingsVersion)
+            {
+                // Version 2 changes the safe defaults to full-resolution plotting and 5,000 points.
+                settings.LastPlotViewOptions.UseDownsampling = false;
+                settings.LastPlotViewOptions.MaxPointsPerTrace = 5000;
+                settings.SettingsVersion = CurrentSettingsVersion;
+            }
             if (string.IsNullOrWhiteSpace(settings.Telemetry.InstallationId))
             {
                 settings.Telemetry.InstallationId = Guid.NewGuid().ToString("N");
@@ -60,12 +69,13 @@ public sealed class AppSettingsStore : IAppSettingsStore
         }
         catch
         {
-            return new AppSettings();
+            return CreateCurrentSettings();
         }
     }
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        settings.SettingsVersion = CurrentSettingsVersion;
         var directory = Path.GetDirectoryName(SettingsPath)
                         ?? throw new InvalidOperationException("Settings path has no directory.");
         Directory.CreateDirectory(directory);
@@ -73,4 +83,9 @@ public sealed class AppSettingsStore : IAppSettingsStore
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
         await File.WriteAllTextAsync(SettingsPath, json, cancellationToken);
     }
+
+    private static AppSettings CreateCurrentSettings() => new()
+    {
+        SettingsVersion = CurrentSettingsVersion
+    };
 }

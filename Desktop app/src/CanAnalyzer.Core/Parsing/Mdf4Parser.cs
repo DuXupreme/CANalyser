@@ -78,6 +78,7 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
         if (entries.Length == 0) throw new InvalidDataException("Het ZIP-bestand bevat geen .MF4-logbestanden.");
         if (entries.Length > MaximumArchiveFiles)
             throw new InvalidDataException($"Het ZIP-bestand bevat meer dan {MaximumArchiveFiles:N0} MF4-bestanden. Maak een kleinere selectie.");
+        ValidateArchiveSequence(entries);
 
         long totalBytes = 0;
         var extracted = new List<string>(entries.Length);
@@ -104,6 +105,26 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
         }
 
         return extracted;
+    }
+
+    private static void ValidateArchiveSequence(IReadOnlyList<ZipArchiveEntry> entries)
+    {
+        if (entries.Count <= 1) return;
+        var identities = new List<OnlineLogPartIdentity>(entries.Count);
+        foreach (var entry in entries)
+        {
+            var segments = entry.FullName.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 3)
+            {
+                throw new InvalidDataException(
+                    "Dit ZIP-bestand bevat meerdere MF4-bestanden, maar de logger en sessie zijn niet betrouwbaar herkenbaar. " +
+                    "Open één MF4-bestand, of maak via Online logs een selectie van opeenvolgende delen uit één sessie.");
+            }
+            identities.Add(new OnlineLogPartIdentity(segments[^3], segments[^2], segments[^1]));
+        }
+
+        var validation = OnlineLogSequencePolicy.Validate(identities);
+        if (!validation.IsValid) throw new InvalidDataException(validation.Message);
     }
 
     private CanLogParseResult MergeChronologically(

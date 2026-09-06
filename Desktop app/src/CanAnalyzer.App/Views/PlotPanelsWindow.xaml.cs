@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Input;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.Core.Analysis;
+using CanAnalyzer.Core.Utilities;
 using CanAnalyzer.App.Services;
 using OxyPlot;
 using OxyPlot.Annotations;
@@ -20,13 +21,14 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
 
     private readonly XAxisSyncService _xAxisSyncService = new();
+    private readonly DateTimeOffset? _startTimeUtc;
     private DateTime _lastCursorUpdateUtc = DateTime.MinValue;
     private double? _cursorTime;
     private double? _flagATime;
     private double? _flagBTime;
     private int _subplotHeight;
     private int _maxPointsPerTrace = 5000;
-    private bool _useDownsampling = true;
+    private bool _useDownsampling;
     private bool _stepPlot;
     private bool _markersOnly;
     private bool _showLegend = true;
@@ -42,7 +44,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         int maxPointsPerTrace,
         bool useDownsampling,
         bool linkXAxisAcrossPanels,
-        bool linkYAxisAcrossPanels)
+        bool linkYAxisAcrossPanels,
+        DateTimeOffset? startTimeUtc)
     {
         InitializeComponent();
         _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
@@ -50,6 +53,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         _useDownsampling = useDownsampling;
         _linkXAxisAcrossPanels = linkXAxisAcrossPanels;
         _linkYAxisAcrossPanels = linkYAxisAcrossPanels;
+        _startTimeUtc = startTimeUtc;
 
         foreach (var panel in panels)
         {
@@ -393,7 +397,29 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         var dtText = _flagATime.HasValue && _flagBTime.HasValue
             ? $"{Math.Abs(_flagBTime.Value - _flagATime.Value):G17}s"
             : "-";
-        CursorInfoText.Text = $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}";
+        var absoluteText = FormatAbsoluteLocal(_cursorTime);
+        CursorInfoText.Text = absoluteText is null
+            ? $"Cursor: {cursorText} | A: {aText} | B: {bText} | dt: {dtText}"
+            : $"Cursor: {cursorText} | Datum/tijd lokaal: {absoluteText}\n" +
+              $"A: {FormatFlagTime(_flagATime, aText)} | B: {FormatFlagTime(_flagBTime, bText)} | dt: {dtText}";
+    }
+
+    private string FormatFlagTime(double? timeSeconds, string relativeText)
+    {
+        var absoluteText = FormatAbsoluteLocal(timeSeconds);
+        return absoluteText is null ? relativeText : $"{relativeText} ({absoluteText})";
+    }
+
+    private string? FormatAbsoluteLocal(double? timeSeconds)
+    {
+        if (_startTimeUtc is not { } startTimeUtc ||
+            !timeSeconds.HasValue ||
+            !MeasurementTimestamp.TrySecondsToNanoseconds(timeSeconds.Value, out var nanoseconds))
+        {
+            return null;
+        }
+
+        return MeasurementTimestamp.FormatLocal(startTimeUtc, nanoseconds);
     }
 
     private void RefreshCursorAnnotations()

@@ -41,7 +41,7 @@ public sealed class PlotViewOptions
     public int MaxPointsPerTrace { get; set; } = 5000;
 
     [JsonPropertyName("use_downsampling")]
-    public bool UseDownsampling { get; set; } = true;
+    public bool UseDownsampling { get; set; }
 
     [JsonPropertyName("subplot_height")]
     public int SubplotHeight { get; set; } = 280;

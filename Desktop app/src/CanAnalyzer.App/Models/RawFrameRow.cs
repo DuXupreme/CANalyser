@@ -1,4 +1,5 @@
 using CanAnalyzer.Core.Domain;
+using CanAnalyzer.Core.Utilities;
 
 namespace CanAnalyzer.App.Models;
 
@@ -7,12 +8,17 @@ namespace CanAnalyzer.App.Models;
 /// </summary>
 public sealed class RawFrameRow
 {
-    public RawFrameRow(RawCanFrame frame)
+    public RawFrameRow(RawCanFrame frame, DateTimeOffset? startTimeUtc = null)
     {
         Source = frame;
+        AbsoluteTimeLocal = startTimeUtc is null
+            ? "-"
+            : MeasurementTimestamp.FormatLocal(startTimeUtc.Value, frame.TimestampNanoseconds);
     }
 
     public RawCanFrame Source { get; }
+
+    public string AbsoluteTimeLocal { get; }
 
     public double TimeSeconds => Source.TimeSeconds;
 

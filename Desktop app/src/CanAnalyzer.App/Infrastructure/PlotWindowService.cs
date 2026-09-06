@@ -13,7 +13,8 @@ public sealed class PlotWindowService : IPlotWindowService
         int maxPointsPerTrace,
         bool useDownsampling,
         bool linkXAxisAcrossPanels,
-        bool linkYAxisAcrossPanels)
+        bool linkYAxisAcrossPanels,
+        DateTimeOffset? startTimeUtc)
     {
         if (panels.Count == 0)
         {
@@ -26,7 +27,8 @@ public sealed class PlotWindowService : IPlotWindowService
             maxPointsPerTrace,
             useDownsampling,
             linkXAxisAcrossPanels,
-            linkYAxisAcrossPanels);
+            linkYAxisAcrossPanels,
+            startTimeUtc);
         window.Show();
         window.Activate();
     }

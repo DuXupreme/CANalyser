@@ -47,6 +47,10 @@
 
             <TextBlock Text="Meer informatie" Foreground="#444444" Margin="0,0,0,4" />
             <TextBlock>
+                <Hyperlink NavigateUri="https://main.d2qydggp5q6c4q.amplifyapp.com/"
+                           RequestNavigate="OnNavigate">Open CANedge-dashboard</Hyperlink>
+            </TextBlock>
+            <TextBlock Margin="0,4,0,0">
                 <Hyperlink NavigateUri="https://github.com/DuXupreme/CANalyser"
                            RequestNavigate="OnNavigate">GitHub-repository</Hyperlink>
             </TextBlock>

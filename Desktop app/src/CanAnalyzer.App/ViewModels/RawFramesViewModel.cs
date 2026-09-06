@@ -119,6 +119,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
     {
         var frame = row.Source;
         var builder = new StringBuilder()
+            .AppendLine($"Datum/tijd lokaal: {row.AbsoluteTimeLocal}")
+            .AppendLine($"Datum/tijd UTC: {FormatAbsoluteUtc(frame.TimestampNanoseconds)}")
             .AppendLine($"Tijd [s]: {frame.TimeSeconds:G17}")
             .AppendLine($"Tijd [ns]: {frame.TimestampNanoseconds}")
             .AppendLine($"Frame-index: {frame.FrameIndex}")
@@ -183,12 +185,17 @@ public sealed partial class RawFramesViewModel : ObservableObject
         var options = CaptureFilterOptions();
         var rows = _filterService.Apply(_dataset.RawFrames, options);
 
-        FilteredFrames = rows.Select(frame => new RawFrameRow(frame)).ToList();
+        FilteredFrames = rows.Select(frame => new RawFrameRow(frame, _dataset.StartTimeUtc)).ToList();
 
         FrameStatistics = $"Pagina {PageNumber:N0}: weergegeven {FilteredFrames.Count:N0} frames vanaf gefilterde offset {options.Offset:N0}; dataset totaal {_dataset.RawCount:N0}. De dataset zelf is niet afgekapt.";
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
     }
+
+    private string FormatAbsoluteUtc(long timestampNanoseconds) =>
+        _dataset?.StartTimeUtc is { } startTimeUtc
+            ? MeasurementTimestamp.FormatUtc(startTimeUtc, timestampNanoseconds)
+            : "niet beschikbaar in dit logbestand";
 
     private void ResetFilters()
     {

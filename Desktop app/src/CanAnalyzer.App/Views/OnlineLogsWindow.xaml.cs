@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Media;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
+using CanAnalyzer.Core.Domain;
 
 namespace CanAnalyzer.App.Views;
 
@@ -58,11 +60,14 @@ public partial class OnlineLogsWindow : Window
             Rows.Clear();
             _maximumSelection = result.MaximumSelection;
             _isTruncated = result.Truncated;
+            var newestFile = result.Files.OrderByDescending(static file => file.CreatedAt).FirstOrDefault();
             foreach (var file in result.Files)
             {
                 var row = new OnlineLogRow
                 {
-                    IsSelected = true,
+                    IsSelected = newestFile is not null &&
+                                 string.Equals(file.Logger, newestFile.Logger, StringComparison.Ordinal) &&
+                                 string.Equals(file.Session, newestFile.Session, StringComparison.Ordinal),
                     Key = file.Key,
                     Name = file.Name,
                     Machine = file.Machine,
@@ -108,6 +113,15 @@ public partial class OnlineLogsWindow : Window
             return;
         }
 
+        var selections = CreateSelections(selected);
+        var validation = ValidateSelection(selections);
+        if (!validation.IsValid)
+        {
+            MessageBox.Show(this, validation.Message, "Deze bestanden kunnen niet samen", MessageBoxButton.OK, MessageBoxImage.Information);
+            UpdateSelectionStatus();
+            return;
+        }
+
         SetBusy(true, $"{selected.Length:N0} bestand(en) downloaden...");
         try
         {
@@ -118,7 +132,7 @@ public partial class OnlineLogsWindow : Window
                     : $"Downloaden: {FormatBytes(value.BytesReceived)}";
             });
             DownloadedArchivePath = await _onlineLogService.DownloadArchiveAsync(
-                selected.Select(static row => new OnlineLogSelection(row.Key, row.SizeBytes)).ToArray(),
+                selections,
                 progress,
                 _windowCts.Token);
             DialogResult = true;
@@ -155,12 +169,42 @@ public partial class OnlineLogsWindow : Window
     {
         if (!IsLoaded || !RefreshButton.IsEnabled) return;
         var selected = Rows.Where(static row => row.IsSelected).ToArray();
-        StatusText.Text = Rows.Count == 0
-            ? "Geen MF4-bestanden gevonden in deze uploadperiode."
-            : $"{selected.Length:N0} van {Rows.Count:N0} bestand(en) geselecteerd, {FormatBytes(selected.Sum(static row => row.SizeBytes))}." +
-              (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);
-        DownloadButton.IsEnabled = selected.Length is > 0 && selected.Length <= _maximumSelection;
+        var validation = ValidateSelection(CreateSelections(selected));
+        var withinMaximum = selected.Length <= _maximumSelection;
+        if (Rows.Count == 0)
+        {
+            StatusText.Text = "Geen MF4-bestanden gevonden in deze uploadperiode.";
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
+        }
+        else if (!withinMaximum)
+        {
+            StatusText.Text = $"Selecteer maximaal {_maximumSelection:N0} bestanden per analyse. Kies één sessie of een korter deel daarvan.";
+            StatusText.Foreground = Brushes.Firebrick;
+        }
+        else if (!validation.IsValid)
+        {
+            StatusText.Text = validation.Message;
+            StatusText.Foreground = Brushes.Firebrick;
+        }
+        else
+        {
+            var sessionText = selected.Length > 1 ? $" uit sessie {selected[0].Session}" : string.Empty;
+            StatusText.Text = $"{selected.Length:N0} van {Rows.Count:N0} bestand(en){sessionText} geselecteerd, " +
+                              $"{FormatBytes(selected.Sum(static row => row.SizeBytes))}." +
+                              (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
+        }
+        DownloadButton.IsEnabled = withinMaximum && validation.IsValid;
     }
+
+    private static OnlineLogSelection[] CreateSelections(IEnumerable<OnlineLogRow> rows) => rows
+        .Select(static row => new OnlineLogSelection(row.Key, row.Name, row.Logger, row.Session, row.SizeBytes))
+        .ToArray();
+
+    private static OnlineLogSequenceValidation ValidateSelection(IReadOnlyList<OnlineLogSelection> files) =>
+        OnlineLogSequencePolicy.Validate(files
+            .Select(static file => new OnlineLogPartIdentity(file.Logger, file.Session, file.Name))
+            .ToArray());
 
     private void SetBusy(bool busy, string? status = null)
     {

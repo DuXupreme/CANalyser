@@ -16,7 +16,12 @@ public sealed record OnlineLogQueryResult(
 
 public sealed record OnlineDownloadProgress(long BytesReceived, long? TotalBytes);
 
-public sealed record OnlineLogSelection(string Key, long SizeBytes);
+public sealed record OnlineLogSelection(
+    string Key,
+    string Name,
+    string Logger,
+    string Session,
+    long SizeBytes);
 
 public interface IOnlineLogService
 {

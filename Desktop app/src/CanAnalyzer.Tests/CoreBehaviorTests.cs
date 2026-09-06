@@ -11,7 +11,10 @@ public sealed class CoreBehaviorTests
     [Fact]
     public void PlotViewOptions_DefaultsToFiveThousandDownsamplingPoints()
     {
-        Assert.Equal(5000, new PlotViewOptions().MaxPointsPerTrace);
+        var options = new PlotViewOptions();
+
+        Assert.Equal(5000, options.MaxPointsPerTrace);
+        Assert.False(options.UseDownsampling);
     }
 
     [Fact]

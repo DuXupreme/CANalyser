@@ -14,6 +14,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 ## 1. Data-integriteitscontract
 
 - Exacte relatieve tijd als signed 64-bit nanoseconden; seconden zijn uitsluitend een weergave/projectie.
+- De absolute logger-starttijd blijft behouden. Plotcursors, flags en ruwe frames tonen lokale datum/tijd met UTC-offset; CSV bevat daarnaast ISO 8601 UTC en Unix-nanoseconden.
 - Exacte raw signaalwaarden als `BigInteger` en fysieke waarden als `double`.
 - Iedere bronregel wordt verklaard als non-data, geaccepteerd of afgewezen.
 - Strikte import is standaard; PARTIAL vereist expliciete bevestiging en synthetiseert nooit waarden.
@@ -23,7 +24,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
   - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
-  - dashboard-ZIP met maximaal 200 MF4-delen; delen worden op absolute UTC-tijd chronologisch samengevoegd
+  - dashboard-ZIP met maximaal 200 opeenvolgende MF4-delen uit één logger-sessie; verschillende sessies worden nooit tot één meting samengevoegd
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
@@ -38,11 +39,14 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
   - manual/permissive decode counts
   - DBC message summaries
 - Signal list and grouped plotting
+- Volledige plotresolutie is standaard; downsampling kan voor zeer grote logs bewust worden ingeschakeld (standaardlimiet 5.000 punten per trace).
 - Per-signal offsets
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
-- Decoded CSV export
+- Decoded CSV export met relatieve én absolute meettijd
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
+- Eén los online bestand is altijd toegestaan; meerdere bestanden alleen als hun deelnummers opeenvolgen en logger plus sessie exact gelijk zijn. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
+- Identieke online selecties worden maximaal zeven dagen lokaal hergebruikt; oude bestanden worden automatisch verwijderd en de cache wordt tot circa 2 GB begrensd.
 - Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
   alignment on the first STEP target transition, and ready-made overlays for
   position, error, PWM, current, bus voltage, and power (no DBC required)

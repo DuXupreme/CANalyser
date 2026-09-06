@@ -3,8 +3,11 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CanAnalyzer.App.Services;
+using CanAnalyzer.Core.Domain;
 
 namespace CanAnalyzer.App.Infrastructure;
 
@@ -12,7 +15,20 @@ namespace CanAnalyzer.App.Infrastructure;
 public sealed class OnlineLogService : IOnlineLogService, IDisposable
 {
     internal const string DashboardBaseUrl = "https://main.d2qydggp5q6c4q.amplifyapp.com/";
+    private const long MaximumCacheBytes = 2L * 1024 * 1024 * 1024;
+    private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
     private readonly HttpClient _httpClient = new() { BaseAddress = new Uri(DashboardBaseUrl), Timeout = TimeSpan.FromMinutes(15) };
+
+    public OnlineLogService()
+    {
+        var cacheDirectory = GetCacheDirectory();
+        try
+        {
+            if (Directory.Exists(cacheDirectory)) CleanupCache(cacheDirectory);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     public async Task<OnlineLogQueryResult> GetLogsAsync(
         string loggerId,
@@ -46,7 +62,25 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         CancellationToken cancellationToken)
     {
         if (files.Count == 0) throw new ArgumentException("Selecteer minimaal één logbestand.", nameof(files));
+        var selectionValidation = OnlineLogSequencePolicy.Validate(files
+            .Select(static file => new OnlineLogPartIdentity(file.Logger, file.Session, file.Name))
+            .ToArray());
+        if (!selectionValidation.IsValid) throw new InvalidOperationException(selectionValidation.Message);
         var keys = files.Select(static file => file.Key).ToArray();
+
+        var cacheDirectory = GetCacheDirectory();
+        Directory.CreateDirectory(cacheDirectory);
+        CleanupCache(cacheDirectory);
+        var finalPath = BuildCachePath(cacheDirectory, files);
+        if (IsUsableCachedArchive(finalPath, files))
+        {
+            File.SetLastWriteTimeUtc(finalPath, DateTime.UtcNow);
+            var cachedBytes = files.Sum(static file => Math.Max(0, file.SizeBytes));
+            progress?.Report(new OnlineDownloadProgress(cachedBytes, cachedBytes));
+            return finalPath;
+        }
+
+        TryDelete(finalPath);
         using var planResponse = await _httpClient.PostAsJsonAsync("api/download-plan", new { keys }, cancellationToken)
             .ConfigureAwait(false);
         await EnsureSuccessAsync(planResponse, cancellationToken).ConfigureAwait(false);
@@ -58,13 +92,8 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         if (plannedFiles.Length != files.Count)
             throw new InvalidDataException("Het online-downloadplan bevat niet alle geselecteerde bestanden.");
 
-        var cacheDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CANalyser", "online-cache");
-        Directory.CreateDirectory(cacheDirectory);
-        CleanupOldArchives(cacheDirectory);
-        var finalPath = Path.Combine(cacheDirectory, $"online-logs-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.zip");
         var partialPath = finalPath + ".partial";
+        TryDelete(partialPath);
         try
         {
             var total = files.Sum(static file => Math.Max(0, file.SizeBytes));
@@ -104,6 +133,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                 await target.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             File.Move(partialPath, finalPath);
+            CleanupCache(cacheDirectory, finalPath);
             return finalPath;
         }
         catch
@@ -153,14 +183,68 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         throw new HttpRequestException($"Online logs ophalen is mislukt (HTTP {(int)response.StatusCode}).", null, response.StatusCode);
     }
 
-    private static void CleanupOldArchives(string directory)
+    private static string BuildCachePath(string directory, IReadOnlyList<OnlineLogSelection> files)
     {
-        var cutoff = DateTime.UtcNow.AddDays(-7);
-        foreach (var path in Directory.EnumerateFiles(directory, "online-logs-*.zip*", SearchOption.TopDirectoryOnly))
+        var identity = string.Join('\n', files
+            .OrderBy(static file => file.Key, StringComparer.Ordinal)
+            .Select(static file => $"{file.Key}\t{file.SizeBytes.ToString(CultureInfo.InvariantCulture)}"));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
+        return Path.Combine(directory, $"online-logs-{hash}.zip");
+    }
+
+    private static string GetCacheDirectory() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CANalyser", "online-cache");
+
+    private static bool IsUsableCachedArchive(string path, IReadOnlyList<OnlineLogSelection> files)
+    {
+        if (!File.Exists(path)) return false;
+        try
         {
-            try { if (File.GetLastWriteTimeUtc(path) < cutoff) File.Delete(path); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            using var archive = ZipFile.OpenRead(path);
+            if (archive.Entries.Count != files.Count) return false;
+            var expectedLengths = files.Select(static file => file.SizeBytes).Order().ToArray();
+            var actualLengths = archive.Entries.Select(static entry => entry.Length).Order().ToArray();
+            return expectedLengths.SequenceEqual(actualLengths);
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private static void CleanupCache(string directory, string? preservePath = null)
+    {
+        var cutoff = DateTime.UtcNow - CacheRetention;
+        var candidates = Directory
+            .EnumerateFiles(directory, "online-logs-*", SearchOption.TopDirectoryOnly)
+            .Select(static path => new FileInfo(path))
+            .ToList();
+
+        foreach (var file in candidates.Where(file =>
+                     !string.Equals(file.FullName, preservePath, StringComparison.OrdinalIgnoreCase) &&
+                     file.LastWriteTimeUtc < cutoff))
+        {
+            TryDelete(file.FullName);
+        }
+
+        var archives = Directory
+            .EnumerateFiles(directory, "online-logs-*.zip", SearchOption.TopDirectoryOnly)
+            .Select(static path => new FileInfo(path))
+            .OrderByDescending(static file => file.LastWriteTimeUtc)
+            .ToList();
+        var totalBytes = archives.Sum(static file => file.Length);
+        foreach (var file in archives.AsEnumerable().Reverse())
+        {
+            if (totalBytes <= MaximumCacheBytes) break;
+            if (string.Equals(file.FullName, preservePath, StringComparison.OrdinalIgnoreCase)) continue;
+            var length = file.Length;
+            TryDelete(file.FullName);
+            if (!File.Exists(file.FullName)) totalBytes -= length;
         }
     }
 

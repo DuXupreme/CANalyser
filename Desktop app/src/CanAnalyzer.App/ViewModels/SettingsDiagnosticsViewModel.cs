@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
+using CanAnalyzer.Core.Utilities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -48,7 +49,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private int _defaultSignalListHeight = 420;
 
     [ObservableProperty]
-    private bool _defaultUseDownsampling = true;
+    private bool _defaultUseDownsampling;
 
     [ObservableProperty]
     private bool _defaultShowLegend = true;
@@ -151,9 +152,13 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     {
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
         var report = dataset.ImportReport;
+        var measurementStart = dataset.StartTimeUtc is { } startTimeUtc
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            : "Meetstart: niet beschikbaar in dit logbestand\n";
         IntegritySummary =
             $"DATASETSTATUS: {dataset.Completeness.ToString().ToUpperInvariant()}\n" +
             $"Appversie: {dataset.ApplicationVersion}\n" +
+            measurementStart +
             $"Bron SHA-256: {dataset.SourceLogSha256}\n" +
             $"DBC SHA-256: {dataset.DbcSha256}\n" +
             (report is null

@@ -29,6 +29,9 @@ public sealed class CanDataset : IDisposable
 
     public string ApplicationVersion { get; init; } = string.Empty;
 
+    /// <summary>Absolute UTC start time supplied by the logger, when available.</summary>
+    public DateTimeOffset? StartTimeUtc { get; init; }
+
     public int RawCount => RawFrames.Count;
 
     public int SignalCount => SignalLabels.Count;

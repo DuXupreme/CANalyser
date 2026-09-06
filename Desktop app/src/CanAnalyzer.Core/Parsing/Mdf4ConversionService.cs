@@ -10,12 +10,15 @@ namespace CanAnalyzer.Core.Parsing;
 public sealed class Mdf4ConversionService : IMdf4ConversionService
 {
     internal const string ExpectedSha256 = "30B7524CC5CEAF7B46E64BB2F4E3AF90262D2DB0607122B08B83606C1CA8AE9C";
+    internal const string EmbeddedResourceName = "CanAnalyzer.Core.Tools.Mdf4.mdf2peak.exe";
     private readonly string _converterPath;
+    private readonly bool _allowEmbeddedFallback;
     private readonly ILogger<Mdf4ConversionService> _logger;
 
     public Mdf4ConversionService(ILogger<Mdf4ConversionService> logger)
         : this(Path.Combine(AppContext.BaseDirectory, "Tools", "Mdf4", "mdf2peak.exe"), logger)
     {
+        _allowEmbeddedFallback = true;
     }
 
     internal Mdf4ConversionService(string converterPath, ILogger<Mdf4ConversionService> logger)
@@ -32,21 +35,20 @@ public sealed class Mdf4ConversionService : IMdf4ConversionService
     {
         ArgumentNullException.ThrowIfNull(inputPaths);
         if (inputPaths.Count == 0) throw new ArgumentException("Er zijn geen MF4-bestanden geselecteerd.", nameof(inputPaths));
-        if (!File.Exists(_converterPath))
-            throw new FileNotFoundException("De ingebouwde CANedge MF4-converter ontbreekt. Installeer CANalyser opnieuw.", _converterPath);
+        var converterPath = await ResolveConverterPathAsync(cancellationToken).ConfigureAwait(false);
 
-        await VerifyConverterAsync(cancellationToken).ConfigureAwait(false);
+        await VerifyConverterAsync(converterPath, cancellationToken).ConfigureAwait(false);
         Directory.CreateDirectory(outputDirectory);
         progress?.Report(new LoadProgress($"MF4 converteren ({inputPaths.Count:N0} bestand(en))...", 3));
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = _converterPath,
+            FileName = converterPath,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(_converterPath) ?? AppContext.BaseDirectory
+            WorkingDirectory = Path.GetDirectoryName(converterPath) ?? AppContext.BaseDirectory
         };
         startInfo.ArgumentList.Add("--non-interactive");
         startInfo.ArgumentList.Add("--verbosity=1");
@@ -95,9 +97,69 @@ public sealed class Mdf4ConversionService : IMdf4ConversionService
         return outputs;
     }
 
-    private async Task VerifyConverterAsync(CancellationToken cancellationToken)
+    private async Task<string> ResolveConverterPathAsync(CancellationToken cancellationToken)
     {
-        await using var stream = new FileStream(_converterPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+        if (File.Exists(_converterPath))
+        {
+            return _converterPath;
+        }
+
+        if (!_allowEmbeddedFallback)
+        {
+            throw new FileNotFoundException("De ingebouwde CANedge MF4-converter ontbreekt. Installeer CANalyser opnieuw.", _converterPath);
+        }
+
+        var converterDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CANalyser", "tools", "mdf4", ExpectedSha256[..12]);
+        var extractedPath = Path.Combine(converterDirectory, "mdf2peak.exe");
+        if (File.Exists(extractedPath))
+        {
+            try
+            {
+                await VerifyConverterAsync(extractedPath, cancellationToken).ConfigureAwait(false);
+                return extractedPath;
+            }
+            catch (InvalidDataException)
+            {
+                try { File.Delete(extractedPath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        await using var embedded = typeof(Mdf4ConversionService).Assembly.GetManifestResourceStream(EmbeddedResourceName)
+                                   ?? throw new FileNotFoundException("De ingebouwde CANedge MF4-converter ontbreekt in dit programmabestand.");
+        Directory.CreateDirectory(converterDirectory);
+        var temporaryPath = extractedPath + ".partial-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using (var target = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             128 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await embedded.CopyToAsync(target, cancellationToken).ConfigureAwait(false);
+                await target.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            File.Move(temporaryPath, extractedPath, overwrite: true);
+            return extractedPath;
+        }
+        finally
+        {
+            try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private async Task VerifyConverterAsync(string converterPath, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(converterPath, FileMode.Open, FileAccess.Read, FileShare.Read,
             128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
         if (!string.Equals(actual, ExpectedSha256, StringComparison.Ordinal))

@@ -4,6 +4,7 @@ using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Utilities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -855,6 +856,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
     {
+        var measurementTimeText = dataset.StartTimeUtc is { } startTimeUtc
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            : "Meetstart: niet beschikbaar in dit logbestand\n";
         var speedModeText = useDownsampling
             ? $"LOD/downsampling actief: de grafiek tekent maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace om grote logs soepel te tonen. " +
               "Dit verandert de brondata, decode, analyse en CSV-export niet. Implicatie: visuele details tussen representatieve punten kunnen minder exact lijken; zoom in of schakel LOD uit voor detailinspectie."
@@ -868,6 +872,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             return
                 $"Bestanden geladen.\n{integrity}\n" +
+                measurementTimeText +
                 $"Ruwe frames geparsed: {dataset.RawCount:N0}\n" +
                 $"Extended frames: {dataset.ExtendedCount:N0}\n" +
                 $"Gedecodeerde meetpunten: {dataset.DecodedSamples.Count:N0}\n" +
@@ -882,6 +887,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         return
             $"Bestanden geladen, maar er zijn geen DBC-signalen gedecodeerd.\n" +
+            measurementTimeText +
             $"Ruwe frames geparsed: {dataset.RawCount:N0}\n" +
             $"Extended frames: {dataset.ExtendedCount:N0}\n" +
             $"DBC berichten: {dataset.Diagnostics.DbcMessageCount:N0}\n" +

@@ -7,6 +7,8 @@ namespace CanAnalyzer.App.State;
 /// </summary>
 public sealed class AppSettings
 {
+    public int SettingsVersion { get; set; }
+
     public string? LastLogFilePath { get; set; }
 
     public string? LastDbcFilePath { get; set; }

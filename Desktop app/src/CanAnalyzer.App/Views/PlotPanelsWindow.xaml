@@ -80,6 +80,7 @@
                 </WrapPanel>
                 <TextBlock x:Name="CursorInfoText"
                            Text="Cursor: - | A: - | B: - | dt: -"
+                           TextWrapping="Wrap"
                            Margin="0,4,0,0" />
                 <TextBlock x:Name="CursorValueText"
                            Text="Signaalwaarde: -"

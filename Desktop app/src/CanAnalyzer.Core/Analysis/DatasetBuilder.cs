@@ -16,7 +16,8 @@ public sealed class DatasetBuilder : IDatasetBuilder
         DatasetCompleteness completeness = DatasetCompleteness.Complete,
         string sourceLogSha256 = "",
         string dbcSha256 = "",
-        string applicationVersion = "")
+        string applicationVersion = "",
+        DateTimeOffset? startTimeUtc = null)
     {
         var counts = new Dictionary<SignalIdentity, int>();
         foreach (var sample in decodedSamples)
@@ -56,7 +57,8 @@ public sealed class DatasetBuilder : IDatasetBuilder
             Completeness = completeness,
             SourceLogSha256 = sourceLogSha256,
             DbcSha256 = dbcSha256,
-            ApplicationVersion = applicationVersion
+            ApplicationVersion = applicationVersion,
+            StartTimeUtc = startTimeUtc?.ToUniversalTime()
         };
     }
 

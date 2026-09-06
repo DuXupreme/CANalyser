@@ -242,7 +242,7 @@
                                 <Button Content="Wis flags" Command="{Binding ClearFlagsCommand}" Margin="0,0,6,0" />
                                 <Button Content="Reset zoom" Command="{Binding ResetAllPlotsCommand}" />
                             </WrapPanel>
-                            <TextBlock Text="{Binding CursorInfo}" Margin="0,3,0,0" />
+                            <TextBlock Text="{Binding CursorInfo}" TextWrapping="Wrap" Margin="0,3,0,0" />
                             <TextBlock Text="{Binding CursorValueInfo}" Margin="0,1,0,0" />
                             <TextBlock Text="Tip: klik op legendanaam om lijn aan/uit te zetten. Ctrl+klik = Flag A, Shift+klik = Flag B, Ctrl+muiswiel = alleen actieve subplot Y-zoom, dubbelklik = reset, omgekeerde box-select = uitzoomen."
                                        Foreground="#444444" />

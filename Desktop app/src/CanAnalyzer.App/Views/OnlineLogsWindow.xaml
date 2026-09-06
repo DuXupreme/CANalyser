@@ -15,8 +15,10 @@
 
         <StackPanel>
             <TextBlock Text="Online CANedge-logs" FontSize="22" FontWeight="SemiBold" />
-            <TextBlock Margin="0,5,0,14" Foreground="#5E6B75" TextWrapping="Wrap"
+            <TextBlock Margin="0,5,0,3" Foreground="#5E6B75" TextWrapping="Wrap"
                        Text="Kies een machine en periode. CANalyser downloadt de geselecteerde MF4-delen als één ZIP, zet ze op absolute tijd en analyseert ze met je laatst gekozen DBC." />
+            <TextBlock Margin="0,0,0,14" Foreground="#5E6B75" TextWrapping="Wrap"
+                       Text="Meerdere bestanden kunnen alleen samen als het opeenvolgende delen uit dezelfde sessie zijn. Andere sessies analyseer je afzonderlijk. Een identieke selectie wordt uit de lokale cache hergebruikt; cachebestanden worden na 7 dagen verwijderd en de cache wordt tot circa 2 GB begrensd." />
         </StackPanel>
 
         <Grid Grid.Row="1" Margin="0,0,0,12">

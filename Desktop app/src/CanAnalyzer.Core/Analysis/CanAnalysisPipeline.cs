@@ -81,7 +81,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
                       ?? "2.1.0";
         var dataset = await Task.Run(() => _datasetBuilder.Build(
             parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
-            combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version), cancellationToken).ConfigureAwait(false);
+            combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
         progress?.Report(new LoadProgress("Klaar.", 100));
         return dataset;
     }

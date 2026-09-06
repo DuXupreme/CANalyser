@@ -16,5 +16,6 @@ public interface IDatasetBuilder
         DatasetCompleteness completeness = DatasetCompleteness.Complete,
         string sourceLogSha256 = "",
         string dbcSha256 = "",
-        string applicationVersion = "");
+        string applicationVersion = "",
+        DateTimeOffset? startTimeUtc = null);
 }

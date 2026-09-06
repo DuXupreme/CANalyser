@@ -321,21 +321,91 @@ public sealed class DataIntegrityTests
         var raw = BigInteger.Parse("18446744073709551615", CultureInfo.InvariantCulture);
         var frame = Frame(123_456_789, 0x123, [0xFF]) with { SourceLineNumber = 7 };
         var report = new ImportReport("test", 1, 0, 1, 0, []);
+        var startTimeUtc = new DateTimeOffset(2026, 9, 3, 12, 34, 56, TimeSpan.Zero).AddTicks(1_234_567);
         using var dataset = new DatasetBuilder().Build([frame],
             [new DecodedSignalSample(frame.TimestampNanoseconds, 0, 7, identity, 0.10000000000000002d, raw, "u")],
-            [], new DecoderDiagnostics(0, 0, 1, 0, 0, ""), report, DatasetCompleteness.Complete, "AA", "BB", "2.0.0");
+            [], new DecoderDiagnostics(0, 0, 1, 0, 0, ""), report, DatasetCompleteness.Complete, "AA", "BB", "2.0.0", startTimeUtc);
         var path = Path.GetTempFileName();
         try
         {
             await new CsvExportService().ExportDecodedSignalsAsync(path, dataset, CancellationToken.None);
             var text = await File.ReadAllTextAsync(path);
             Assert.Contains("time_ns", text);
+            Assert.Contains("timestamp_utc", text);
+            Assert.Contains("unix_time_ns", text);
+            Assert.Contains("2026-09-03T12:34:56.246913489Z", text);
             Assert.Contains("123456789", text);
             Assert.Contains("18446744073709551615", text);
             Assert.Contains("0.10000000000000002", text);
             Assert.Contains(",AA,BB,2.0.0", text);
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task CsvExportLeavesUnavailableAbsoluteTimeAndFrameMetadataEmptyOrZero()
+    {
+        var identity = new SignalIdentity("can1", CanFrameFormat.Classic, false, 0x123, "M", "S");
+        using var dataset = new DatasetBuilder().Build(
+            [],
+            [
+                new DecodedSignalSample(5, 5, 1, identity, 1d, BigInteger.One),
+                new DecodedSignalSample(6, -1, 2, identity, 2d, new BigInteger(2))
+            ],
+            [],
+            new DecoderDiagnostics(0, 0, 2, 0, 0, ""));
+        var path = Path.GetTempFileName();
+        try
+        {
+            await new CsvExportService().ExportDecodedSignalsAsync(path, dataset, CancellationToken.None);
+            var rows = await File.ReadAllLinesAsync(path);
+
+            Assert.Equal(3, rows.Length);
+            foreach (var row in rows.Skip(1))
+            {
+                var fields = row.Split(',');
+                Assert.Equal(string.Empty, fields[1]);
+                Assert.Equal(string.Empty, fields[2]);
+                Assert.Equal("0", fields[14]);
+                Assert.Equal("0", fields[15]);
+                Assert.Equal(string.Empty, fields[^1]);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void MeasurementTimestampPreservesAbsoluteNanoseconds()
+    {
+        var start = new DateTimeOffset(2026, 9, 3, 12, 34, 56, TimeSpan.Zero).AddTicks(1_234_567);
+
+        Assert.Equal("2026-09-03 12:34:56.246913489 UTC", MeasurementTimestamp.FormatUtc(start, 123_456_789));
+        Assert.Equal("2026-09-03T12:34:56.246913489Z", MeasurementTimestamp.FormatUtcIso8601(start, 123_456_789));
+        Assert.Equal(1_788_438_896_246_913_489L, MeasurementTimestamp.ToUnixNanoseconds(start, 123_456_789));
+        Assert.True(MeasurementTimestamp.TrySecondsToNanoseconds(0.123456789d, out var relativeNanoseconds));
+        Assert.Equal(123_456_789L, relativeNanoseconds);
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(double.MaxValue)]
+    [InlineData(double.MinValue)]
+    public void MeasurementTimestampRejectsNonFiniteOrOutOfRangeSeconds(double seconds)
+    {
+        Assert.False(MeasurementTimestamp.TrySecondsToNanoseconds(seconds, out var nanoseconds));
+        Assert.Equal(0L, nanoseconds);
+    }
+
+    [Fact]
+    public void MeasurementTimestampFormatsLocalAndPreEpochValues()
+    {
+        var local = MeasurementTimestamp.FormatLocal(DateTimeOffset.UnixEpoch, 1);
+
+        Assert.EndsWith(DateTimeOffset.UnixEpoch.ToLocalTime().ToString(" zzz", CultureInfo.InvariantCulture), local);
+        Assert.Equal("1969-12-31 23:59:59.999999999 UTC", MeasurementTimestamp.FormatUtc(DateTimeOffset.UnixEpoch, -1));
+        Assert.Equal("1969-12-31T23:59:59.999999999Z", MeasurementTimestamp.FormatUtcIso8601(DateTimeOffset.UnixEpoch, -1));
     }
 
     [Fact]
