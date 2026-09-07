@@ -14,6 +14,7 @@ public partial class OnlineLogsWindow : Window
     private readonly CancellationTokenSource _windowCts = new();
     private int _maximumSelection = 200;
     private bool _isTruncated;
+    private int _unknownRecordingTimes;
 
     public OnlineLogsWindow(IOnlineLogService onlineLogService)
     {
@@ -60,7 +61,8 @@ public partial class OnlineLogsWindow : Window
             Rows.Clear();
             _maximumSelection = result.MaximumSelection;
             _isTruncated = result.Truncated;
-            var newestFile = result.Files.OrderByDescending(static file => file.CreatedAt).FirstOrDefault();
+            _unknownRecordingTimes = result.UnknownRecordingTimes;
+            var newestFile = result.Files.Where(static file => file.RecordedAt.HasValue).OrderByDescending(static file => file.RecordedAt).FirstOrDefault();
             foreach (var file in result.Files)
             {
                 var row = new OnlineLogRow
@@ -73,7 +75,8 @@ public partial class OnlineLogsWindow : Window
                     Machine = file.Machine,
                     Logger = file.Logger,
                     Session = file.Session,
-                    CreatedAt = file.CreatedAt,
+                    RecordedAt = file.RecordedAt,
+                    UploadedAt = file.UploadedAt,
                     SizeBytes = file.SizeBytes
                 };
                 row.PropertyChanged += OnRowPropertyChanged;
@@ -88,6 +91,7 @@ public partial class OnlineLogsWindow : Window
         {
             Rows.Clear();
             _isTruncated = false;
+            _unknownRecordingTimes = 0;
             StatusText.Text = "Online logs konden niet worden opgehaald.";
             MessageBox.Show(this, ex.Message, "Online logs ophalen mislukt", MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -173,7 +177,7 @@ public partial class OnlineLogsWindow : Window
         var withinMaximum = selected.Length <= _maximumSelection;
         if (Rows.Count == 0)
         {
-            StatusText.Text = "Geen MF4-bestanden gevonden in deze uploadperiode.";
+            StatusText.Text = "Geen MF4-bestanden gevonden met een meetstart in deze periode.";
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
         }
         else if (!withinMaximum)
@@ -194,6 +198,8 @@ public partial class OnlineLogsWindow : Window
                               (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
         }
+        if (_unknownRecordingTimes > 0)
+            StatusText.Text += $" Van {_unknownRecordingTimes:N0} bestand(en) is de meettijd niet leesbaar; deze vallen buiten de datumselectie.";
         DownloadButton.IsEnabled = withinMaximum && validation.IsValid;
     }
 

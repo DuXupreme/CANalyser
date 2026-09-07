@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Online CANedge-logs"
         Icon="pack://application:,,,/Resources/Branding/canalyser-icon.ico"
-        Width="1020" Height="680" MinWidth="840" MinHeight="520"
+        Width="1280" Height="680" MinWidth="1050" MinHeight="520"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="18">
         <Grid.RowDefinitions>
@@ -16,7 +16,7 @@
         <StackPanel>
             <TextBlock Text="Online CANedge-logs" FontSize="22" FontWeight="SemiBold" />
             <TextBlock Margin="0,5,0,3" Foreground="#5E6B75" TextWrapping="Wrap"
-                       Text="Kies een machine en periode. CANalyser downloadt de geselecteerde MF4-delen als één ZIP, zet ze op absolute tijd en analyseert ze met je laatst gekozen DBC." />
+                       Text="Kies een machine en meetperiode. De periode en kolom 'Log gestart' gebruiken het eerste meetrecord volgens de loggerklok, ook bij latere upload. Tijden staan lokaal met UTC-offset. CANalyser analyseert de geselecteerde MF4-delen met je laatst gekozen DBC." />
             <TextBlock Margin="0,0,0,14" Foreground="#5E6B75" TextWrapping="Wrap"
                        Text="Meerdere bestanden kunnen alleen samen als het opeenvolgende delen uit dezelfde sessie zijn. Andere sessies analyseer je afzonderlijk. Een identieke selectie wordt uit de lokale cache hergebruikt; cachebestanden worden na 7 dagen verwijderd en de cache wordt tot circa 2 GB begrensd." />
         </StackPanel>
@@ -33,7 +33,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="Machine" VerticalAlignment="Center" Margin="0,0,8,0" />
             <ComboBox x:Name="MachineBox" Grid.Column="1" DisplayMemberPath="Name" SelectedValuePath="LoggerId" />
-            <TextBlock Grid.Column="2" Text="Uploads van" VerticalAlignment="Center" Margin="18,0,8,0" />
+            <TextBlock Grid.Column="2" Text="Meetstart van" VerticalAlignment="Center" Margin="18,0,8,0" />
             <DatePicker x:Name="FromPicker" Grid.Column="3" />
             <TextBlock Grid.Column="4" Text="Tot en met" VerticalAlignment="Center" Margin="18,0,8,0" />
             <DatePicker x:Name="ToPicker" Grid.Column="5" />
@@ -48,7 +48,8 @@
                 <DataGridTextColumn Header="Machine" Binding="{Binding Machine}" Width="150" IsReadOnly="True" />
                 <DataGridTextColumn Header="Sessie" Binding="{Binding Session}" Width="130" IsReadOnly="True" />
                 <DataGridTextColumn Header="Bestand" Binding="{Binding Name}" Width="*" MinWidth="230" IsReadOnly="True" />
-                <DataGridTextColumn Header="Upload" Binding="{Binding CreatedDisplay}" Width="155" IsReadOnly="True" />
+                <DataGridTextColumn Header="Log gestart" Binding="{Binding RecordedDisplay}" SortMemberPath="RecordedAt" Width="210" IsReadOnly="True" />
+                <DataGridTextColumn Header="Geüpload" Binding="{Binding UploadedDisplay}" SortMemberPath="UploadedAt" Width="210" IsReadOnly="True" />
                 <DataGridTextColumn Header="Grootte" Binding="{Binding SizeDisplay}" Width="90" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>

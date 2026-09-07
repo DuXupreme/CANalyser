@@ -8,6 +8,8 @@
 
 ## Veilige selectie van online logs
 
+- De datumselectie en nieuwste sessie gebruiken de meetstart uit het eerste MF4-meetrecord, ook als een bestand dagen later is geüpload.
+- Online logs tonen meetstart en uploadtijd in afzonderlijke kolommen met UTC-offset. Dit vereist de bijbehorende dashboardupdate; een oude API wordt duidelijk gemeld.
 - Meerdere MF4-bestanden mogen alleen samen worden geopend als logger en sessie gelijk zijn en de deelnummers opeenvolgen.
 - Ongeldige selecties krijgen uitleg voordat de download begint; dezelfde controle geldt bij ZIP-import.
 - De nieuwste sessie wordt standaard geselecteerd. Een enkel bestand blijft toegestaan.

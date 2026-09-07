@@ -6,13 +6,15 @@ public sealed record OnlineLogFile(
     string Machine,
     string Logger,
     string Session,
-    DateTimeOffset CreatedAt,
+    DateTimeOffset? RecordedAt,
+    DateTimeOffset UploadedAt,
     long SizeBytes);
 
 public sealed record OnlineLogQueryResult(
     IReadOnlyList<OnlineLogFile> Files,
     bool Truncated,
-    int MaximumSelection);
+    int MaximumSelection,
+    int UnknownRecordingTimes);
 
 public sealed record OnlineDownloadProgress(long BytesReceived, long? TotalBytes);
 

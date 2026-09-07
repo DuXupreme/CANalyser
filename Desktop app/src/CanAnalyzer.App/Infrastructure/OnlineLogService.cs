@@ -38,11 +38,14 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
     {
         var url = "api/logs?machine=" + Uri.EscapeDataString(loggerId)
                   + "&from=" + Uri.EscapeDataString(fromUtc.ToString("O", CultureInfo.InvariantCulture))
-                  + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture));
+                  + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture))
+                  + "&timeBasis=recording";
         using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         var payload = await response.Content.ReadFromJsonAsync<LogListResponse>(cancellationToken: cancellationToken).ConfigureAwait(false)
                       ?? throw new InvalidDataException("De online-loglijst is leeg of ongeldig.");
+        if (!string.Equals(payload.TimeBasis, "recording", StringComparison.Ordinal))
+            throw new InvalidDataException("Het dashboard ondersteunt selectie op meettijd nog niet. Werk eerst het dashboard bij; uploadtijden worden niet als meettijden gebruikt.");
         return new OnlineLogQueryResult(
             payload.Files.Select(static file => new OnlineLogFile(
                 file.Key,
@@ -50,10 +53,12 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                 file.Machine,
                 file.Logger,
                 file.Session,
-                file.CreatedAt,
+                file.RecordedAt,
+                file.UploadedAt ?? file.CreatedAt,
                 file.SizeBytes)).ToArray(),
             payload.Truncated,
-            payload.MaximumSelection);
+            payload.MaximumSelection,
+            payload.UnknownRecordingTimes);
     }
 
     public async Task<string> DownloadArchiveAsync(
@@ -255,7 +260,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private sealed record LogListResponse(LogFileResponse[] Files, bool Truncated, int MaximumSelection);
+    private sealed record LogListResponse(LogFileResponse[] Files, bool Truncated, int MaximumSelection, string? TimeBasis, int UnknownRecordingTimes);
     private sealed record DownloadPlanResponse(DownloadFileResponse[]? Files, DateTimeOffset ExpiresAt);
     private sealed record DownloadFileResponse(string? ArchiveName, string? Url);
     private sealed record LogFileResponse(
@@ -265,6 +270,8 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         string Logger,
         string Session,
         DateTimeOffset CreatedAt,
-        long SizeBytes);
+        long SizeBytes,
+        DateTimeOffset? RecordedAt,
+        DateTimeOffset? UploadedAt);
     private sealed record ErrorResponse(string Error);
 }
