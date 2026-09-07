@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
+using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -17,7 +18,9 @@ namespace CanAnalyzer.App.ViewModels;
 
 public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 {
+    private const int MaximumAnalysisPointsPerSignal = 250_000;
     private readonly IJoystickAnalyticsService _analyticsService;
+    private readonly ITelemetryService _telemetryService;
     private readonly DispatcherTimer _joystickPlaybackTimer;
     private CanDataset? _dataset;
     private DelayAnalysisResult? _lastDelayResult;
@@ -28,6 +31,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private double _currentJoystickDeadzone;
     private double _currentJoystickSaturation;
     private string? _lastTimedPathFailure;
+    private readonly Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
+    private bool _analysisWasSampled;
+    private int _largestAnalysisSource;
 
     [ObservableProperty] private string? _selectedJoystickXSignal;
     [ObservableProperty] private string? _selectedJoystickYSignal;
@@ -40,6 +46,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private int _histogramBins = 40;
     [ObservableProperty] private double _deadzoneThreshold = 0.10;
     [ObservableProperty] private double _saturationThreshold = 0.90;
+    [ObservableProperty] private double _actuatorStrokeMinimum;
+    [ObservableProperty] private double _actuatorStrokeMaximum = 100;
+    [ObservableProperty] private double _actuatorExtremeBandPercent = 5;
     [ObservableProperty] private bool _useJoystickTimeWindow;
     [ObservableProperty] private double _joystickTimeStartSeconds;
     [ObservableProperty] private double _joystickTimeEndSeconds;
@@ -63,6 +72,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private double _responseThresholdPercent = 2.0;
     [ObservableProperty] private string _statusText = "Laad eerst log + DBC en open daarna dit tabblad.";
     [ObservableProperty] private string _actuatorSummary = string.Empty;
+    [ObservableProperty] private string _actuatorStrokeSummary = string.Empty;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _busyLabel = "Analyses herberekenen...";
 
@@ -80,9 +90,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private PlotModel _canTopIdPlotModel = EmptyPlot("Top CAN-IDs");
     [ObservableProperty] private IPlotController _delayOverlayController = CreateInteractiveController();
 
-    public JoystickAnalyticsViewModel(IJoystickAnalyticsService analyticsService)
+    public JoystickAnalyticsViewModel(
+        IJoystickAnalyticsService analyticsService,
+        ITelemetryService telemetryService,
+        ActiveUsageViewModel activeUsage)
     {
         _analyticsService = analyticsService;
+        _telemetryService = telemetryService;
+        ActiveUsage = activeUsage;
         RecomputeCommand = new AsyncRelayCommand(RecomputeAsync, () => !IsBusy);
         AutoDetectJoystickPairCommand = new RelayCommand(AutoDetectJoystickSignals);
         AutoDetectActuatorPairCommand = new RelayCommand(AutoDetectButterflySignals);
@@ -98,8 +113,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     }
 
     public ObservableCollection<string> AvailableSignals { get; } = [];
+    public ActiveUsageViewModel ActiveUsage { get; }
     public ObservableCollection<MetricRow> JoystickUsageMetrics { get; } = [];
     public ObservableCollection<ActuatorMetricRow> ActuatorMatrix { get; } = [];
+    public ObservableCollection<ActuatorMetricRow> ActuatorStrokeMetrics { get; } = [];
     public ObservableCollection<MetricRow> DelayMetrics { get; } = [];
     public ObservableCollection<MetricRow> ProfessionalCanMetrics { get; } = [];
     public ObservableCollection<CanTopIdRow> ProfessionalTopIdRows { get; } = [];
@@ -203,6 +220,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     public void LoadDataset(CanDataset dataset)
     {
         _dataset = dataset;
+        ActiveUsage.LoadDataset(dataset);
+        _analysisSeriesCache.Clear();
         AvailableSignals.Clear();
         foreach (var label in dataset.SignalLabels) AvailableSignals.Add(label);
         AutoDetectButterflySignals();
@@ -225,11 +244,26 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         IsBusy = true;
+        _analysisWasSampled = false;
+        _largestAnalysisSource = 0;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var operationProperties = new Dictionary<string, object?>
+        {
+            ["decoded_sample_bucket"] = TelemetryBuckets.Count(_dataset.DecodedSamples.Count),
+            ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount),
+            ["maximum_points_per_signal"] = MaximumAnalysisPointsPerSignal
+        };
+        var operationId = _telemetryService.BeginCriticalOperation("analytics_recompute", operationProperties);
         try
         {
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_started", operationProperties);
             BusyLabel = "Joystickanalyse herberekenen...";
             await Dispatcher.Yield(DispatcherPriority.Background);
             BuildJoystickUsageAnalytics();
+
+            BusyLabel = "Actuatorslag analyseren...";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildActuatorStrokeUsage();
 
             BusyLabel = "Actuatoranalyse herberekenen...";
             await Dispatcher.Yield(DispatcherPriority.Background);
@@ -242,12 +276,35 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             BusyLabel = "CAN-overzichten herberekenen...";
             await Dispatcher.Yield(DispatcherPriority.Background);
             BuildProfessionalCanAnalytics();
-        StatusText = _dataset.Completeness == DatasetCompleteness.Partial
-            ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
-            : "COMPLETE — analyses bijgewerkt.";
+            var boundedText = _analysisWasSampled
+                ? $" Voor stabiliteit zijn per signaal maximaal {MaximumAnalysisPointsPerSignal:N0} gelijkmatig verdeelde punten uit de volledige meetperiode gebruikt (grootste bron: {_largestAnalysisSource:N0})."
+                : string.Empty;
+            StatusText = (_dataset.Completeness == DatasetCompleteness.Partial
+                ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
+                : "COMPLETE — analyses bijgewerkt.") + boundedText;
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_completed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["input_sampled"] = _analysisWasSampled,
+                ["largest_source_sample_bucket"] = TelemetryBuckets.Count(_largestAnalysisSource),
+                ["maximum_points_per_signal"] = MaximumAnalysisPointsPerSignal
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Analyse kon niet worden voltooid; de fout is vastgelegd in telemetry. De geladen brondata blijft beschikbaar.";
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_failed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["exception_type"] = ex.GetType().Name,
+                ["input_sampled"] = _analysisWasSampled,
+                ["largest_source_sample_bucket"] = TelemetryBuckets.Count(_largestAnalysisSource)
+            });
         }
         finally
         {
+            stopwatch.Stop();
+            _telemetryService.CompleteCriticalOperation(operationId);
             IsBusy = false;
         }
     }
@@ -461,7 +518,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         _currentJoystickFilteredPath = [];
         JoystickUsageMetrics.Clear();
         ActuatorMatrix.Clear();
+        ActuatorStrokeMetrics.Clear();
         ActuatorSummary = string.Empty;
+        ActuatorStrokeSummary = string.Empty;
         DelayMetrics.Clear();
         ProfessionalCanMetrics.Clear();
         ProfessionalTopIdRows.Clear();
@@ -650,6 +709,74 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             r.FrontTracking.Gain < 0);
         ActuatorDelayHistogramModel = BuildButterflyDelayHistogram(r);
     }
+
+    private void BuildActuatorStrokeUsage()
+    {
+        ActuatorStrokeMetrics.Clear();
+        ActuatorStrokeSummary = string.Empty;
+        var minimum = ActuatorStrokeMinimum;
+        var maximum = ActuatorStrokeMaximum;
+        var band = ActuatorExtremeBandPercent;
+        if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || maximum <= minimum ||
+            !double.IsFinite(band) || band is < 0 or > 50)
+        {
+            ActuatorStrokeSummary = "Ongeldige referentieslag: maximum moet groter zijn dan minimum en de uiterste-band moet 0–50% zijn.";
+            return;
+        }
+
+        var analyzer = new ActuatorStrokeUsageAnalyzer();
+        ActuatorStrokeUsageResult? Analyze(string? label)
+        {
+            if (!TryGetSeries(label, out var series)) return null;
+            return analyzer.Analyze(
+                series,
+                minimum,
+                maximum,
+                band,
+                UseJoystickTimeWindow ? JoystickTimeStartSeconds : null,
+                UseJoystickTimeWindow ? JoystickTimeEndSeconds : null);
+        }
+
+        var left = Analyze(SelectedActuatorLeftSignal);
+        var right = Analyze(SelectedActuatorRightSignal);
+        var front = Analyze(SelectedActuatorFrontSignal);
+        ActuatorStrokeMetrics.Add(new ActuatorMetricRow("Signaal", Name(left), Name(right), Name(front)));
+        ActuatorStrokeMetrics.Add(new ActuatorMetricRow("Meetpunten", Count(left), Count(right), Count(front)));
+        AddStrokeRow("Waargenomen minimum", left, right, front, static value => value.ObservedMinimum);
+        AddStrokeRow("P01", left, right, front, static value => value.Percentile01);
+        AddStrokeRow("Mediaan", left, right, front, static value => value.Median);
+        AddStrokeRow("P99", left, right, front, static value => value.Percentile99);
+        AddStrokeRow("Waargenomen maximum", left, right, front, static value => value.ObservedMaximum);
+        AddStrokeRow("Robuust gebruikte slag [%]", left, right, front, static value => value.RobustStrokeUsedPercent);
+        AddStrokeRow("Tijd nabij lage uiterste [%]", left, right, front, static value => value.TimeNearMinimumPercent);
+        AddStrokeRow("Tijd nabij hoge uiterste [%]", left, right, front, static value => value.TimeNearMaximumPercent);
+        AddStrokeRow("Tijd buiten referentieslag [%]", left, right, front, static value => value.TimeOutsideReferencePercent);
+        ActuatorStrokeMetrics.Add(new ActuatorMetricRow(
+            "Uitersten geraakt (laag/hoog)",
+            Reached(left),
+            Reached(right),
+            Reached(front)));
+        ActuatorStrokeSummary =
+            $"Referentieslag {F(minimum)} .. {F(maximum)}; ‘nabij uiterste’ is de buitenste {F(band)}% aan elke zijde. " +
+            "Robuuste slag gebruikt P01–P99, zodat één meetpiek het resultaat niet domineert.";
+    }
+
+    private void AddStrokeRow(
+        string metric,
+        ActuatorStrokeUsageResult? left,
+        ActuatorStrokeUsageResult? right,
+        ActuatorStrokeUsageResult? front,
+        Func<ActuatorStrokeUsageResult, double> selector) =>
+        ActuatorStrokeMetrics.Add(new ActuatorMetricRow(metric, StrokeValue(left, selector), StrokeValue(right, selector), StrokeValue(front, selector)));
+
+    private static string StrokeValue(ActuatorStrokeUsageResult? result, Func<ActuatorStrokeUsageResult, double> selector) =>
+        result is null || result.SampleCount == 0 || !double.IsFinite(selector(result)) ? "—" : F(selector(result));
+
+    private static string Name(ActuatorStrokeUsageResult? result) => result?.SignalLabel ?? "—";
+    private static string Count(ActuatorStrokeUsageResult? result) => result is null ? "—" : result.SampleCount.ToString("N0", CultureInfo.CurrentCulture);
+    private static string Reached(ActuatorStrokeUsageResult? result) => result is null || result.SampleCount == 0
+        ? "—"
+        : $"{(result.ReachedMinimumBand ? "ja" : "nee")}/{(result.ReachedMaximumBand ? "ja" : "nee")}";
 
     private void AddActuatorMatrixRow(string metric, double left, double right, double front)
         => ActuatorMatrix.Add(new ActuatorMetricRow(metric, F(left), F(right), F(front)));
@@ -912,7 +1039,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return false;
         }
 
-        series = found;
+        var sourceCount = found.SampleCount ?? 0;
+        _largestAnalysisSource = Math.Max(_largestAnalysisSource, sourceCount);
+        _analysisWasSampled |= sourceCount > MaximumAnalysisPointsPerSignal;
+        if (!_analysisSeriesCache.TryGetValue(label, out series!))
+        {
+            series = found.ForAnalysis(MaximumAnalysisPointsPerSignal);
+            _analysisSeriesCache[label] = series;
+        }
         return true;
     }
 

@@ -32,6 +32,24 @@ internal sealed class DecodedSampleQualityView(
             : source.Where(sample => sample.Identity == identity)
                 .Select(sample => new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
 
+    public IEnumerable<SignalSeriesPoint> ReadSignalSeriesSampled(SignalIdentity identity, int maximumPoints)
+    {
+        if (source is ISignalSampleLookup lookup)
+        {
+            foreach (var point in lookup.ReadSignalSeriesSampled(identity, maximumPoints)) yield return point;
+            yield break;
+        }
+
+        var matching = source.Where(sample => sample.Identity == identity).ToArray();
+        var count = Math.Min(maximumPoints, matching.Length);
+        for (var index = 0; index < count; index++)
+        {
+            var sourceIndex = count == 1 ? 0 : (long)index * (matching.Length - 1L) / (count - 1L);
+            var sample = matching[sourceIndex];
+            yield return new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value);
+        }
+    }
+
     public bool TryGetFrameSummary(long frameIndex, out string messageName, out int sampleCount)
     {
         if (source is IFrameSampleLookup lookup)

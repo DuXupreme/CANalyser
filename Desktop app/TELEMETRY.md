@@ -78,6 +78,10 @@ Each line/request contains:
 - `analysis_apply_plot_groups`
 - `analysis_open_detached_plots`
 - `analysis_lod_forced`
+- `analytics_recompute_started`
+- `analytics_recompute_completed`
+- `analytics_recompute_failed`
+- `previous_operation_interrupted`
 - `update_check_skipped`
 - `update_check_completed`
 - `update_prompt_declined`
@@ -105,6 +109,15 @@ The implementation only records technical/product analytics:
 - bucketed counts for raw frames, decoded samples, signals, messages, unmatched frames and decode errors
 - feature usage booleans and counts such as number of plot groups/subplots and whether linked axes or downsampling were used
 - exception type for failed load/decode attempts
+- begrensde analyse-instellingen, bucketed brongrootte en of sampling nodig was
+
+Voor zware analyses wordt daarnaast tijdelijk
+`%AppData%\CanAnalyzer\telemetry-active-operation.json` geschreven. Dit bestand
+bevat uitsluitend de privacy-minimale operationele eigenschappen hierboven en
+wordt na voltooiing verwijderd. Blijft het door een harde procesafsluiting staan,
+dan registreert de volgende start `previous_operation_interrupted` en ruimt de
+marker op. Zo wordt ook een beëindiging door geheugendruk zichtbaar zonder CAN-
+data, bestandsnamen of signaalnamen vast te leggen.
 
 ## Data that must not be recorded
 

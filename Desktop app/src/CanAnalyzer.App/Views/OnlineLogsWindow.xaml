@@ -9,6 +9,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -40,7 +41,22 @@
             <Button x:Name="RefreshButton" Grid.Column="6" Content="Vernieuwen" Padding="14,5" Margin="18,0,0,0" Click="OnRefreshClick" />
         </Grid>
 
-        <DataGrid x:Name="LogsGrid" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False"
+        <Grid Grid.Row="2" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="520" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Recente selectie" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="RecentSelectionBox" Grid.Column="1" DisplayMemberPath="DisplayName" />
+            <Button x:Name="RestoreSelectionButton" Grid.Column="2" Content="Opnieuw selecteren" Padding="14,5"
+                    Margin="10,0,0,0" Click="OnRestoreSelectionClick" />
+            <TextBlock x:Name="RecentSelectionHint" Grid.Column="3" Margin="12,0,0,0" VerticalAlignment="Center"
+                       Foreground="#5E6B75" Text="Je laatste vijf downloadselecties blijven bewaard na opnieuw starten." />
+        </Grid>
+
+        <DataGrid x:Name="LogsGrid" Grid.Row="3" AutoGenerateColumns="False" CanUserAddRows="False"
                   IsReadOnly="False" SelectionMode="Extended" GridLinesVisibility="Horizontal"
                   ItemsSource="{Binding Rows}">
             <DataGrid.Columns>
@@ -54,7 +70,7 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <Grid Grid.Row="3" Margin="0,12,0,0">
+        <Grid Grid.Row="4" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />

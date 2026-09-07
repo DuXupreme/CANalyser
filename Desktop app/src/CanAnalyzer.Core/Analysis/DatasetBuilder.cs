@@ -36,7 +36,11 @@ public sealed class DatasetBuilder : IDatasetBuilder
         {
             var identity = pair.Key;
             var expectedCount = pair.Value;
-            var series = new SignalSeries(identity, () => LoadSeries(decodedSamples, identity, expectedCount));
+            var series = new SignalSeries(
+                identity,
+                expectedCount,
+                () => LoadSeries(decodedSamples, identity, expectedCount),
+                maximumPoints => LoadSampledSeries(decodedSamples, identity, expectedCount, maximumPoints));
             seriesByIdentity.Add(pair.Key, series);
             seriesByLabel.Add(series.Label, series);
         }
@@ -82,6 +86,41 @@ public sealed class DatasetBuilder : IDatasetBuilder
             foreach (var sample in decodedSamples)
                 if (sample.Identity == identity)
                     buffer.Append(new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
+        }
+
+        return buffer.Complete();
+    }
+
+    private static (long[] Timestamps, double[] Values) LoadSampledSeries(
+        IReadOnlyList<DecodedSignalSample> decodedSamples,
+        SignalIdentity identity,
+        int expectedCount,
+        int maximumPoints)
+    {
+        if (expectedCount <= maximumPoints) return LoadSeries(decodedSamples, identity, expectedCount);
+        var buffer = new SeriesBuffer(maximumPoints);
+        if (decodedSamples is ISignalSampleLookup lookup)
+        {
+            foreach (var point in lookup.ReadSignalSeriesSampled(identity, maximumPoints)) buffer.Append(point);
+        }
+        else
+        {
+            var target = 0L;
+            var outputIndex = 0;
+            var sourceIndex = 0L;
+            foreach (var sample in decodedSamples)
+            {
+                if (sample.Identity != identity) continue;
+                if (sourceIndex == target)
+                {
+                    buffer.Append(new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
+                    outputIndex++;
+                    if (outputIndex >= maximumPoints) break;
+                    target = (long)outputIndex * (expectedCount - 1L) / (maximumPoints - 1L);
+                }
+
+                sourceIndex++;
+            }
         }
 
         return buffer.Complete();

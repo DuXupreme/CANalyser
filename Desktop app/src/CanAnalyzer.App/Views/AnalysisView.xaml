@@ -254,7 +254,6 @@
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                <views:ActiveUsageView DataContext="{Binding ActiveUsage}" />
                 <ItemsControl ItemsSource="{Binding PlotPanels}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

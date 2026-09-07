@@ -124,6 +124,7 @@ public partial class App : Application
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
         services.AddSingleton<IImportRepairWizardService, ImportRepairWizardService>();
         services.AddSingleton<IOnlineLogService, OnlineLogService>();
+        services.AddSingleton<IOnlineLogSelectionHistoryStore, OnlineLogSelectionHistoryStore>();
         services.AddSingleton<IOnlineLogDialogService, OnlineLogDialogService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IAppSettingsStore, AppSettingsStore>();
@@ -153,6 +154,7 @@ public partial class App : Application
         services.AddSingleton<IPresetSerializer, PresetSerializer>();
         services.AddSingleton<ICanAnalysisPipeline, CanAnalysisPipeline>();
 
+        services.AddSingleton<ActiveUsageViewModel>();
         services.AddSingleton<AnalysisViewModel>();
         services.AddSingleton<JoystickAnalyticsViewModel>();
         services.AddSingleton<RawFramesViewModel>();

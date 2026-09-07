@@ -5,6 +5,7 @@
              xmlns:infra="clr-namespace:CanAnalyzer.App.Infrastructure"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:oxy="http://oxyplot.org/wpf"
+             xmlns:views="clr-namespace:CanAnalyzer.App.Views"
              mc:Ignorable="d">
     <UserControl.Resources>
         <infra:FlexibleDoubleConverter x:Key="FlexibleDoubleConverter" />
@@ -121,6 +122,18 @@
                                 <ComboBox Width="300" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickYSignal, Mode=TwoWay}" />
                             </StackPanel>
                             <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Left" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorLeftSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Right" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorRightSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Actuator Front" />
+                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorFrontSignal, Mode=TwoWay}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="Bins" />
                                 <TextBox Width="70" Text="{Binding HistogramBins, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
@@ -133,6 +146,19 @@
                                 <TextBlock Text="Saturatie" />
                                 <TextBox Width="80"
                                          Text="{Binding SaturationThreshold, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Slag minimum" />
+                                <TextBox Width="85" Text="{Binding ActuatorStrokeMinimum, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Slag maximum" />
+                                <TextBox Width="85" Text="{Binding ActuatorStrokeMaximum, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Uiterste-band [%]" />
+                                <TextBox Width="85" Text="{Binding ActuatorExtremeBandPercent, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}"
+                                         ToolTip="Bij 5% telt de onderste en bovenste 5% van de ingestelde referentieslag als nabij een uiterste." />
                             </StackPanel>
                             <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="Tijdvenster" />
@@ -211,14 +237,34 @@
                             <ColumnDefinition Width="0.95*" />
                             <ColumnDefinition Width="1.5*" />
                         </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Joystick tuning metrics" Margin="0,0,6,0">
-                            <DataGrid ItemsSource="{Binding JoystickUsageMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
-                                    <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
+                        <Grid Grid.Column="0" Margin="0,0,6,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="0.9*" />
+                                <RowDefinition Height="1.25*" />
+                            </Grid.RowDefinitions>
+                            <GroupBox Grid.Row="0" Header="Joystick tuning metrics" Margin="0,0,0,6">
+                                <DataGrid ItemsSource="{Binding JoystickUsageMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
+                                        <DataGridTextColumn Header="Waarde" Binding="{Binding Value}" Width="165" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </GroupBox>
+                            <GroupBox Grid.Row="1" Header="Actuator slagbenutting (aparte analyse)">
+                                <DockPanel Margin="6">
+                                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding ActuatorStrokeSummary}" TextWrapping="Wrap"
+                                               Foreground="#555555" Margin="0,6,0,0" />
+                                    <DataGrid ItemsSource="{Binding ActuatorStrokeMetrics}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Metric" Binding="{Binding Metric}" Width="*" />
+                                            <DataGridTextColumn Header="Left" Binding="{Binding Left}" Width="105" />
+                                            <DataGridTextColumn Header="Right" Binding="{Binding Right}" Width="105" />
+                                            <DataGridTextColumn Header="Front" Binding="{Binding Front}" Width="105" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </GroupBox>
+                        </Grid>
                         <GroupBox Grid.Column="1" Header="Joystick dichtheid (genormaliseerd, 1:1)">
                             <Grid x:Name="JoystickDensityCell">
                                 <oxy:PlotView Model="{Binding JoystickDensityModel}"
@@ -443,6 +489,12 @@
                         </GroupBox>
                     </Grid>
                 </Grid>
+            </TabItem>
+
+            <TabItem Header="Actief gebruik en accuduur">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6">
+                    <views:ActiveUsageView DataContext="{Binding ActiveUsage}" />
+                </ScrollViewer>
             </TabItem>
         </TabControl>
 

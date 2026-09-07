@@ -4,11 +4,13 @@ using CanAnalyzer.App.Views;
 
 namespace CanAnalyzer.App.Infrastructure;
 
-public sealed class OnlineLogDialogService(IOnlineLogService onlineLogService) : IOnlineLogDialogService
+public sealed class OnlineLogDialogService(
+    IOnlineLogService onlineLogService,
+    IOnlineLogSelectionHistoryStore historyStore) : IOnlineLogDialogService
 {
     public string? SelectAndDownload()
     {
-        var window = new OnlineLogsWindow(onlineLogService)
+        var window = new OnlineLogsWindow(onlineLogService, historyStore)
         {
             Owner = Application.Current.MainWindow
         };

@@ -106,6 +106,60 @@ public sealed class LoadOptimizationTests
         Assert.Throws<ObjectDisposedException>(() => unfinished.GetSignalSummaries());
     }
 
+    [Fact]
+    public void DiskBackedSeries_BoundedAnalysisCopyUsesIndexWithoutMaterializingSource()
+    {
+        using var store = new DiskBackedDecodedSampleStore();
+        var identity = new SignalIdentity("1", CanFrameFormat.Classic, false, 0x321, "Message", "Signal");
+        const int sourceCount = 100_003;
+        for (var index = 0; index < sourceCount; index++)
+        {
+            store.Append(new DecodedSignalSample(index * 1000L, index, index + 1L, identity, index, index));
+        }
+
+        store.Complete();
+        using var dataset = new DatasetBuilder().Build([], store, [], new DecoderDiagnostics(0, 0, 1, 0, 0, string.Empty));
+        var source = dataset.SignalSeriesByIdentity[identity];
+        var bounded = source.ForAnalysis(1000);
+
+        Assert.False(source.IsMaterialized);
+        Assert.Equal(sourceCount, source.SampleCount);
+        Assert.Equal(1000, bounded.Value.Length);
+        Assert.Equal(0, bounded.Value[0]);
+        Assert.Equal(sourceCount - 1, bounded.Value[^1]);
+        Assert.True(bounded.Time.Zip(bounded.Time.Skip(1), (left, right) => right > left).All(value => value));
+    }
+
+    [Fact]
+    public void FifteenMillionPointLazySeries_UsesBoundedLoaderForAnalysis()
+    {
+        var identity = new SignalIdentity("1", CanFrameFormat.Classic, false, 0x123, "Message", "Signal");
+        var fullLoaderCalled = false;
+        var requestedMaximum = 0;
+        var source = new SignalSeries(
+            identity,
+            15_000_000,
+            () =>
+            {
+                fullLoaderCalled = true;
+                return ([], []);
+            },
+            maximum =>
+            {
+                requestedMaximum = maximum;
+                return (
+                    Enumerable.Range(0, maximum).Select(index => (long)index).ToArray(),
+                    Enumerable.Range(0, maximum).Select(index => (double)index).ToArray());
+            });
+
+        var bounded = source.ForAnalysis(250_000);
+
+        Assert.False(fullLoaderCalled);
+        Assert.False(source.IsMaterialized);
+        Assert.Equal(250_000, requestedMaximum);
+        Assert.Equal(250_000, bounded.SampleCount);
+    }
+
     [Theory]
     [InlineData("(1.000000001) can1 123#2A00\n", false)]
     [InlineData("(1.000000001) can1 123#2A00\n(1.1) can1 123#2B\n", true)]

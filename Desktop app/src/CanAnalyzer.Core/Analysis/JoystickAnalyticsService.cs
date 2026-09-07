@@ -250,9 +250,10 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
 
         var finestDt = Math.Min(EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length), EstimateMedianDt(responseSeries.Time, responseSeries.Time.Length));
         var nLong = checked((long)Math.Ceiling((end - start) / Math.Max(1e-9, finestDt)) + 1L);
-        if (nLong > 2_000_000)
-            throw new InvalidOperationException($"Delayanalyse vereist {nLong:N0} punten op bronresolutie; beperk het tijdvenster in plaats van data stil te reduceren.");
-        var n = (int)Math.Max(3, nLong);
+        // Correlation does not need every decoded point. Bounding the working grid prevents the
+        // many temporary arrays from exhausting memory on multi-million-point online logs.
+        const int maximumDelayWorkingPoints = 50_000;
+        var n = (int)Math.Max(3, Math.Min(nLong, maximumDelayWorkingPoints));
         var dt = (end - start) / (n - 1);
         var t = new double[n];
         var cRaw = new double[n];
@@ -275,20 +276,31 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var bestK = 0;
         var bestCorr = double.NegativeInfinity;
         var bestScore = double.NegativeInfinity;
-        for (var k = -maxK; k <= maxK; k++)
+        const int coarseLagCandidates = 241;
+        var lagStep = Math.Max(1, (int)Math.Ceiling(((2d * maxK) + 1d) / coarseLagCandidates));
+        var evaluated = new HashSet<int>();
+
+        void EvaluateLag(int k)
         {
+            if (!evaluated.Add(k)) return;
             var corr = CorrAt(cDynamics, rDynamics, k, out var samples);
             curve.Add(new DelayCorrelationPoint(k * dt, corr, samples));
             var score = Math.Abs(corr);
             if (score <= bestScore)
             {
-                continue;
+                return;
             }
 
             bestScore = score;
             bestCorr = corr;
             bestK = k;
         }
+
+        for (var k = -maxK; k <= maxK; k += lagStep) EvaluateLag(k);
+        EvaluateLag(maxK);
+        var coarseBest = bestK;
+        for (var k = Math.Max(-maxK, coarseBest - lagStep); k <= Math.Min(maxK, coarseBest + lagStep); k++) EvaluateLag(k);
+        curve.Sort(static (left, right) => left.LagSeconds.CompareTo(right.LagSeconds));
 
         var lag = bestK * dt;
         var shiftedTimes = new List<double>(n);

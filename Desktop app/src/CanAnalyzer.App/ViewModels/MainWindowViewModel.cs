@@ -98,6 +98,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         LoadedSettings = _settingsStore.Load();
         _telemetryService.Configure(LoadedSettings.Telemetry);
+        _ = _telemetryService.ReportInterruptedOperationAsync();
         LogFilePath = LoadedSettings.LastLogFilePath;
         DbcFilePath = LoadedSettings.LastDbcFilePath;
         Analysis.ApplyViewOptions(LoadedSettings.LastPlotViewOptions);

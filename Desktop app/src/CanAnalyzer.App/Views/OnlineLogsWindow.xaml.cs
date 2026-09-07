@@ -11,20 +11,25 @@ namespace CanAnalyzer.App.Views;
 public partial class OnlineLogsWindow : Window
 {
     private readonly IOnlineLogService _onlineLogService;
+    private readonly IOnlineLogSelectionHistoryStore _historyStore;
     private readonly CancellationTokenSource _windowCts = new();
     private int _maximumSelection = 200;
     private bool _isTruncated;
     private int _unknownRecordingTimes;
+    private HashSet<string>? _keysToRestore;
+    private string? _restoreNotice;
 
-    public OnlineLogsWindow(IOnlineLogService onlineLogService)
+    public OnlineLogsWindow(IOnlineLogService onlineLogService, IOnlineLogSelectionHistoryStore historyStore)
     {
         InitializeComponent();
         _onlineLogService = onlineLogService;
+        _historyStore = historyStore;
         DataContext = this;
         MachineBox.ItemsSource = OnlineMachineCatalog.Machines;
         MachineBox.SelectedIndex = 0;
         FromPicker.SelectedDate = DateTime.Today.AddDays(-7);
         ToPicker.SelectedDate = DateTime.Today;
+        ReloadHistory();
         Loaded += OnLoaded;
         Closed += (_, _) => _windowCts.Cancel();
     }
@@ -37,6 +42,7 @@ public partial class OnlineLogsWindow : Window
 
     private async Task RefreshAsync()
     {
+        if (_keysToRestore is null) _restoreNotice = null;
         if (MachineBox.SelectedValue is not string loggerId || FromPicker.SelectedDate is not DateTime from || ToPicker.SelectedDate is not DateTime to)
         {
             MessageBox.Show(this, "Kies een machine en een geldige begin- en einddatum.", "Online logs", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -59,13 +65,16 @@ public partial class OnlineLogsWindow : Window
             _isTruncated = result.Truncated;
             _unknownRecordingTimes = result.UnknownRecordingTimes;
             var newestFile = result.Files.Where(static file => file.RecordedAt.HasValue).OrderByDescending(static file => file.RecordedAt).FirstOrDefault();
+            var restoreKeys = _keysToRestore;
             foreach (var file in result.Files)
             {
                 var row = new OnlineLogRow
                 {
-                    IsSelected = newestFile is not null &&
-                                 string.Equals(file.Logger, newestFile.Logger, StringComparison.Ordinal) &&
-                                 string.Equals(file.Session, newestFile.Session, StringComparison.Ordinal),
+                    IsSelected = restoreKeys is not null
+                        ? restoreKeys.Contains(file.Key)
+                        : newestFile is not null &&
+                          string.Equals(file.Logger, newestFile.Logger, StringComparison.Ordinal) &&
+                          string.Equals(file.Session, newestFile.Session, StringComparison.Ordinal),
                     Key = file.Key,
                     Name = file.Name,
                     Machine = file.Machine,
@@ -77,6 +86,15 @@ public partial class OnlineLogsWindow : Window
                 };
                 row.PropertyChanged += OnRowPropertyChanged;
                 Rows.Add(row);
+            }
+
+            if (restoreKeys is not null)
+            {
+                var restored = Rows.Count(row => row.IsSelected);
+                _restoreNotice = restored == restoreKeys.Count
+                    ? $"Recente selectie hersteld: {restored:N0} bestand(en)."
+                    : $"Recente selectie deels hersteld: {restored:N0} van {restoreKeys.Count:N0} bestand(en) zijn nog online beschikbaar.";
+                _keysToRestore = null;
             }
 
         }
@@ -122,6 +140,26 @@ public partial class OnlineLogsWindow : Window
             return;
         }
 
+        if (MachineBox.SelectedValue is string loggerId && FromPicker.SelectedDate is DateTime from && ToPicker.SelectedDate is DateTime to)
+        {
+            var machineName = (MachineBox.SelectedItem as OnlineMachine)?.Name ?? OnlineMachineCatalog.ResolveName(loggerId);
+            try
+            {
+                await _historyStore.RememberAsync(new OnlineLogSelectionHistoryEntry(
+                    loggerId,
+                    machineName,
+                    from.Date,
+                    to.Date,
+                    DateTimeOffset.UtcNow,
+                    selections), CancellationToken.None);
+                ReloadHistory();
+            }
+            catch (Exception)
+            {
+                // History is a convenience; a write failure must never block the requested download.
+            }
+        }
+
         SetBusy(true, $"{selected.Length:N0} bestand(en) downloaden...");
         try
         {
@@ -149,6 +187,17 @@ public partial class OnlineLogsWindow : Window
     }
 
     private void OnSelectSessionClick(object sender, RoutedEventArgs e) => SelectSession(true);
+
+    private async void OnRestoreSelectionClick(object sender, RoutedEventArgs e)
+    {
+        if (RecentSelectionBox.SelectedItem is not OnlineLogSelectionHistoryEntry entry) return;
+        MachineBox.SelectedValue = entry.LoggerId;
+        FromPicker.SelectedDate = entry.FromDate.Date;
+        ToPicker.SelectedDate = entry.ToDate.Date;
+        _keysToRestore = entry.Files.Select(file => file.Key).ToHashSet(StringComparer.Ordinal);
+        _restoreNotice = null;
+        await RefreshAsync();
+    }
     private void OnDeselectSessionClick(object sender, RoutedEventArgs e) => SelectSession(false);
     private void SelectSession(bool selected)
     {
@@ -205,9 +254,22 @@ public partial class OnlineLogsWindow : Window
                               (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
         }
+        if (!string.IsNullOrWhiteSpace(_restoreNotice)) StatusText.Text = _restoreNotice + " " + StatusText.Text;
         if (_unknownRecordingTimes > 0)
             StatusText.Text += $" Van {_unknownRecordingTimes:N0} bestand(en) is de meettijd niet leesbaar; deze vallen buiten de datumselectie.";
         DownloadButton.IsEnabled = withinMaximum && validation.IsValid;
+    }
+
+    private void ReloadHistory()
+    {
+        var entries = _historyStore.Load();
+        RecentSelectionBox.ItemsSource = entries;
+        RecentSelectionBox.SelectedIndex = entries.Count > 0 ? 0 : -1;
+        RecentSelectionBox.IsEnabled = entries.Count > 0;
+        RestoreSelectionButton.IsEnabled = entries.Count > 0;
+        RecentSelectionHint.Text = entries.Count > 0
+            ? "Je laatste vijf downloadselecties blijven bewaard na opnieuw starten."
+            : "Nog geen eerdere online selectie opgeslagen.";
     }
 
     private static OnlineLogSelection[] CreateSelections(IEnumerable<OnlineLogRow> rows) => rows
@@ -225,6 +287,8 @@ public partial class OnlineLogsWindow : Window
         FromPicker.IsEnabled = !busy;
         ToPicker.IsEnabled = !busy;
         RefreshButton.IsEnabled = !busy;
+        RecentSelectionBox.IsEnabled = !busy && RecentSelectionBox.Items.Count > 0;
+        RestoreSelectionButton.IsEnabled = !busy && RecentSelectionBox.Items.Count > 0;
         LogsGrid.IsEnabled = !busy;
         DownloadButton.IsEnabled = !busy;
         if (status is not null) StatusText.Text = status;

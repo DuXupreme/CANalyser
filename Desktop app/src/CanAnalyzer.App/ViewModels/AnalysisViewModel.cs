@@ -116,6 +116,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         IPresetSerializer presetSerializer,
         IXAxisSyncService xAxisSyncService,
         ITelemetryService telemetryService,
+        ActiveUsageViewModel activeUsage,
         ILogger<AnalysisViewModel> logger)
     {
         _plotModelBuilder = plotModelBuilder;
@@ -124,6 +125,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         _presetSerializer = presetSerializer;
         _xAxisSyncService = xAxisSyncService;
         _telemetryService = telemetryService;
+        ActiveUsage = activeUsage;
         _logger = logger;
 
         BuildGroupsFromSelectionCommand = new RelayCommand(BuildGroupsFromSelection);
@@ -153,7 +155,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public ObservableCollection<SignalSelectionItem> AvailableSignals { get; } = [];
 
-    public ActiveUsageViewModel ActiveUsage { get; } = new();
+    public ActiveUsageViewModel ActiveUsage { get; }
 
     public ICollectionView FilteredSignalsView { get; }
 
@@ -239,7 +241,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
     public void LoadDataset(CanDataset dataset)
     {
         _dataset = dataset;
-        ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
         foreach (var label in dataset.SignalLabels)
         {
