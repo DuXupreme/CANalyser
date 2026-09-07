@@ -1,0 +1,64 @@
+<UserControl x:Class="CanAnalyzer.App.Views.ActiveUsageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:oxy="http://oxyplot.org/wpf">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="UsageVisibility" />
+        <DataTemplate x:Key="UsageMetric">
+            <Grid Margin="0,3">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" Margin="0,0,12,0" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" MaxWidth="205" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Expander Header="Actief gebruik en batterijduur" IsExpanded="True" Margin="0,0,0,8"
+              Background="#F5F8FA" BorderBrush="#D6E0E5" BorderThickness="1" Padding="8">
+        <StackPanel>
+            <TextBlock Text="{Binding Scope}" TextWrapping="Wrap" Foreground="#52616B" Margin="0,4,0,8" />
+            <WrapPanel>
+                <StackPanel Width="310" Margin="0,0,10,8">
+                    <TextBlock Text="Activiteitssignaal (RPM, BMS current, kracht, …)" />
+                    <ComboBox ItemsSource="{Binding Signals}" SelectedItem="{Binding ActivitySignal}" IsTextSearchEnabled="True" ToolTip="Kies een gemeten signaal en controleer de gedecodeerde eenheid. Waarden boven de grens, in de gekozen richting, tellen als activiteit." />
+                </StackPanel>
+                <StackPanel Width="310" Margin="0,0,10,8">
+                    <TextBlock Text="SOC-signaal [0–100%]" />
+                    <ComboBox ItemsSource="{Binding Signals}" SelectedItem="{Binding SocSignal}" IsTextSearchEnabled="True" />
+                </StackPanel>
+                <StackPanel Width="310" Margin="0,0,10,8">
+                    <TextBlock Text="Aan/uit-signaal (optioneel)" />
+                    <ComboBox ItemsSource="{Binding OnSignals}" SelectedItem="{Binding OnSignal}" IsTextSearchEnabled="True"
+                              ToolTip="Kies bijvoorbeeld contact aan. Zonder signaal wordt de meetdekking als schatting van aan-tijd gebruikt." />
+                </StackPanel>
+            </WrapPanel>
+            <WrapPanel>
+                <StackPanel Width="235" Margin="0,0,10,8"><TextBlock Text="Richting (BMS: kies teken van ontladen)" /><ComboBox ItemsSource="{Binding Directions}" SelectedIndex="{Binding DirectionIndex}" /></StackPanel>
+                <StackPanel Width="130" Margin="0,0,10,8"><TextBlock Text="Activiteitsgrens &gt;" /><TextBox Text="{Binding Threshold, UpdateSourceTrigger=PropertyChanged}" ToolTip="In de eenheid van het gekozen signaal: bijvoorbeeld 100 rpm, 5 A of 1000 N. Dit zijn startwaarden; pas ze aan je machine aan." /></StackPanel>
+                <StackPanel Width="100" Margin="0,0,10,8"><TextBlock Text="Aan als waarde &gt;" /><TextBox Text="{Binding OnThreshold, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                <StackPanel Width="115" Margin="0,0,10,8"><TextBlock Text="Korte pauze [s]" /><TextBox Text="{Binding BridgeSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Voeg werkperiodes samen als er hoogstens zoveel seconden bekende inactiviteit tussen zit. Deze korte pauze telt mee als actief gebruik." /></StackPanel>
+                <StackPanel Width="130" Margin="0,0,10,8"><TextBlock Text="Min. werkperiode [s]" /><TextBox Text="{Binding MinimumSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Kortere periodes worden als inactief beschouwd, bijvoorbeeld losse meetpieken." /></StackPanel>
+                <StackPanel Width="135" Margin="0,0,10,8"><TextBlock Text="Max. sampleafstand [s]" /><TextBox Text="{Binding MaxGapSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Grotere afstanden tussen meetpunten zijn onbekend. Kies een waarde passend bij de samplefrequentie. Importgaten blijven altijd onbekend." /></StackPanel>
+                <StackPanel Width="115" Margin="0,0,10,8"><TextBlock Text="Bruikbare accu [kWh]" /><TextBox Text="{Binding CapacityKwh, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                <StackPanel Width="85" Margin="0,0,10,8"><TextBlock Text="Reserve SOC [%]" /><TextBox Text="{Binding ReserveSoc, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+            </WrapPanel>
+            <WrapPanel Margin="0,0,0,8">
+                <CheckBox Content="Activiteit afleiden uit SOC-daling" IsChecked="{Binding UseSocSlope}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                <StackPanel Width="100" Margin="0,0,10,0"><TextBlock Text="SOC-venster [s]" /><TextBox Text="{Binding SocWindow, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding UseSocSlope}" /></StackPanel>
+                <StackPanel Width="160" Margin="0,0,16,0"><TextBlock Text="Daling ≥ [procentpunt/uur]" /><TextBox Text="{Binding SocRateThreshold, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding UseSocSlope}" /></StackPanel>
+                <Button Content="Bereken actief gebruik" Command="{Binding CalculateCommand}" Padding="12,6" VerticalAlignment="Bottom" />
+            </WrapPanel>
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,0,0,8" FontWeight="SemiBold" />
+            <StackPanel Visibility="{Binding HasResult, Converter={StaticResource UsageVisibility}}">
+                <WrapPanel>
+                    <GroupBox Header="Tijd en gebruik" Width="410" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding TimeMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
+                    <GroupBox Header="SOC en energie" Width="470" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding EnergyMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
+                    <GroupBox Header="Verbruik en batterijduur" Width="490" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding BatteryMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
+                </WrapPanel>
+                <oxy:PlotView Model="{Binding Timeline}" Height="195" Margin="0,0,0,8" />
+                <Expander Header="Berekening en betrouwbaarheid" Margin="0,0,0,6">
+                    <TextBlock Text="{Binding Notes}" TextWrapping="Wrap" Foreground="#52616B" Margin="4,6" />
+                </Expander>
+            </StackPanel>
+        </StackPanel>
+    </Expander>
+</UserControl>

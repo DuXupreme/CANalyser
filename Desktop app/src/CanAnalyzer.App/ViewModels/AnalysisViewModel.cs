@@ -153,6 +153,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public ObservableCollection<SignalSelectionItem> AvailableSignals { get; } = [];
 
+    public ActiveUsageViewModel ActiveUsage { get; } = new();
+
     public ICollectionView FilteredSignalsView { get; }
 
     public ObservableCollection<PlotGroupViewModel> PlotGroups { get; } = [];
@@ -223,6 +225,10 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnUseDownsamplingChanged(bool value) => TriggerLiveRebuild();
 
+    partial void OnTimeStartChanged(double? value) => ActiveUsage.SetTimeWindow(value, TimeEnd);
+
+    partial void OnTimeEndChanged(double? value) => ActiveUsage.SetTimeWindow(TimeStart, value);
+
     partial void OnIsBusyChanged(bool value) => ApplyGroupsCommand.NotifyCanExecuteChanged();
 
     partial void OnSignalSearchTextChanged(string value)
@@ -233,6 +239,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
     public void LoadDataset(CanDataset dataset)
     {
         _dataset = dataset;
+        ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
         foreach (var label in dataset.SignalLabels)
         {

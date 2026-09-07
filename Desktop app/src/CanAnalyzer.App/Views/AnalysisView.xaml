@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:controls="clr-namespace:CanAnalyzer.App.Controls"
+             xmlns:views="clr-namespace:CanAnalyzer.App.Views"
              xmlns:oxy="http://oxyplot.org/wpf"
              mc:Ignorable="d">
     <Grid Margin="8">
@@ -252,6 +253,8 @@
             </Border>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                <views:ActiveUsageView DataContext="{Binding ActiveUsage}" />
                 <ItemsControl ItemsSource="{Binding PlotPanels}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -274,6 +277,7 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
             </ScrollViewer>
 
             <StackPanel Grid.Row="1"
