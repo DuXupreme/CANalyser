@@ -10,4 +10,7 @@ public sealed record RenderedSeriesData(
     double[] Time,
     double[] Value,
     string YAxisKey,
-    OxyColor Color);
+    OxyColor Color)
+{
+    public IReadOnlyList<CanAnalyzer.Core.Domain.MeasurementGap> Gaps { get; init; } = [];
+}

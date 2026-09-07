@@ -18,7 +18,7 @@
             <TextBlock Margin="0,5,0,3" Foreground="#5E6B75" TextWrapping="Wrap"
                        Text="Kies een machine en meetperiode. De periode en kolom 'Log gestart' gebruiken het eerste meetrecord volgens de loggerklok, ook bij latere upload. Tijden staan lokaal met UTC-offset. CANalyser analyseert de geselecteerde MF4-delen met je laatst gekozen DBC." />
             <TextBlock Margin="0,0,0,14" Foreground="#5E6B75" TextWrapping="Wrap"
-                       Text="Meerdere bestanden kunnen alleen samen als het opeenvolgende delen uit dezelfde sessie zijn. Andere sessies analyseer je afzonderlijk. Een identieke selectie wordt uit de lokale cache hergebruikt; cachebestanden worden na 7 dagen verwijderd en de cache wordt tot circa 2 GB begrensd." />
+                       Text="Klik op een bestandsrij en kies Sessie toevoegen voor alle getoonde bestanden van die sessie. Meerdere sessies kunnen samen; onderbrekingen blijven zichtbaar. Binnen elke sessie moeten de delen opeenvolgend zijn. Een identieke selectie wordt uit de lokale cache hergebruikt; cachebestanden worden na 7 dagen verwijderd en de cache wordt tot circa 2 GB begrensd." />
         </StackPanel>
 
         <Grid Grid.Row="1" Margin="0,0,0,12">
@@ -61,6 +61,8 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <StackPanel Orientation="Horizontal">
+                    <Button Content="Sessie toevoegen" Padding="10,4" Margin="0,0,8,0" Click="OnSelectSessionClick" />
+                    <Button Content="Sessie uitvinken" Padding="10,4" Margin="0,0,8,0" Click="OnDeselectSessionClick" />
                     <Button Content="Alles selecteren" Padding="10,4" Margin="0,0,8,0" Click="OnSelectAllClick" />
                     <Button Content="Niets selecteren" Padding="10,4" Click="OnSelectNoneClick" />
                 </StackPanel>

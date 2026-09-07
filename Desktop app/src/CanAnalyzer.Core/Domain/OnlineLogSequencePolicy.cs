@@ -10,8 +10,8 @@ public sealed record OnlineLogSequenceValidation(bool IsValid, string Message)
 }
 
 /// <summary>
-/// Prevents unrelated CANedge sessions from being presented as one continuous measurement.
-/// Multiple files are only safe when they are consecutive numbered parts in one logger session.
+/// Validates selections from one logger across multiple sessions.
+/// Parts must be consecutive within each session; absolute timestamps preserve gaps.
 /// </summary>
 public static class OnlineLogSequencePolicy
 {
@@ -21,18 +21,19 @@ public static class OnlineLogSequencePolicy
             return new(false, "Selecteer minimaal één MF4-bestand.");
         if (files.Count == 1) return OnlineLogSequenceValidation.Valid;
 
-        var sessionCount = files
-            .Select(static file => (file.Logger.Trim(), file.Session.Trim()))
-            .Distinct()
-            .Count();
-        if (sessionCount != 1 || string.IsNullOrWhiteSpace(files[0].Logger) || string.IsNullOrWhiteSpace(files[0].Session))
+        if (files.Any(static file => string.IsNullOrWhiteSpace(file.Logger) || string.IsNullOrWhiteSpace(file.Session)) ||
+            files.Select(static file => file.Logger.Trim()).Distinct(StringComparer.Ordinal).Count() != 1)
+            return new(false, "Selecteer herkenbare logger-sessies van dezelfde machine.");
+        foreach (var session in files.GroupBy(static file => file.Session.Trim(), StringComparer.Ordinal))
         {
-            return new(false,
-                $"Je hebt bestanden uit {sessionCount:N0} verschillende logger-sessies geselecteerd. " +
-                "CANalyser mag alleen opeenvolgende MF4-delen samenvoegen die binnen één sessie door de ingestelde maximale bestandsgrootte zijn ontstaan. " +
-                "Kies één waarde in de kolom 'Sessie' en analyseer andere sessies afzonderlijk.");
+            var validation = ValidateSession(session.ToArray());
+            if (!validation.IsValid) return validation;
         }
+        return OnlineLogSequenceValidation.Valid;
+    }
 
+    private static OnlineLogSequenceValidation ValidateSession(IReadOnlyList<OnlineLogPartIdentity> files)
+    {
         var parts = new List<int>(files.Count);
         foreach (var file in files)
         {

@@ -152,6 +152,17 @@ public partial class OnlineLogsWindow : Window
         }
     }
 
+    private void OnSelectSessionClick(object sender, RoutedEventArgs e) => SelectSession(true);
+    private void OnDeselectSessionClick(object sender, RoutedEventArgs e) => SelectSession(false);
+    private void SelectSession(bool selected)
+    {
+        LogsGrid.CommitEdit();
+        if (LogsGrid.SelectedItem is not OnlineLogRow active) return;
+        foreach (var row in Rows.Where(row => row.Logger == active.Logger && row.Session == active.Session))
+            row.IsSelected = selected;
+        UpdateSelectionStatus();
+    }
+
     private void OnSelectAllClick(object sender, RoutedEventArgs e)
     {
         foreach (var row in Rows) row.IsSelected = true;
@@ -192,7 +203,7 @@ public partial class OnlineLogsWindow : Window
         }
         else
         {
-            var sessionText = selected.Length > 1 ? $" uit sessie {selected[0].Session}" : string.Empty;
+            var sessionText = $" uit {selected.Select(row => (row.Logger, row.Session)).Distinct().Count()} sessie(s)";
             StatusText.Text = $"{selected.Length:N0} van {Rows.Count:N0} bestand(en){sessionText} geselecteerd, " +
                               $"{FormatBytes(selected.Sum(static row => row.SizeBytes))}." +
                               (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);

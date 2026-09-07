@@ -35,6 +35,8 @@ public sealed record ImportReport(
     IReadOnlyList<ImportIssue> Issues,
     ImportMode Mode = ImportMode.Strict)
 {
+    public IReadOnlyList<MeasurementGap> Gaps { get; init; } = [];
+
     public bool IsConsistent => TotalLines == NonDataLines + AcceptedLines + RejectedLines;
     public bool HasErrors => Issues.Any(static issue => issue.Severity == ImportIssueSeverity.Error);
 }
@@ -73,3 +75,5 @@ public sealed record AnalysisResult<T>(
     long OverlapNanoseconds,
     double CoveragePercent,
     string Note);
+
+public sealed record MeasurementGap(double StartSeconds, double EndSeconds);

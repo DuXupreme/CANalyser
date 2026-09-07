@@ -6,7 +6,7 @@
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.3.0` toont absolute meettijden, bewaakt logsessies en hergebruikt downloads.
+> Versie `2.3.1` laat complete online sessies samen selecteren en toont echte meetonderbrekingen als duidelijke gaten in de grafiek.
 > De eerdere versie `2.2.1` voegde directe CANedge MF4/ZIP-import en de workflow **Online logs**
 > toe. Grote selecties worden rechtstreeks uit S3 gedownload en lokaal samengevoegd,
 > zodat de responslimiet van het dashboard geen logs meer blokkeert. De laatst gekozen
@@ -25,7 +25,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
   - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
-  - dashboard-ZIP met maximaal 200 opeenvolgende MF4-delen uit één logger-sessie; verschillende sessies worden nooit tot één meting samengevoegd
+  - dashboard-ZIP met maximaal 200 MF4-delen uit één logger; binnen iedere geselecteerde sessie moeten de deelnummers opeenvolgen
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
@@ -46,7 +46,8 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Layout preset export/import (JSON)
 - Decoded CSV export met relatieve én absolute meettijd
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
-- Eén los online bestand is altijd toegestaan; meerdere bestanden alleen als hun deelnummers opeenvolgen en logger plus sessie exact gelijk zijn. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
+- Een complete sessie kan in één handeling worden toegevoegd of uitgevinkt. Meerdere sessies van dezelfde logger mogen samen worden geanalyseerd; de absolute tijd en meetonderbrekingen blijven behouden.
+- Binnen iedere geselecteerde sessie moeten de MF4-deelnummers opeenvolgen. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
 - Identieke online selecties worden maximaal zeven dagen lokaal hergebruikt; oude bestanden worden automatisch verwijderd en de cache wordt tot circa 2 GB begrensd.
 - Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
   alignment on the first STEP target transition, and ready-made overlays for

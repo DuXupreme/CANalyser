@@ -95,7 +95,7 @@ public sealed class Mdf4ImportTests
     }
 
     [Fact]
-    public async Task ZipImport_RejectsFilesFromDifferentSessionsBeforeConversion()
+    public async Task ZipImport_AcceptsDifferentSessionsAndPreservesNineSecondGap()
     {
         var zipPath = Path.Combine(Path.GetTempPath(), $"mf4-mixed-sessions-{Guid.NewGuid():N}.zip");
         using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
@@ -106,11 +106,13 @@ public sealed class Mdf4ImportTests
 
         try
         {
-            var parser = new Mdf4Parser(new FakeConverter(), new PeakTrcParser());
-            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
-                parser.ParseAsync(zipPath, ImportMode.Strict, null, CancellationToken.None));
-            Assert.Contains("verschillende logger-sessies", exception.Message);
-            Assert.Contains("afzonderlijk", exception.Message);
+            var parser = new Mdf4Parser(new FakeConverter(withGap: true), new PeakTrcParser());
+            var result = await parser.ParseAsync(zipPath, ImportMode.Strict, null, CancellationToken.None);
+            Assert.NotNull(result);
+            var gap = Assert.Single(result!.Report.Gaps);
+            Assert.Equal(9d, gap.EndSeconds - gap.StartSeconds, 6);
+            Assert.Equal(9_000_000_000L, result.Frames[1].TimestampNanoseconds - result.Frames[0].TimestampNanoseconds);
+            (result.Frames as IDisposable)?.Dispose();
         }
         finally
         {
@@ -215,7 +217,7 @@ public sealed class Mdf4ImportTests
         await stream.WriteAsync("not parsed by the fake converter"u8.ToArray());
     }
 
-    private sealed class FakeConverter : IMdf4ConversionService
+    private sealed class FakeConverter(bool withGap = false) : IMdf4ConversionService
     {
         public async Task<IReadOnlyList<string>> ConvertToPeakTrcAsync(
             IReadOnlyList<string> inputPaths,
@@ -232,8 +234,8 @@ public sealed class Mdf4ImportTests
             {
                 var output = Path.Combine(outputDirectory, $"part-{index + 1}.trc");
                 var start = baseTime.AddSeconds(index * 10).UtcDateTime.ToOADate().ToString("R", CultureInfo.InvariantCulture);
-                var relativeMilliseconds = index == 0 ? "100.000" : "200.000";
-                var overlappingTail = index == 0 ? "2) 20000.000 Rx 123 1 0A\n" : string.Empty;
+                var relativeMilliseconds = index == 0 ? (withGap ? "1200.000" : "100.000") : "200.000";
+                var overlappingTail = index == 0 && !withGap ? "2) 20000.000 Rx 123 1 0A\n" : string.Empty;
                 await File.WriteAllTextAsync(output,
                     $";$FILEVERSION=1.1\n;$STARTTIME={start}\n1) {relativeMilliseconds} Rx 123 1 0{index + 1}\n{overlappingTail}", cancellationToken);
                 outputs.Add(output);

@@ -90,6 +90,17 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 MinorGridlineColor = OxyColor.FromAColor(20, OxyColors.Gray)
             };
             model.Axes.Add(xAxis);
+            foreach (var gap in dataset.ImportReport?.Gaps ?? [])
+            {
+                if (gap.EndSeconds - gap.StartSeconds < 1) continue;
+                model.Annotations.Add(new OxyPlot.Annotations.RectangleAnnotation
+                {
+                    MinimumX = gap.StartSeconds, MaximumX = gap.EndSeconds,
+                    Fill = OxyColor.FromAColor(35, OxyColors.Gray),
+                    Text = $"Geen data: {gap.EndSeconds - gap.StartSeconds:0.###} s",
+                    Layer = OxyPlot.Annotations.AnnotationLayer.BelowSeries
+                });
+            }
 
             var primaryYAxis = new LinearAxis
             {
@@ -146,13 +157,13 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 }
 
                 var seriesColor = ColorCycle[colorIndex % ColorCycle.Length];
-                renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor));
+                renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor) { Gaps = dataset.ImportReport?.Gaps ?? [] });
 
                 (double[] x, double[] y) = viewOptions.UseDownsampling
                     ? Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
                     : (filtered.X, filtered.Y);
 
-                AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions);
+                AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions, dataset.ImportReport?.Gaps ?? []);
                 colorIndex++;
             }
 
@@ -233,7 +244,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         string label,
         string yAxisKey,
         OxyColor color,
-        PlotViewOptions options)
+        PlotViewOptions options,
+        IReadOnlyList<MeasurementGap> gaps)
     {
         if (options.MarkersOnly)
         {
@@ -272,6 +284,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             };
             for (var i = 0; i < x.Length; i++)
             {
+                if (CrossesGap(x, i, gaps)) stair.Points.Add(DataPoint.Undefined);
                 stair.Points.Add(new DataPoint(x[i], y[i]));
             }
 
@@ -291,11 +304,15 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         };
         for (var i = 0; i < x.Length; i++)
         {
+            if (CrossesGap(x, i, gaps)) line.Points.Add(DataPoint.Undefined);
             line.Points.Add(new DataPoint(x[i], y[i]));
         }
 
         model.Series.Add(line);
     }
+
+    private static bool CrossesGap(double[] time, int index, IReadOnlyList<MeasurementGap> gaps) =>
+        index > 0 && gaps.Any(gap => time[index - 1] <= gap.StartSeconds && time[index] >= gap.EndSeconds);
 
     private static IPlotController CreateInteractionController()
     {
