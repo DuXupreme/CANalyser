@@ -31,11 +31,13 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
   - candump Classic/FD
-- DBC-decoding is fail-closed:
+- DBC- en BUSMASTER DBF-decoding is fail-closed:
   - exact ID match (standard + extended)
   - extended fallback on J1939 PGN
   - ambigue PGN-matches en lengtefouten leveren geen waarden
   - Intel/Motorola, signed/unsigned, IEEE float/double en multiplex-ranges
+- De Database-editor opent en bewerkt DBC en BUSMASTER DBF en converteert in
+  beide richtingen via **Opslaan/converteren**.
 - Decode diagnostics:
   - unmatched IDs
   - manual/permissive decode counts

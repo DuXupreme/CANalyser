@@ -292,7 +292,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(LogFilePath) || string.IsNullOrWhiteSpace(DbcFilePath))
         {
-            _messageDialogService.ShowInfo("Bestanden ontbreken", "Kies eerst zowel een CAN-logbestand als een DBC-bestand.");
+            _messageDialogService.ShowInfo("Bestanden ontbreken", "Kies eerst zowel een CAN-logbestand als een DBC- of DBF-bestand.");
             return;
         }
 
@@ -304,7 +304,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         if (!File.Exists(DbcFilePath))
         {
-            _messageDialogService.ShowError("DBC-bestand ontbreekt", $"Bestand niet gevonden:\n{DbcFilePath}");
+            _messageDialogService.ShowError("CAN-database ontbreekt", $"Bestand niet gevonden:\n{DbcFilePath}");
             return;
         }
 

@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 namespace CanAnalyzer.App.ViewModels;
 
 /// <summary>
-/// Database (DBC) editor tab: author frames + signals with a live bit-layout grid and save to a .dbc file.
+/// CAN database editor: author frames and signals, then save or convert between DBC and BUSMASTER DBF.
 /// </summary>
 public sealed partial class DbcEditorViewModel : ObservableObject
 {
@@ -36,6 +36,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private readonly List<DbcSignalRow> _attachedSignals = [];
     private DbcFrameRow? _attachedFrame;
     private string? _repairSourcePath;
+    private bool _requiresNormalizationWarning;
 
     [ObservableProperty]
     private DbcFrameRow? _selectedFrame;
@@ -47,7 +48,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private string _validationSummary = "Geen frame geselecteerd.";
 
     [ObservableProperty]
-    private string _statusText = "Maak een nieuwe database of open een bestaand DBC-bestand om te bewerken.";
+    private string _statusText = "Maak een nieuwe database of open een bestaand DBC/DBF-bestand om te bewerken.";
 
     [ObservableProperty]
     private string? _currentFilePath;
@@ -152,6 +153,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         Frames.Clear();
         CurrentFilePath = null;
         _repairSourcePath = null;
+        _requiresNormalizationWarning = false;
         IsReadOnly = false;
         StatusText = "Nieuwe lege database.";
         UpdateValidation();
@@ -178,10 +180,11 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             LoadFromDatabase(database);
             CurrentFilePath = path;
             _repairSourcePath = null;
-            IsReadOnly = !database.IsLosslessWritable;
+            _requiresNormalizationWarning = !database.IsLosslessWritable;
+            IsReadOnly = false;
             HasUnsavedChanges = false;
-            StatusText = IsReadOnly
-                ? $"ALLEEN-LEZEN: {path} — deze geïmporteerde DBC bevat constructies die de editor niet aantoonbaar lossless kan terugschrijven."
+            StatusText = _requiresNormalizationWarning
+                ? $"Geladen voor bewerken: {path} — bij opslaan maakt CANalyser een genormaliseerde database; niet-ondersteunde opmerkingen en attributen worden niet meegenomen."
                 : $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
         }
         catch (Exception ex)
@@ -199,6 +202,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         LoadFromDatabase(database);
         _repairSourcePath = Path.GetFullPath(path);
         CurrentFilePath = GetDefaultRepairPath(path);
+        _requiresNormalizationWarning = false;
         IsReadOnly = false;
         HasUnsavedChanges = false;
         StatusText =
@@ -300,14 +304,6 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private async Task SaveDbcAsync()
     {
-        if (IsReadOnly)
-        {
-            _messageDialogService.ShowError(
-                "Lossless opslaan niet mogelijk",
-                "Deze geïmporteerde DBC is bewust alleen-lezen. De editor kan niet garanderen dat alle metadata en multiplexconstructies semantisch identiek worden teruggeschreven.");
-            return;
-        }
-
         if (Frames.Count == 0)
         {
             _messageDialogService.ShowInfo("Niets op te slaan", "Voeg eerst minstens één frame toe.");
@@ -320,17 +316,28 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             return;
         }
 
+        if (_requiresNormalizationWarning &&
+            !_messageDialogService.Confirm(
+                "CAN-database genormaliseerd opslaan",
+                "CANalyser slaat alle bewerkbare frames, signalen en multiplexdefinities op. " +
+                "Niet-ondersteunde metadata, zoals opmerkingen, waardetabellen en attributen, wordt niet meegenomen.\n\n" +
+                "Het oorspronkelijke bestand blijft behouden zolang je in het opslagvenster een andere bestandsnaam kiest. Doorgaan?"))
+        {
+            return;
+        }
+
         try
         {
             var database = BuildDatabase();
             await _dbcWriter.WriteAsync(database, path, CancellationToken.None);
             CurrentFilePath = path;
+            _requiresNormalizationWarning = false;
             HasUnsavedChanges = false;
             var signalCount = Frames.Sum(f => f.Signals.Count);
             StatusText = $"Opgeslagen: {path}  ({Frames.Count} frames, {signalCount} signalen)";
             _messageDialogService.ShowInfo(
-                "DBC opgeslagen",
-                $"Database opgeslagen als:\n{path}\n\nJe kunt dit bestand nu laden via 'Open DBC' op het hoofdscherm.");
+                "CAN-database opgeslagen",
+                $"Database opgeslagen als:\n{path}\n\nJe kunt dit bestand nu laden via 'Open database' op het hoofdscherm.");
         }
         catch (Exception ex)
         {

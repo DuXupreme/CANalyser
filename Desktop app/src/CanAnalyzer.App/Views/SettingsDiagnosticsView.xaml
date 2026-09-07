@@ -61,7 +61,7 @@
                 <StackPanel Margin="8">
                     <TextBlock Text="Logbestand" FontWeight="SemiBold" />
                     <TextBox Text="{Binding LogFilePath}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
-                    <TextBlock Text="DBC-bestand" FontWeight="SemiBold" />
+                    <TextBlock Text="DBC/DBF-bestand" FontWeight="SemiBold" />
                     <TextBox Text="{Binding DbcFilePath}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,0" />
                 </StackPanel>
             </GroupBox>
@@ -70,7 +70,7 @@
                 <ListBox ItemsSource="{Binding RecentLogFiles}" Height="120" />
             </GroupBox>
 
-            <GroupBox Header="Recente DBC-bestanden" Margin="0,0,0,8">
+            <GroupBox Header="Recente CAN-databases" Margin="0,0,0,8">
                 <ListBox ItemsSource="{Binding RecentDbcFiles}" Height="120" />
             </GroupBox>
 
