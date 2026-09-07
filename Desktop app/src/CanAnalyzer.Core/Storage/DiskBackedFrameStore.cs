@@ -15,6 +15,7 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
     private readonly string _dataPath;
     private readonly string _indexPath;
     private readonly object _readLock = new();
+    private readonly HashSet<string> _channels = new(StringComparer.Ordinal);
     private FileStream? _dataWriterStream;
     private FileStream? _indexWriterStream;
     private BinaryWriter? _dataWriter;
@@ -42,6 +43,8 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
     }
 
     public int Count { get; private set; }
+    public int ExtendedCount { get; private set; }
+    public IReadOnlyCollection<string> Channels => _channels.ToArray();
 
     public string BackingFilePath => _dataPath;
 
@@ -70,6 +73,8 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
         if (Count == int.MaxValue) throw new IOException("The frame-store count exceeds the supported 32-bit list index.");
         _indexWriter!.Write(_dataWriterStream!.Position);
         WriteFrame(_dataWriter!, frame);
+        if (frame.IsExtended) ExtendedCount++;
+        _channels.Add(frame.Channel);
         Count++;
     }
 

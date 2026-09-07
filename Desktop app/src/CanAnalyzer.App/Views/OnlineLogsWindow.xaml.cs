@@ -21,11 +21,7 @@ public partial class OnlineLogsWindow : Window
         InitializeComponent();
         _onlineLogService = onlineLogService;
         DataContext = this;
-        MachineBox.ItemsSource = new[]
-        {
-            new MachineOption("Vlindermachine 1", "48EDFD35"),
-            new MachineOption("Vlindermachine 2", "22484AAA")
-        };
+        MachineBox.ItemsSource = OnlineMachineCatalog.Machines;
         MachineBox.SelectedIndex = 0;
         FromPicker.SelectedDate = DateTime.Today.AddDays(-7);
         ToPicker.SelectedDate = DateTime.Today;
@@ -240,5 +236,4 @@ public partial class OnlineLogsWindow : Window
         ? $"{bytes / 1024d / 1024d:N1} MB"
         : $"{bytes / 1024d:N0} kB";
 
-    private sealed record MachineOption(string Name, string LoggerId);
 }

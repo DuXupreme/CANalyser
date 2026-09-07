@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using CanAnalyzer.Core.Domain;
@@ -24,66 +25,99 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         _logger = logger;
     }
 
-    public async Task<CanDataset> LoadAsync(
+    public async Task<PreparedCanAnalysis> PrepareForReviewAsync(
+        string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken) =>
+        new(await LoadCoreAsync(logFilePath, dbcFilePath, ImportMode.Partial, progress, cancellationToken, forReview: true).ConfigureAwait(false));
+
+    public Task<CanDataset> LoadAsync(
         string logFilePath, string dbcFilePath, ImportMode importMode,
-        IProgress<LoadProgress>? progress, CancellationToken cancellationToken)
+        IProgress<LoadProgress>? progress, CancellationToken cancellationToken) =>
+        LoadCoreAsync(logFilePath, dbcFilePath, importMode, progress, cancellationToken);
+
+    private async Task<CanDataset> LoadCoreAsync(
+        string logFilePath, string dbcFilePath, ImportMode importMode,
+        IProgress<LoadProgress>? progress, CancellationToken cancellationToken, bool forReview = false)
     {
         _logger.LogInformation("Starting strict load/decode: log={LogFile}, dbc={DbcFile}, mode={Mode}", logFilePath, dbcFilePath, importMode);
         progress?.Report(new LoadProgress("Logbestand valideren en inlezen...", 2));
+        var timer = Stopwatch.StartNew();
         var parseResult = await _parsingService.ParseAsync(logFilePath, importMode, progress, cancellationToken).ConfigureAwait(false);
-
-        progress?.Report(new LoadProgress("DBC valideren...", 15));
-        var database = await _dbcLoader.LoadAsync(dbcFilePath, cancellationToken).ConfigureAwait(false);
-        var combinedReport = database.Issues.Count == 0
-            ? parseResult.Report
-            : parseResult.Report with { Issues = parseResult.Report.Issues.Concat(database.Issues).ToList() };
-        if (importMode == ImportMode.Strict && database.Issues.Any(static issue => issue.Severity == ImportIssueSeverity.Error))
+        var parseMs = timer.ElapsedMilliseconds;
+        DecodeResult? decodeResult = null;
+        try
         {
-            (parseResult.Frames as IDisposable)?.Dispose();
-            throw new ImportIntegrityException(
-                $"DBC-validatie is mislukt met {database.Issues.Count:N0} fout(en).",
-                combinedReport);
-        }
-
-        var completeness = parseResult.Completeness == DatasetCompleteness.Partial || database.Issues.Count > 0
-            ? DatasetCompleteness.Partial
-            : DatasetCompleteness.Complete;
-        progress?.Report(new LoadProgress("Strikt decoderen...", 20));
-        var decodeResult = await Task.Run(
-            () => _decodingService.Decode(parseResult.Frames, database, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
-
-        var decodeIssues = BuildDecodeIssues(decodeResult.Diagnostics);
-        if (decodeIssues.Count > 0)
-        {
-            combinedReport = combinedReport with
+            progress?.Report(new LoadProgress("DBC valideren...", 15));
+            timer.Restart();
+            var database = await _dbcLoader.LoadAsync(dbcFilePath, cancellationToken).ConfigureAwait(false);
+            var dbcMs = timer.ElapsedMilliseconds;
+            var combinedReport = database.Issues.Count == 0
+                ? parseResult.Report
+                : parseResult.Report with { Issues = parseResult.Report.Issues.Concat(database.Issues).ToList() };
+            if (importMode == ImportMode.Strict && database.Issues.Any(static issue => issue.Severity == ImportIssueSeverity.Error))
             {
-                Issues = combinedReport.Issues.Concat(decodeIssues).ToList()
-            };
-            completeness = DatasetCompleteness.Partial;
-            if (importMode == ImportMode.Strict)
-            {
-                (parseResult.Frames as IDisposable)?.Dispose();
-                (decodeResult.Samples as IDisposable)?.Dispose();
                 throw new ImportIntegrityException(
-                    $"Decodering is mislukt voor {decodeResult.Diagnostics.DecodeErrorFrameCount:N0} frame(s); " +
-                    $"{decodeResult.Diagnostics.AmbiguousFrameCount:N0} frame(s) waren ambigu.",
+                    $"DBC-validatie is mislukt met {database.Issues.Count:N0} fout(en).",
                     combinedReport);
             }
-        }
 
-        progress?.Report(new LoadProgress("Dataset cache opbouwen...", 92));
-        var logHashTask = ComputeSha256Async(logFilePath, cancellationToken);
-        var dbcHashTask = ComputeSha256Async(dbcFilePath, cancellationToken);
-        await Task.WhenAll(logHashTask, dbcHashTask).ConfigureAwait(false);
-        var entryAssembly = Assembly.GetEntryAssembly();
-        var version = entryAssembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
-                      ?? entryAssembly?.GetName().Version?.ToString(3)
-                      ?? "2.1.0";
-        var dataset = await Task.Run(() => _datasetBuilder.Build(
-            parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
-            combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
-        progress?.Report(new LoadProgress("Klaar.", 100));
-        return dataset;
+            var completeness = parseResult.Completeness == DatasetCompleteness.Partial || database.Issues.Count > 0
+                ? DatasetCompleteness.Partial
+                : DatasetCompleteness.Complete;
+            progress?.Report(new LoadProgress("Strikt decoderen...", 20));
+            timer.Restart();
+            decodeResult = await Task.Run(
+                () => _decodingService.Decode(parseResult.Frames, database, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
+            var decodeMs = timer.ElapsedMilliseconds;
+
+            var decodeIssues = BuildDecodeIssues(decodeResult.Diagnostics);
+            if (decodeIssues.Count > 0)
+            {
+                combinedReport = combinedReport with
+                {
+                    Issues = combinedReport.Issues.Concat(decodeIssues).ToList()
+                };
+                completeness = DatasetCompleteness.Partial;
+                if (importMode == ImportMode.Strict)
+                {
+                    throw new ImportIntegrityException(
+                        $"Decodering is mislukt voor {decodeResult.Diagnostics.DecodeErrorFrameCount:N0} frame(s); " +
+                        $"{decodeResult.Diagnostics.AmbiguousFrameCount:N0} frame(s) waren ambigu.",
+                        combinedReport);
+                }
+            }
+
+            progress?.Report(new LoadProgress("Dataset cache opbouwen...", 92));
+            timer.Restart();
+            var logHashTask = ComputeSha256Async(logFilePath, cancellationToken);
+            var dbcHashTask = ComputeSha256Async(dbcFilePath, cancellationToken);
+            await Task.WhenAll(logHashTask, dbcHashTask).ConfigureAwait(false);
+            var hashMs = timer.ElapsedMilliseconds;
+            var entryAssembly = Assembly.GetEntryAssembly();
+            var version = entryAssembly?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+                          ?? entryAssembly?.GetName().Version?.ToString(3)
+                          ?? "2.1.0";
+            if (forReview && !combinedReport.HasErrors)
+                combinedReport = combinedReport with { Mode = ImportMode.Strict };
+            timer.Restart();
+            var dataset = await Task.Run(() => _datasetBuilder.Build(
+                parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
+                combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
+            dataset.LoadTimings = new LoadTimings(parseMs, dbcMs, decodeMs, hashMs, timer.ElapsedMilliseconds);
+            dataset.SourceLogPath = Path.GetFullPath(logFilePath);
+            dataset.SourceDbcPath = Path.GetFullPath(dbcFilePath);
+            dataset.SourceFiles = parseResult.SourceFiles.Count > 0
+                ? parseResult.SourceFiles : [SourceLogFile.FromLocalFile(dataset.SourceLogPath)];
+            _logger.LogInformation("Load phases (ms): parse={Parse}, dbc={Dbc}, decode={Decode}, hash={Hash}, dataset={Dataset}",
+                parseMs, dbcMs, decodeMs, hashMs, dataset.LoadTimings.DatasetMilliseconds);
+            progress?.Report(new LoadProgress("Klaar.", 100));
+            return dataset;
+        }
+        catch
+        {
+            (decodeResult?.Samples as IDisposable)?.Dispose();
+            (parseResult.Frames as IDisposable)?.Dispose();
+            throw;
+        }
     }
 
     private static IReadOnlyList<ImportIssue> BuildDecodeIssues(DecoderDiagnostics diagnostics)

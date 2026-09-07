@@ -311,6 +311,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IsBusy = true;
         _dataset?.Dispose();
         _dataset = null;
+        SettingsDiagnostics.ClearCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
         ProgressLabel = "Start verwerking...";
@@ -337,6 +338,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
 
             _dataset = loadResult.Dataset;
+            var confirmationMs = loadResult.ReviewMilliseconds;
             importMode = loadResult.Mode;
             LogFilePath = loadResult.LogPath;
             DbcFilePath = loadResult.DbcPath;
@@ -344,8 +346,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 _dataset.Completeness == DatasetCompleteness.Partial &&
                 _dataset.ImportReport?.HasErrors == true;
 
-            var channels = _dataset.RawFrames
-                .Select(static frame => string.IsNullOrWhiteSpace(frame.Channel) ? "(onbekend)" : frame.Channel)
+            var channels = _dataset.Channels
+                .Select(static channel => string.IsNullOrWhiteSpace(channel) ? "(onbekend)" : channel)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(static channel => channel, StringComparer.Ordinal)
                 .ToArray();
@@ -353,10 +355,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 var dbcName = Path.GetFileName(DbcFilePath);
                 var mapping = string.Join(Environment.NewLine, channels.Select(channel => $"• {channel} → {dbcName}"));
+                var confirmationTimer = Stopwatch.StartNew();
                 var confirmed = _messageDialogService.Confirm(
                     "DBC-toewijzing per kanaal bevestigen",
                     $"De log bevat {channels.Length} kanalen. Bevestig expliciet dat dezelfde DBC op ieder kanaal van toepassing is:\n\n{mapping}\n\n" +
                     "Kies Annuleren als een kanaal een andere DBC vereist; de analyse wordt dan niet geopend.");
+                confirmationMs += confirmationTimer.ElapsedMilliseconds;
                 if (!confirmed)
                 {
                     _dataset.Dispose();
@@ -368,11 +372,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 }
             }
 
+            var viewTimer = Stopwatch.StartNew();
             Analysis.LoadDataset(_dataset);
             JoystickAnalytics.LoadDataset(_dataset);
             RawFrames.LoadDataset(_dataset);
             Busmaster.LoadDataset(_dataset);
             SettingsDiagnostics.UpdateDataset(_dataset);
+            viewTimer.Stop();
+            var timings = _dataset.LoadTimings;
 
             StatusText = BuildStatusText(_dataset, Analysis.UseDownsampling, Analysis.MaxPointsPerTrace);
             SettingsDiagnostics.LastOperationSummary =
@@ -380,7 +387,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 $"Duur: {stopwatch.Elapsed}\n" +
                 $"Ruwe frames: {_dataset.RawCount:N0}\n" +
                 $"Gedecodeerde meetpunten: {_dataset.DecodedSamples.Count:N0}\n" +
-                $"Signalen: {_dataset.SignalCount:N0}";
+                $"Signalen: {_dataset.SignalCount:N0}\n" +
+                (timings is null ? string.Empty :
+                    $"Inlezen/converteren: {timings.ParseMilliseconds:N0} ms\n" +
+                    $"DBC laden: {timings.DbcMilliseconds:N0} ms\n" +
+                    $"Decoderen: {timings.DecodeMilliseconds:N0} ms\n" +
+                    $"Bestandshashes: {timings.HashMilliseconds:N0} ms\n" +
+                    $"Dataset opbouwen: {timings.DatasetMilliseconds:N0} ms\n") +
+                $"Weergaven voorbereiden: {viewTimer.ElapsedMilliseconds:N0} ms\n" +
+                $"Bevestigingsvensters: {confirmationMs:N0} ms\n" +
+                $"Verwerkingspogingen: {loadResult.ProcessingAttempts}";
 
             ProgressLabel = "Klaar.";
             ProgressValue = 100;
@@ -401,6 +417,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 ["duration_ms"] = stopwatch.ElapsedMilliseconds,
                 ["duration_bucket"] = TelemetryBuckets.DurationMilliseconds(stopwatch.ElapsedMilliseconds),
+                ["parse_duration_ms"] = timings?.ParseMilliseconds,
+                ["dbc_duration_ms"] = timings?.DbcMilliseconds,
+                ["decode_duration_ms"] = timings?.DecodeMilliseconds,
+                ["hash_duration_ms"] = timings?.HashMilliseconds,
+                ["dataset_duration_ms"] = timings?.DatasetMilliseconds,
+                ["view_duration_ms"] = viewTimer.ElapsedMilliseconds,
+                ["confirmation_duration_ms"] = confirmationMs,
+                ["processing_attempts"] = loadResult.ProcessingAttempts,
                 ["import_mode"] = importMode.ToString(),
                 ["dataset_completeness"] = _dataset.Completeness.ToString(),
                 ["raw_frame_bucket"] = TelemetryBuckets.Count(_dataset.RawCount),
@@ -470,6 +494,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IsBusy = true;
         _dataset?.Dispose();
         _dataset = null;
+        SettingsDiagnostics.ClearCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
         ProgressLabel = "Actuator CSV-runs voorbereiden...";
@@ -629,87 +654,92 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         var activeLogPath = initialLogPath;
         var activeDbcPath = initialDbcPath;
+        long reviewMilliseconds = 0;
+        var processingAttempts = 0;
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            processingAttempts++;
+            using var prepared = await _analysisPipeline.PrepareForReviewAsync(
+                activeLogPath, activeDbcPath, progress, cancellationToken);
+            if (!prepared.RequiresPartialConfirmation)
+                return new ImportLoadResult(prepared.Accept(), ImportMode.Strict, activeLogPath, activeDbcPath, reviewMilliseconds, processingAttempts);
+            var report = prepared.Report!;
+            SettingsDiagnostics.LastErrorDetails = FormatImportReport(report);
+            ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
+
+            ImportRepairWizardResult repair;
+            IsRepairWizardOpen = true;
+            var reviewTimer = Stopwatch.StartNew();
             try
             {
-                var dataset = await _analysisPipeline.LoadAsync(
+                repair = await _importRepairWizardService.ShowAsync(
+                    report,
                     activeLogPath,
                     activeDbcPath,
-                    ImportMode.Strict,
+                    cancellationToken);
+            }
+            finally
+            {
+                IsRepairWizardOpen = false;
+                reviewMilliseconds += reviewTimer.ElapsedMilliseconds;
+            }
+            if (repair.Decision == ImportRepairDecision.Cancel)
+            {
+                return null;
+            }
+
+            if (repair.Decision == ImportRepairDecision.ContinuePartial)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ProgressLabel = "Gecontroleerde PARTIAL-dataset openen...";
+                if (await prepared.MatchesSourcesAsync(repair.LogPath, repair.DbcPath, cancellationToken))
+                    return new ImportLoadResult(prepared.Accept(allowPartial: true), ImportMode.Partial, repair.LogPath, repair.DbcPath, reviewMilliseconds, processingAttempts);
+                prepared.Dispose();
+                processingAttempts++;
+                var partialDataset = await _analysisPipeline.LoadAsync(
+                    repair.LogPath,
+                    repair.DbcPath,
+                    ImportMode.Partial,
                     progress,
                     cancellationToken);
-                return new ImportLoadResult(dataset, ImportMode.Strict, activeLogPath, activeDbcPath);
+                return new ImportLoadResult(
+                    partialDataset,
+                    ImportMode.Partial,
+                    repair.LogPath,
+                    repair.DbcPath,
+                    reviewMilliseconds,
+                    processingAttempts);
             }
-            catch (ImportIntegrityException integrityException)
-            {
-                SettingsDiagnostics.LastErrorDetails = FormatImportReport(integrityException.Report);
-                ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
 
-                ImportRepairWizardResult repair;
-                IsRepairWizardOpen = true;
+            prepared.Dispose();
+            if (repair.RemoveRejectedLogLines)
+            {
                 try
                 {
-                    repair = await _importRepairWizardService.ShowAsync(
-                        integrityException.Report,
+                    ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
+                    var removed = await _importRepairService.CreateRepairedLogCopyAsync(
                         activeLogPath,
-                        activeDbcPath,
-                        cancellationToken);
-                }
-                finally
-                {
-                    IsRepairWizardOpen = false;
-                }
-                if (repair.Decision == ImportRepairDecision.Cancel)
-                {
-                    return null;
-                }
-
-                if (repair.Decision == ImportRepairDecision.ContinuePartial)
-                {
-                    ProgressLabel = "Bewust laden in PARTIAL-modus...";
-                    var partialDataset = await _analysisPipeline.LoadAsync(
                         repair.LogPath,
-                        repair.DbcPath,
-                        ImportMode.Partial,
-                        progress,
+                        report,
                         cancellationToken);
-                    return new ImportLoadResult(
-                        partialDataset,
-                        ImportMode.Partial,
-                        repair.LogPath,
-                        repair.DbcPath);
-                }
-
-                if (repair.RemoveRejectedLogLines)
-                {
-                    try
-                    {
-                        ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
-                        var removed = await _importRepairService.CreateRepairedLogCopyAsync(
-                            activeLogPath,
-                            repair.LogPath,
-                            integrityException.Report,
-                            cancellationToken);
-                        activeLogPath = repair.LogPath;
-                        ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-                    {
-                        _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
-                        _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
-                        continue;
-                    }
-                }
-                else
-                {
                     activeLogPath = repair.LogPath;
+                    ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
                 }
-
-                activeDbcPath = repair.DbcPath;
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                {
+                    _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
+                    _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
+                    continue;
+                }
             }
+            else
+            {
+                activeLogPath = repair.LogPath;
+            }
+
+            activeDbcPath = repair.DbcPath;
         }
     }
 
@@ -929,5 +959,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CanDataset Dataset,
         ImportMode Mode,
         string LogPath,
-        string DbcPath);
+        string DbcPath,
+        long ReviewMilliseconds,
+        int ProcessingAttempts);
 }

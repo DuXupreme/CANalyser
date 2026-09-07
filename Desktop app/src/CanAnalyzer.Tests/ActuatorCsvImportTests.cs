@@ -23,6 +23,8 @@ public sealed class ActuatorCsvImportTests
                 [first, second], null, CancellationToken.None);
 
             Assert.Equal(32, dataset.SignalCount);
+            Assert.Equal([first, second], dataset.SourceFiles.Select(source => source.SourcePath.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.All(dataset.SourceFiles, source => Assert.Null(source.Logger));
             var runA = Assert.Single(dataset.SignalSeriesByLabel.Values,
                 series => series.Identity.Channel == "run_a" &&
                           series.Identity.SignalName == "ActualPositionPct");

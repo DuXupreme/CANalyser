@@ -5,17 +5,59 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d">
     <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="350" />
             <ColumnDefinition Width="12" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Column="0"
+        <GroupBox Grid.ColumnSpan="3" Header="Huidige meting" Margin="0,0,0,12" BorderBrush="#16758A" BorderThickness="2">
+            <Grid Margin="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="350" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="{Binding CurrentMeasurementSummary}" FontWeight="SemiBold"
+                               FontSize="14" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <Expander Header="Bronarchief en gebruikte DBC">
+                        <StackPanel>
+                            <TextBox Text="{Binding CurrentSourceLogPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,4,0,4" />
+                            <TextBox Text="{Binding CurrentSourceDbcPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+                <DockPanel Grid.Column="2">
+                    <TextBlock DockPanel.Dock="Top" Text="Geopende logs en sessies" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <DataGrid ItemsSource="{Binding CurrentSourceFiles}" AutoGenerateColumns="False"
+                              IsReadOnly="True" CanUserAddRows="False" Height="150"
+                              EnableRowVirtualization="True" HeadersVisibility="Column">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="ToolTip" Value="{Binding SourcePath}" />
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Machine" Binding="{Binding Machine}" Width="135" />
+                            <DataGridTextColumn Header="Logger" Binding="{Binding Logger}" Width="90" />
+                            <DataGridTextColumn Header="Sessie" Binding="{Binding Session}" Width="90" />
+                            <DataGridTextColumn Header="Logbestand" Binding="{Binding Name}" Width="*" MinWidth="170" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Grid>
+        </GroupBox>
+
+        <ScrollViewer Grid.Row="1" Grid.Column="0"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
-            <GroupBox Header="Actieve bestanden" Margin="0,0,0,8">
+            <GroupBox Header="Geselecteerd voor volgende import" Margin="0,0,0,8">
                 <StackPanel Margin="8">
                     <TextBlock Text="Logbestand" FontWeight="SemiBold" />
                     <TextBox Text="{Binding LogFilePath}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
@@ -102,7 +144,7 @@
         </StackPanel>
         </ScrollViewer>
 
-        <Grid Grid.Column="2">
+        <Grid Grid.Row="1" Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />

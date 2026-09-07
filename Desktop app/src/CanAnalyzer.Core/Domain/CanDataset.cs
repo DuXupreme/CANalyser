@@ -1,3 +1,5 @@
+using CanAnalyzer.Core.Storage;
+
 namespace CanAnalyzer.Core.Domain;
 
 /// <summary>
@@ -32,11 +34,22 @@ public sealed class CanDataset : IDisposable
     /// <summary>Absolute UTC start time supplied by the logger, when available.</summary>
     public DateTimeOffset? StartTimeUtc { get; init; }
 
+    public LoadTimings? LoadTimings { get; internal set; }
+
+    public string SourceLogPath { get; internal set; } = string.Empty;
+    public string SourceDbcPath { get; internal set; } = string.Empty;
+    public IReadOnlyList<SourceLogFile> SourceFiles { get; internal set; } = [];
+
     public int RawCount => RawFrames.Count;
 
     public int SignalCount => SignalLabels.Count;
 
-    public int ExtendedCount => RawFrames.Count(frame => frame.IsExtended);
+    private int? _extendedCount;
+    public int ExtendedCount => _extendedCount ??= RawFrames is DiskBackedFrameStore store
+        ? store.ExtendedCount : RawFrames.Count(frame => frame.IsExtended);
+
+    public IReadOnlyCollection<string> Channels => RawFrames is DiskBackedFrameStore store
+        ? store.Channels : RawFrames.Select(frame => frame.Channel).Distinct(StringComparer.Ordinal).ToArray();
 
     public void Dispose()
     {

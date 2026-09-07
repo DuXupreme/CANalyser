@@ -85,6 +85,16 @@ Each line/request contains:
 
 ## Data that is allowed in telemetry
 
+`load_decode_completed` includes `parse_duration_ms` (including MDF4 extraction,
+conversion and merge), `dbc_duration_ms`, `decode_duration_ms`, `hash_duration_ms`,
+`dataset_duration_ms`, `view_duration_ms`, `confirmation_duration_ms` and
+`processing_attempts`. Phase timings describe the final processing attempt;
+confirmation time covers the repair wizard and channel-mapping confirmation.
+`duration_ms` remains the full load operation, including confirmations, retries,
+source revalidation and settings persistence, but excluding the online download.
+View timing measures synchronous view initialization; deferred analytics can
+continue afterward. Phase durations therefore need not sum to `duration_ms`.
+
 The implementation only records technical/product analytics:
 
 - app version, runtime version, operating system description, process architecture

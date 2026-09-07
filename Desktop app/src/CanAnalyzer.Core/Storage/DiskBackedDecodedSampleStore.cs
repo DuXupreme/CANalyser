@@ -7,12 +7,13 @@ using CanAnalyzer.Core.Interfaces;
 namespace CanAnalyzer.Core.Storage;
 
 /// <summary>Append-only decoded-sample store with exact BigInteger raw values and a compact disk index.</summary>
-public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSample>, IFrameSampleLookup, IDisposable
+public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSample>, IFrameSampleLookup, ISignalSampleLookup, IDisposable
 {
     private static readonly byte[] Magic = "CANSMP2\0"u8.ToArray();
     private readonly string _dataPath;
     private readonly string _indexPath;
     private readonly string _frameIndexPath;
+    private readonly DiskBackedSignalIndex _signalIndex;
     private readonly object _readLock = new();
     private FileStream? _dataWriteStream;
     private FileStream? _indexWriteStream;
@@ -41,6 +42,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         _dataPath = Path.Combine(directory, $"{id}.samples");
         _indexPath = Path.Combine(directory, $"{id}.index");
         _frameIndexPath = Path.Combine(directory, $"{id}.frame-index");
+        _signalIndex = new DiskBackedSignalIndex(Path.Combine(directory, $"{id}.series"));
         _dataWriteStream = new FileStream(_dataPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
         _indexWriteStream = new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
         _frameIndexWriteStream = new FileStream(_frameIndexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
@@ -88,6 +90,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
 
         _indexWriter!.Write(_dataWriteStream!.Position);
         Write(_dataWriter!, sample);
+        _signalIndex.Append(sample);
         _activeFrameSampleCount++;
         Count++;
     }
@@ -96,6 +99,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_complete) return;
+        _signalIndex.Complete();
         FinalizeActiveFrame();
         _dataWriter!.Flush();
         _indexWriter!.Flush();
@@ -128,6 +132,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     {
         if (_disposed) return;
         _disposed = true;
+        _signalIndex.Dispose();
         _dataWriter?.Dispose();
         _indexWriter?.Dispose();
         _frameIndexWriter?.Dispose();
@@ -155,6 +160,18 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
 
         messageName = this[first].MessageName;
         return true;
+    }
+
+    public IReadOnlyList<SignalSampleSummary> GetSignalSummaries()
+    {
+        Complete();
+        return _signalIndex.GetSignalSummaries();
+    }
+
+    public IEnumerable<SignalSeriesPoint> ReadSignalSeries(SignalIdentity identity)
+    {
+        Complete();
+        return _signalIndex.ReadSignalSeries(identity);
     }
 
     public IReadOnlyList<DecodedSignalSample> GetFrameSamples(long frameIndex)

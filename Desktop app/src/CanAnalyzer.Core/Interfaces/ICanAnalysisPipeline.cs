@@ -7,6 +7,10 @@ namespace CanAnalyzer.Core.Interfaces;
 /// </summary>
 public interface ICanAnalysisPipeline
 {
+    /// <summary>Processes once, retaining valid data for explicit review before it can be used.</summary>
+    Task<PreparedCanAnalysis> PrepareForReviewAsync(
+        string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken);
+
     Task<CanDataset> LoadAsync(
         string logFilePath,
         string dbcFilePath,

@@ -172,6 +172,18 @@ public sealed partial class BusmasterViewModel : ObservableObject
             return;
         }
 
+        if (dataset.DecodedSamples is ISignalSampleLookup lookup)
+        {
+            _allSignalWatchRows = lookup.GetSignalSummaries()
+                .Select(summary => new BusmasterSignalWatchRow(summary.Latest.Identity,
+                    summary.Latest.TimestampNanoseconds, summary.Latest.FrameIndex, summary.Latest.Value,
+                    summary.Latest.RawValueHex, summary.Latest.Unit, summary.Count, summary.Minimum, summary.Maximum))
+                .OrderBy(row => row.MessageName).ThenBy(row => row.Name).ThenBy(row => row.Channel).ThenBy(row => row.FrameIdHex)
+                .ToList();
+            ApplySignalWatchFilter();
+            return;
+        }
+
         var stats = new Dictionary<SignalIdentity, SignalWatchAccumulator>();
         foreach (var sample in dataset.DecodedSamples)
         {

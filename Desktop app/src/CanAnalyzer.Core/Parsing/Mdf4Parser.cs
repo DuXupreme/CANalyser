@@ -35,9 +35,11 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
         Directory.CreateDirectory(inputDirectory);
         try
         {
+            var sourceFiles = new List<SourceLogFile>();
             var inputPaths = Path.GetExtension(filePath).Equals(".zip", StringComparison.OrdinalIgnoreCase)
-                ? await ExtractArchiveAsync(filePath, inputDirectory, progress, cancellationToken).ConfigureAwait(false)
+                ? await ExtractArchiveAsync(filePath, inputDirectory, sourceFiles, progress, cancellationToken).ConfigureAwait(false)
                 : new[] { Path.GetFullPath(filePath) };
+            if (sourceFiles.Count == 0) sourceFiles.Add(SourceLogFile.FromLocalFile(filePath));
             var trcPaths = await converter.ConvertToPeakTrcAsync(inputPaths, outputDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -52,7 +54,10 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
                     parsedFiles.Add((trcPath, parsed));
                 }
 
-                return MergeChronologically(parsedFiles, mode, progress, cancellationToken);
+                return MergeChronologically(parsedFiles, mode, progress, cancellationToken) with
+                {
+                    SourceFiles = sourceFiles.ToArray()
+                };
             }
             finally
             {
@@ -68,6 +73,7 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
     private static async Task<IReadOnlyList<string>> ExtractArchiveAsync(
         string archivePath,
         string inputDirectory,
+        List<SourceLogFile> sourceFiles,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -100,6 +106,7 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
             await source.CopyToAsync(target, 128 * 1024, cancellationToken).ConfigureAwait(false);
             if (target.Length != entry.Length) throw new InvalidDataException($"MF4-bestand '{entry.Name}' is onvolledig uitgepakt.");
             extracted.Add(destination);
+            sourceFiles.Add(SourceLogFile.FromArchiveEntry(entry.FullName));
             progress?.Report(new LoadProgress($"ZIP uitpakken ({index + 1}/{entries.Length})...",
                 1 + (int)Math.Round((index + 1) * 2d / entries.Length)));
         }

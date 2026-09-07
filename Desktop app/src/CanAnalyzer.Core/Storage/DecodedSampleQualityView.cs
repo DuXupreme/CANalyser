@@ -6,7 +6,7 @@ namespace CanAnalyzer.Core.Storage;
 
 internal sealed class DecodedSampleQualityView(
     IReadOnlyList<DecodedSignalSample> source,
-    DecodeQuality quality) : IReadOnlyList<DecodedSignalSample>, IFrameSampleLookup, IDisposable
+    DecodeQuality quality) : IReadOnlyList<DecodedSignalSample>, IFrameSampleLookup, ISignalSampleLookup, IDisposable
 {
     public int Count => source.Count;
 
@@ -18,6 +18,19 @@ internal sealed class DecodedSampleQualityView(
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public IReadOnlyList<SignalSampleSummary> GetSignalSummaries() =>
+        source is ISignalSampleLookup lookup
+            ? lookup.GetSignalSummaries().Select(summary => summary with { Latest = summary.Latest with { Quality = quality } }).ToArray()
+            : source.GroupBy(sample => sample.Identity).Select(group => new SignalSampleSummary(
+                group.Count(), group.Min(sample => sample.Value), group.Max(sample => sample.Value),
+                group.OrderBy(sample => sample.TimestampNanoseconds).ThenBy(sample => sample.FrameIndex).Last() with { Quality = quality })).ToArray();
+
+    public IEnumerable<SignalSeriesPoint> ReadSignalSeries(SignalIdentity identity) =>
+        source is ISignalSampleLookup lookup
+            ? lookup.ReadSignalSeries(identity)
+            : source.Where(sample => sample.Identity == identity)
+                .Select(sample => new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
 
     public bool TryGetFrameSummary(long frameIndex, out string messageName, out int sampleCount)
     {
