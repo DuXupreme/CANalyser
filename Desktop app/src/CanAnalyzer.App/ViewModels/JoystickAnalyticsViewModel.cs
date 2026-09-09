@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Text;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
-using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Domain;
+using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Interfaces;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -19,22 +19,29 @@ namespace CanAnalyzer.App.ViewModels;
 public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 {
     private const int MaximumAnalysisPointsPerSignal = 250_000;
-    private readonly IJoystickAnalyticsService _analyticsService;
     private readonly ITelemetryService _telemetryService;
+    private readonly Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
+    private bool _analysisWasSampled;
+    private int _largestAnalysisSource;
+    private readonly IJoystickAnalyticsService _analyticsService;
     private readonly DispatcherTimer _joystickPlaybackTimer;
     private CanDataset? _dataset;
     private DelayAnalysisResult? _lastDelayResult;
     private bool _suppressTimeWindowAutoRecompute;
     private bool _suppressPlaybackAutoRefresh;
     private DateTime _lastPlaybackTickUtc;
-    private IReadOnlyList<TimeNormalizedPoint> _currentJoystickFilteredPath = [];
+    private IReadOnlyList<JoystickUsagePoint> _currentJoystickFilteredPath = [];
     private double _currentJoystickDeadzone;
     private double _currentJoystickSaturation;
-    private string? _lastTimedPathFailure;
-    private readonly Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
-    private bool _analysisWasSampled;
-    private int _largestAnalysisSource;
 
+
+    [ObservableProperty] private string _joystickUsageStatus = "Laad een log om joystickgebruik en actuatorbereik te bekijken.";
+    [ObservableProperty] private string _joystickDeadzoneText = "—";
+    [ObservableProperty] private string _joystickSaturationText = "—";
+    [ObservableProperty] private string _joystickCoverageText = "—";
+    [ObservableProperty] private double _strokeEdgePercent = 5;
+    public ObservableCollection<StrokeUsageCard> StrokeCards { get; } = [];
+    [ObservableProperty] private PlotModel _strokeDistributionModel = EmptyPlot("Geen actuatorposities geselecteerd");
     [ObservableProperty] private string? _selectedJoystickXSignal;
     [ObservableProperty] private string? _selectedJoystickYSignal;
     [ObservableProperty] private string? _selectedJoystickYawSignal;
@@ -46,9 +53,6 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private int _histogramBins = 40;
     [ObservableProperty] private double _deadzoneThreshold = 0.10;
     [ObservableProperty] private double _saturationThreshold = 0.90;
-    [ObservableProperty] private double _actuatorStrokeMinimum;
-    [ObservableProperty] private double _actuatorStrokeMaximum = 100;
-    [ObservableProperty] private double _actuatorExtremeBandPercent = 5;
     [ObservableProperty] private bool _useJoystickTimeWindow;
     [ObservableProperty] private double _joystickTimeStartSeconds;
     [ObservableProperty] private double _joystickTimeEndSeconds;
@@ -72,7 +76,6 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private double _responseThresholdPercent = 2.0;
     [ObservableProperty] private string _statusText = "Laad eerst log + DBC en open daarna dit tabblad.";
     [ObservableProperty] private string _actuatorSummary = string.Empty;
-    [ObservableProperty] private string _actuatorStrokeSummary = string.Empty;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _busyLabel = "Analyses herberekenen...";
 
@@ -90,15 +93,13 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private PlotModel _canTopIdPlotModel = EmptyPlot("Top CAN-IDs");
     [ObservableProperty] private IPlotController _delayOverlayController = CreateInteractiveController();
 
-    public JoystickAnalyticsViewModel(
-        IJoystickAnalyticsService analyticsService,
-        ITelemetryService telemetryService,
-        ActiveUsageViewModel activeUsage)
+    public JoystickAnalyticsViewModel(IJoystickAnalyticsService analyticsService, ITelemetryService telemetryService, ActiveUsageViewModel activeUsage)
     {
         _analyticsService = analyticsService;
         _telemetryService = telemetryService;
         ActiveUsage = activeUsage;
         RecomputeCommand = new AsyncRelayCommand(RecomputeAsync, () => !IsBusy);
+        RecomputeUsageCommand = new AsyncRelayCommand(RecomputeUsageAsync, () => !IsBusy);
         AutoDetectJoystickPairCommand = new RelayCommand(AutoDetectJoystickSignals);
         AutoDetectActuatorPairCommand = new RelayCommand(AutoDetectButterflySignals);
         AutoDetectDelaySignalsCommand = new RelayCommand(AutoDetectDelaySignals);
@@ -112,22 +113,46 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         _joystickPlaybackTimer.Tick += JoystickPlaybackTimerOnTick;
     }
 
-    public ObservableCollection<string> AvailableSignals { get; } = [];
     public ActiveUsageViewModel ActiveUsage { get; }
+    public ObservableCollection<string> AvailableSignals { get; } = [];
     public ObservableCollection<MetricRow> JoystickUsageMetrics { get; } = [];
     public ObservableCollection<ActuatorMetricRow> ActuatorMatrix { get; } = [];
-    public ObservableCollection<ActuatorMetricRow> ActuatorStrokeMetrics { get; } = [];
     public ObservableCollection<MetricRow> DelayMetrics { get; } = [];
     public ObservableCollection<MetricRow> ProfessionalCanMetrics { get; } = [];
     public ObservableCollection<CanTopIdRow> ProfessionalTopIdRows { get; } = [];
     public ObservableCollection<CanCycleTimingRow> ProfessionalCycleRows { get; } = [];
     public IAsyncRelayCommand RecomputeCommand { get; }
+    public IAsyncRelayCommand RecomputeUsageCommand { get; }
     public IRelayCommand AutoDetectJoystickPairCommand { get; }
     public IRelayCommand AutoDetectActuatorPairCommand { get; }
     public IRelayCommand AutoDetectDelaySignalsCommand { get; }
     public IRelayCommand ResetJoystickTimeWindowCommand { get; }
     public IRelayCommand ToggleJoystickPlaybackCommand { get; }
     public IRelayCommand ResetJoystickPlaybackCommand { get; }
+
+    private void InvalidateUsage()
+    {
+        if (IsBusy) return;
+        StopJoystickPlayback();
+        _currentJoystickFilteredPath = [];
+        StrokeCards.Clear();
+        JoystickUsageMetrics.Clear();
+        JoystickDeadzoneText = JoystickSaturationText = JoystickCoverageText = "—";
+        JoystickUsageStatus = "Instellingen gewijzigd. Klik op Bereken analyse om de resultaten bij te werken.";
+        JoystickDensityModel = EmptyPlot("Bereken analyse");
+        RadiusHistogramModel = EmptyPlot("Bereken analyse");
+        TrajectoryModel = EmptyPlot("Bereken analyse");
+        StrokeDistributionModel = EmptyPlot("Bereken analyse");
+    }
+    partial void OnSelectedJoystickXSignalChanged(string? value) => InvalidateUsage();
+    partial void OnSelectedJoystickYSignalChanged(string? value) => InvalidateUsage();
+    partial void OnSelectedActuatorLeftSignalChanged(string? value) => InvalidateUsage();
+    partial void OnSelectedActuatorRightSignalChanged(string? value) => InvalidateUsage();
+    partial void OnSelectedActuatorFrontSignalChanged(string? value) => InvalidateUsage();
+    partial void OnHistogramBinsChanged(int value) => InvalidateUsage();
+    partial void OnDeadzoneThresholdChanged(double value) => InvalidateUsage();
+    partial void OnSaturationThresholdChanged(double value) => InvalidateUsage();
+    partial void OnStrokeEdgePercentChanged(double value) => InvalidateUsage();
 
     partial void OnUseJoystickTimeWindowChanged(bool value) => RecomputeJoystickWindowIfNeeded();
     partial void OnJoystickTimeStartSecondsChanged(double value) => RecomputeJoystickWindowIfNeeded();
@@ -145,13 +170,17 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     partial void OnJoystickPlaybackPositionSecondsChanged(double value) => UpdateJoystickPlaybackPlots();
     partial void OnJoystickPlaybackSpeedChanged(double value)
     {
-        if (value < 0.1)
+        if (!double.IsFinite(value) || value < 0.1)
         {
             JoystickPlaybackSpeed = 0.1;
         }
     }
 
-    partial void OnIsBusyChanged(bool value) => RecomputeCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        RecomputeCommand.NotifyCanExecuteChanged();
+        RecomputeUsageCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnResponseThresholdPercentChanged(double value)
     {
@@ -219,6 +248,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     public void LoadDataset(CanDataset dataset)
     {
+        StopJoystickPlayback();
+        _suppressTimeWindowAutoRecompute = true;
+        try
+        {
+            UseJoystickTimeWindow = false;
+            JoystickTimeStartSeconds = JoystickTimeEndSeconds = 0;
+        }
+        finally { _suppressTimeWindowAutoRecompute = false; }
         _dataset = dataset;
         ActiveUsage.LoadDataset(dataset);
         _analysisSeriesCache.Clear();
@@ -261,10 +298,6 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             await Dispatcher.Yield(DispatcherPriority.Background);
             BuildJoystickUsageAnalytics();
 
-            BusyLabel = "Actuatorslag analyseren...";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            BuildActuatorStrokeUsage();
-
             BusyLabel = "Actuatoranalyse herberekenen...";
             await Dispatcher.Yield(DispatcherPriority.Background);
             BuildActuatorTrackingAnalytics();
@@ -277,7 +310,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             await Dispatcher.Yield(DispatcherPriority.Background);
             BuildProfessionalCanAnalytics();
             var boundedText = _analysisWasSampled
-                ? $" Voor stabiliteit zijn per signaal maximaal {MaximumAnalysisPointsPerSignal:N0} gelijkmatig verdeelde punten uit de volledige meetperiode gebruikt (grootste bron: {_largestAnalysisSource:N0})."
+                ? $" Alleen voor delay/kinematica zijn per signaal maximaal {MaximumAnalysisPointsPerSignal:N0} gelijkmatig verdeelde punten uit de volledige meetperiode gebruikt (grootste bron: {_largestAnalysisSource:N0})."
                 : string.Empty;
             StatusText = (_dataset.Completeness == DatasetCompleteness.Partial
                 ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
@@ -321,74 +354,50 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private void RecomputeJoystickWindowIfNeeded()
     {
-        if (_suppressTimeWindowAutoRecompute || _dataset is null)
-        {
-            return;
-        }
-
-        if (!UseJoystickTimeWindow)
-        {
-            _ = RecomputeAsync();
-            return;
-        }
-
-        if (JoystickTimeEndSeconds > JoystickTimeStartSeconds)
-        {
-            _ = RecomputeAsync();
-        }
+        if (_suppressTimeWindowAutoRecompute || _dataset is null) return;
+        InvalidateUsage();
     }
 
     private void UpdateJoystickPlaybackPlots()
     {
-        if (_suppressPlaybackAutoRefresh)
-        {
-            return;
-        }
-
+        if (_suppressPlaybackAutoRefresh) return;
         if (_currentJoystickFilteredPath.Count == 0)
         {
-            JoystickDensityModel = EmptyPlot("Joystick puntenwolk");
-            TrajectoryModel = EmptyPlot("Joystick traject");
+            TrajectoryModel = EmptyPlot("Geen traject beschikbaar");
             return;
         }
-
-        if (!IsJoystickPlaybackEnabled)
+        var end = IsJoystickPlaybackEnabled ? JoystickPlaybackPositionSeconds : JoystickPlaybackEndSeconds;
+        int UpperPathBound(double time)
         {
-            var allPoints = _currentJoystickFilteredPath.Select(static p => new NormalizedPoint(p.X, p.Y)).ToArray();
-            var current = _currentJoystickFilteredPath[^1];
-            var marker = new NormalizedPoint(current.X, current.Y);
-            JoystickDensityModel = BuildPointCloud(allPoints, _currentJoystickDeadzone, _currentJoystickSaturation, marker);
-            TrajectoryModel = BuildTrajectory(allPoints, _currentJoystickDeadzone, _currentJoystickSaturation, marker);
+            var low = 0;
+            var high = _currentJoystickFilteredPath.Count;
+            while (low < high)
+            {
+                var mid = low + (high - low) / 2;
+                if (_currentJoystickFilteredPath[mid].Time <= time) low = mid + 1;
+                else high = mid;
+            }
+            return low;
+        }
+        var first = Math.Max(0, UpperPathBound(end - 5) - 1);
+        var last = UpperPathBound(end);
+        var visible = new List<JoystickUsagePoint>();
+        for (var i = first; i < last; i++)
+            if (_currentJoystickFilteredPath[i].Time + _currentJoystickFilteredPath[i].Seconds >= end - 5)
+                visible.Add(_currentJoystickFilteredPath[i]);
+        if (visible.Count == 0 || visible[^1].Time + visible[^1].Seconds < end - 0.000001)
+        {
+            TrajectoryModel = EmptyPlot("Geen meetdekking op dit tijdstip");
             return;
         }
-
-        var start = _currentJoystickFilteredPath[0].Time;
-        var end = _currentJoystickFilteredPath[^1].Time;
-        var playbackTime = Math.Clamp(JoystickPlaybackPositionSeconds, start, end);
-        if (Math.Abs(playbackTime - JoystickPlaybackPositionSeconds) > 1e-9)
+        var points = new List<NormalizedPoint>();
+        for (var i = 0; i < visible.Count; i++)
         {
-            _suppressPlaybackAutoRefresh = true;
-            try
-            {
-                JoystickPlaybackPositionSeconds = playbackTime;
-            }
-            finally
-            {
-                _suppressPlaybackAutoRefresh = false;
-            }
+            if (i > 0 && visible[i].Time > visible[i - 1].Time + visible[i - 1].Seconds + 0.000001)
+                points.Add(new NormalizedPoint(double.NaN, double.NaN));
+            points.Add(new NormalizedPoint(visible[i].X, visible[i].Y));
         }
-
-        var visible = _currentJoystickFilteredPath.Where(point => point.Time <= playbackTime).ToArray();
-        if (visible.Length == 0)
-        {
-            visible = [_currentJoystickFilteredPath[0]];
-        }
-
-        var points = visible.Select(static p => new NormalizedPoint(p.X, p.Y)).ToArray();
-        var currentPoint = visible[^1];
-        var currentMarker = new NormalizedPoint(currentPoint.X, currentPoint.Y);
-        JoystickDensityModel = BuildPointCloud(points, _currentJoystickDeadzone, _currentJoystickSaturation, currentMarker);
-        TrajectoryModel = BuildTrajectory(points, _currentJoystickDeadzone, _currentJoystickSaturation, currentMarker);
+        TrajectoryModel = BuildTrajectory(points, _currentJoystickDeadzone, _currentJoystickSaturation, points[^1]);
     }
 
     private void ToggleJoystickPlayback()
@@ -515,12 +524,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     {
         StopJoystickPlayback();
         _lastDelayResult = null;
+        StrokeCards.Clear();
+        StrokeDistributionModel = EmptyPlot("Geen actuatorposities geselecteerd");
+        JoystickDeadzoneText = JoystickSaturationText = JoystickCoverageText = "—";
+        JoystickUsageStatus = "Laad een log om het gebruik te analyseren.";
         _currentJoystickFilteredPath = [];
         JoystickUsageMetrics.Clear();
         ActuatorMatrix.Clear();
-        ActuatorStrokeMetrics.Clear();
         ActuatorSummary = string.Empty;
-        ActuatorStrokeSummary = string.Empty;
         DelayMetrics.Clear();
         ProfessionalCanMetrics.Clear();
         ProfessionalTopIdRows.Clear();
@@ -539,130 +550,150 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         CanTopIdPlotModel = EmptyPlot("Top CAN-IDs");
     }
 
+    private async Task RecomputeUsageAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            JoystickUsageStatus = "Analyse wordt berekend…";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            BuildJoystickUsageAnalytics();
+        }
+        finally { IsBusy = false; }
+    }
+
     private void BuildJoystickUsageAnalytics()
     {
         StopJoystickPlayback();
+        _currentJoystickFilteredPath = [];
         JoystickUsageMetrics.Clear();
-        if (!TryGetSeries(SelectedJoystickXSignal, out var sx) || !TryGetSeries(SelectedJoystickYSignal, out var sy))
-        {
-            JoystickDensityModel = EmptyPlot("Joystick puntenwolk");
-            TrajectoryModel = EmptyPlot("Joystick traject");
-            RadiusHistogramModel = EmptyPlot("Joystick radius histogram");
-            return;
-        }
-
-        var timedPath = BuildTimedNormalizedPath(sx, sy);
-        if (timedPath.Count == 0)
-        {
-            Add(JoystickUsageMetrics, "Alignmentstatus", _lastTimedPathFailure ?? "Geen gemeenschappelijke tijdsperiode");
-            JoystickDensityModel = EmptyPlot("Joystick puntenwolk");
-            TrajectoryModel = EmptyPlot("Joystick traject");
-            RadiusHistogramModel = EmptyPlot("Joystick radius histogram");
-            return;
-        }
-
+        JoystickDeadzoneText = JoystickSaturationText = JoystickCoverageText = "—";
+        JoystickDensityModel = EmptyPlot("Geen gezamenlijke joystickdata");
+        TrajectoryModel = EmptyPlot("Geen traject beschikbaar");
+        RadiusHistogramModel = EmptyPlot("Geen uitslagverdeling beschikbaar");
+        var selectedSeries = new[] { SelectedJoystickXSignal, SelectedJoystickYSignal, SelectedActuatorLeftSignal, SelectedActuatorRightSignal, SelectedActuatorFrontSignal }
+            .Select(label => TryGetSeries(label, out var series) ? series : null)
+            .Where(series => series is not null && series.Time.Length > 0).ToArray();
         _suppressTimeWindowAutoRecompute = true;
         try
         {
-            JoystickAvailableStartSeconds = timedPath[0].Time;
-            JoystickAvailableEndSeconds = timedPath[^1].Time;
-            if (JoystickTimeEndSeconds <= JoystickTimeStartSeconds)
+            JoystickAvailableStartSeconds = selectedSeries.Length > 0 ? selectedSeries.Min(s => s!.Time[0]) : 0;
+            JoystickAvailableEndSeconds = selectedSeries.Length > 0 ? selectedSeries.Max(s => s!.Time[^1]) : 0;
+            if (!UseJoystickTimeWindow)
             {
                 JoystickTimeStartSeconds = JoystickAvailableStartSeconds;
                 JoystickTimeEndSeconds = JoystickAvailableEndSeconds;
             }
         }
-        finally
+        finally { _suppressTimeWindowAutoRecompute = false; }
+        if (!double.IsFinite(DeadzoneThreshold) || !double.IsFinite(SaturationThreshold)
+            || DeadzoneThreshold < 0 || SaturationThreshold > 1 || DeadzoneThreshold >= SaturationThreshold
+            || !double.IsFinite(StrokeEdgePercent) || StrokeEdgePercent <= 0 || StrokeEdgePercent >= 50
+            || HistogramBins < 10 || HistogramBins > 100
+            || (UseJoystickTimeWindow && (!double.IsFinite(JoystickTimeStartSeconds) || !double.IsFinite(JoystickTimeEndSeconds) || JoystickTimeEndSeconds <= JoystickTimeStartSeconds)))
         {
-            _suppressTimeWindowAutoRecompute = false;
+            StrokeCards.Clear();
+            StrokeDistributionModel = EmptyPlot("Controleer de instellingen");
+            JoystickUsageStatus = "Controleer de instellingen: 0 ≤ deadzone < buitenrand ≤ 1; uiterste band > 0 en < 50%; 10–100 bins; einde na start.";
+            return;
         }
-
-        var filteredPath = FilterTimedPath(timedPath);
-        if (filteredPath.Count == 0)
+        BuildStrokeUsage();
+        if (!TryGetSeries(SelectedJoystickXSignal, out var sx) || !TryGetSeries(SelectedJoystickYSignal, out var sy))
         {
-            filteredPath = timedPath;
-            _suppressTimeWindowAutoRecompute = true;
-            try
-            {
-                UseJoystickTimeWindow = false;
-                JoystickTimeStartSeconds = JoystickAvailableStartSeconds;
-                JoystickTimeEndSeconds = JoystickAvailableEndSeconds;
-            }
-            finally
-            {
-                _suppressTimeWindowAutoRecompute = false;
-            }
+            JoystickUsageStatus = "Selecteer joystick X en Y bij Signalen en instellingen. Slagbenutting werkt onafhankelijk van de joystick.";
+            return;
         }
-
-        var filteredX = filteredPath.Select(static p => p.X).ToArray();
-        var filteredY = filteredPath.Select(static p => p.Y).ToArray();
-        var filteredTime = filteredPath.Select(static p => p.Time).ToArray();
-        var filteredXSeries = new SignalSeries(sx.Label, filteredTime, filteredX);
-        var filteredYSeries = new SignalSeries(sy.Label, filteredTime, filteredY);
-
-        var result = _analyticsService.AnalyzePair(
-            filteredXSeries,
-            filteredYSeries,
-            Math.Max(0, DeadzoneThreshold),
-            Math.Max(0, SaturationThreshold),
-            Math.Clamp(HistogramBins, 10, 100),
-            24000);
-        var s = result.Statistics;
-        Add(JoystickUsageMetrics, "Joystick X", result.XSignalLabel);
-        Add(JoystickUsageMetrics, "Joystick Y", result.YSignalLabel);
-        Add(JoystickUsageMetrics, "Analysetijd [s]",
-            UseJoystickTimeWindow
-                ? $"{F(JoystickTimeStartSeconds)} .. {F(JoystickTimeEndSeconds)}"
-                : $"{F(JoystickAvailableStartSeconds)} .. {F(JoystickAvailableEndSeconds)}");
-        Add(JoystickUsageMetrics, "Samples", s.SampleCount.ToString("N0", CultureInfo.CurrentCulture));
-        Add(JoystickUsageMetrics, "Alignmentstatus", result.Alignment.Status.ToString());
-        Add(JoystickUsageMetrics, "Overlap [s]", F(result.Alignment.OverlapNanoseconds / 1_000_000_000d));
-        Add(JoystickUsageMetrics, "Alignmentdekking [%]", F(result.Alignment.CoveragePercent));
-        Add(JoystickUsageMetrics, "Max sampleafstand [s]", F(result.Alignment.MaximumSampleDistanceSeconds));
-        Add(JoystickUsageMetrics, "Dubbele timestampintervallen overgeslagen", result.Alignment.DuplicateTimestampIntervalsSkipped.ToString("N0", CultureInfo.CurrentCulture));
-        Add(JoystickUsageMetrics, "Deadzone usage [%]", F(s.DeadzonePercent));
-        Add(JoystickUsageMetrics, "Saturation usage [%]", F(s.SaturationPercent));
-        Add(JoystickUsageMetrics, "Gebruikte X-range [%] (indicatief)", F(s.UsedXRangePercent));
-        Add(JoystickUsageMetrics, "Gebruikte Y-range [%] (indicatief)", F(s.UsedYRangePercent));
-        Add(JoystickUsageMetrics, "Bias/center-offset X", F(s.BiasX));
-        Add(JoystickUsageMetrics, "Bias/center-offset Y", F(s.BiasY));
-        Add(JoystickUsageMetrics, "Quadrant I [%]", F(s.Quadrant1Percent));
-        Add(JoystickUsageMetrics, "Quadrant II [%]", F(s.Quadrant2Percent));
-        Add(JoystickUsageMetrics, "Quadrant III [%]", F(s.Quadrant3Percent));
-        Add(JoystickUsageMetrics, "Quadrant IV [%]", F(s.Quadrant4Percent));
-        Add(JoystickUsageMetrics, "P95 radius", F(s.Percentile95Radius));
-        Add(JoystickUsageMetrics, "Aanbevolen gevoeligheid", SensitivityAdvice(s));
-
-        _currentJoystickFilteredPath = filteredPath;
-        _currentJoystickDeadzone = Math.Max(0, DeadzoneThreshold);
-        _currentJoystickSaturation = Math.Max(0, SaturationThreshold);
+        if (sx.Time.Length == 0 || sy.Time.Length == 0)
+        {
+            JoystickUsageStatus = "De geselecteerde joysticksignalen bevatten geen meetpunten.";
+            return;
+        }
+        if (UseJoystickTimeWindow && JoystickTimeEndSeconds <= JoystickTimeStartSeconds)
+        {
+            JoystickUsageStatus = "Ongeldig tijdvenster: einde moet na start liggen.";
+            return;
+        }
+        var result = UsageAnalytics.AnalyzeJoystick(sx, sy,
+            UseJoystickTimeWindow ? JoystickTimeStartSeconds : null,
+            UseJoystickTimeWindow ? JoystickTimeEndSeconds : null,
+            DeadzoneThreshold, SaturationThreshold, HistogramBins);
+        if (result.CoveredSeconds <= 0)
+        {
+            JoystickUsageStatus = "Geen gezamenlijke meetdekking in dit tijdvenster. Kies een ander venster of controleer de signalen.";
+            return;
+        }
+        JoystickDeadzoneText = UsagePercent(result.DeadzonePercent);
+        JoystickSaturationText = UsagePercent(result.SaturationPercent);
+        JoystickCoverageText = UsagePercent(100 * result.CoveredSeconds / result.WindowSeconds);
+        JoystickUsageStatus = $"{result.CoveredSeconds:N1} s gezamenlijke meetdekking · {Math.Max(0, result.WindowSeconds - result.CoveredSeconds):N1} s zonder dekking overgeslagen. Percentages zijn tijdgewogen.";
+        Add(JoystickUsageMetrics, "X-signaal", sx.Label);
+        Add(JoystickUsageMetrics, "Y-signaal", sy.Label);
+        Add(JoystickUsageMetrics, "Geldige intervallen", result.Points.Count.ToString("N0"));
+        Add(JoystickUsageMetrics, "Normalisatie", "Per as: minimum volledige log = −1, maximum = +1; midden van dat bereik = 0.");
+        Add(JoystickUsageMetrics, "Interpretatie", "Geschat joystickbereik; geen kalibratie van fysieke nulstand of eindstops. Een constante as wordt op 0 getoond.");
+        Add(JoystickUsageMetrics, "Meetgaten", "Intervallen groter dan 5× de mediane sampleafstand per bronsignaal tellen niet mee.");
+        Add(JoystickUsageMetrics, "Tijdweging", "Laatst gemeten positie tot de volgende sample, uitsluitend waar beide assen dekking hebben.");
+        _currentJoystickFilteredPath = result.Points;
+        _currentJoystickDeadzone = DeadzoneThreshold;
+        _currentJoystickSaturation = SaturationThreshold;
         _suppressPlaybackAutoRefresh = true;
         try
         {
-            JoystickPlaybackStartSeconds = filteredPath[0].Time;
-            JoystickPlaybackEndSeconds = filteredPath[^1].Time;
-            if (JoystickPlaybackPositionSeconds < JoystickPlaybackStartSeconds || JoystickPlaybackPositionSeconds > JoystickPlaybackEndSeconds)
-            {
-                JoystickPlaybackPositionSeconds = JoystickPlaybackEndSeconds;
-            }
+            JoystickPlaybackStartSeconds = result.Points[0].Time;
+            JoystickPlaybackEndSeconds = result.Points[^1].Time + result.Points[^1].Seconds;
+            JoystickPlaybackPositionSeconds = JoystickPlaybackEndSeconds;
         }
-        finally
-        {
-            _suppressPlaybackAutoRefresh = false;
-        }
-
+        finally { _suppressPlaybackAutoRefresh = false; }
+        JoystickDensityModel = BuildPointCloud(_currentJoystickFilteredPath, DeadzoneThreshold, SaturationThreshold);
+        RadiusHistogramModel = BuildUsageHistogram(result.RadiusDistribution, result.CoveredSeconds, "Joystickuitslag (genormaliseerd)");
+        AddRadiusGuides(RadiusHistogramModel, DeadzoneThreshold, SaturationThreshold);
         UpdateJoystickPlaybackPlots();
-        var radiusModel = BuildHistogram("Joystick radius histogram", result.RadiusHistogram, "Radius", OxyColor.Parse("#F28E2B"));
-        AddRadiusGuides(radiusModel, Math.Max(0, DeadzoneThreshold), Math.Max(0, SaturationThreshold));
-        RadiusHistogramModel = radiusModel;
+    }
+
+    private void BuildStrokeUsage()
+    {
+        StrokeCards.Clear();
+        var model = new PlotModel { Title = "Tijd per actuatorpositie", TitleFontSize = 14, IsLegendVisible = true };
+        model.Legends.Add(new OxyPlot.Legends.Legend { LegendPosition = OxyPlot.Legends.LegendPosition.TopRight });
+        model.Axes.Add(Axis(AxisPosition.Bottom, "Positie binnen logbereik [%]", 0, 100));
+        model.Axes.Add(Axis(AxisPosition.Left, "Aandeel gedekte tijd [%]", 0));
+        var sides = new[] { ("Links", SelectedActuatorLeftSignal, "#2563EB"), ("Rechts", SelectedActuatorRightSignal, "#D97706"), ("Voor", SelectedActuatorFrontSignal, "#0D9488") };
+        foreach (var (side, label, color) in sides)
+        {
+            StrokeUsageResult? result = null;
+            if (TryGetSeries(label, out var series))
+                result = UsageAnalytics.AnalyzeStroke(series, UseJoystickTimeWindow ? JoystickTimeStartSeconds : null,
+                    UseJoystickTimeWindow ? JoystickTimeEndSeconds : null, StrokeEdgePercent, HistogramBins);
+            StrokeCards.Add(new StrokeUsageCard(side, label, color, result));
+            if (result is not { CoveredSeconds: > 0, LogMinimum: not null, LogMaximum: not null } || result.LogMaximum <= result.LogMinimum) continue;
+            var line = new StairStepSeries { Title = side, Color = OxyColor.Parse(color), StrokeThickness = 2 };
+            foreach (var bin in result.Distribution) line.Points.Add(new DataPoint(bin.Start, bin.Seconds * 100 / result.CoveredSeconds));
+            line.Points.Add(new DataPoint(100, result.Distribution[^1].Seconds * 100 / result.CoveredSeconds));
+            model.Series.Add(line);
+        }
+        StrokeDistributionModel = model.Series.Count > 0 ? model : EmptyPlot("Geen variërende actuatorposities met meetdekking");
+    }
+
+    private static string UsagePercent(double? value) => value.HasValue ? $"{value.Value:N1}%" : "—";
+
+    private static PlotModel BuildUsageHistogram(IReadOnlyList<UsageBin> bins, double covered, string xTitle)
+    {
+        var model = new PlotModel { Title = "Verdeling joystickuitslag", TitleFontSize = 14 };
+        model.Axes.Add(Axis(AxisPosition.Bottom, xTitle, 0, Math.Sqrt(2)));
+        model.Axes.Add(Axis(AxisPosition.Left, "Aandeel gedekte tijd [%]", 0));
+        var bars = new RectangleBarSeries { FillColor = OxyColor.Parse("#2563EB"), StrokeThickness = 0 };
+        foreach (var bin in bins) bars.Items.Add(new RectangleBarItem(bin.Start, 0, bin.End, 100 * bin.Seconds / covered));
+        model.Series.Add(bars);
+        return model;
     }
 
     private void BuildActuatorTrackingAnalytics()
     {
         ActuatorMatrix.Clear();
         ActuatorSummary = string.Empty;
-        if (!TryGetSeries(SelectedJoystickXSignal, out var jx) || !TryGetSeries(SelectedJoystickYSignal, out var jy) || !TryGetSeries(SelectedJoystickYawSignal, out var jyaw) ||
-            !TryGetSeries(SelectedActuatorLeftSignal, out var al) || !TryGetSeries(SelectedActuatorRightSignal, out var ar) || !TryGetSeries(SelectedActuatorFrontSignal, out var af))
+        if (!TryGetAnalysisSeries(SelectedJoystickXSignal, out var jx) || !TryGetAnalysisSeries(SelectedJoystickYSignal, out var jy) || !TryGetAnalysisSeries(SelectedJoystickYawSignal, out var jyaw) ||
+            !TryGetAnalysisSeries(SelectedActuatorLeftSignal, out var al) || !TryGetAnalysisSeries(SelectedActuatorRightSignal, out var ar) || !TryGetAnalysisSeries(SelectedActuatorFrontSignal, out var af))
         {
             ActuatorLeftOverlayModel = EmptyPlot("Left actuator");
             ActuatorRightOverlayModel = EmptyPlot("Right actuator");
@@ -710,74 +741,6 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         ActuatorDelayHistogramModel = BuildButterflyDelayHistogram(r);
     }
 
-    private void BuildActuatorStrokeUsage()
-    {
-        ActuatorStrokeMetrics.Clear();
-        ActuatorStrokeSummary = string.Empty;
-        var minimum = ActuatorStrokeMinimum;
-        var maximum = ActuatorStrokeMaximum;
-        var band = ActuatorExtremeBandPercent;
-        if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || maximum <= minimum ||
-            !double.IsFinite(band) || band is < 0 or > 50)
-        {
-            ActuatorStrokeSummary = "Ongeldige referentieslag: maximum moet groter zijn dan minimum en de uiterste-band moet 0–50% zijn.";
-            return;
-        }
-
-        var analyzer = new ActuatorStrokeUsageAnalyzer();
-        ActuatorStrokeUsageResult? Analyze(string? label)
-        {
-            if (!TryGetSeries(label, out var series)) return null;
-            return analyzer.Analyze(
-                series,
-                minimum,
-                maximum,
-                band,
-                UseJoystickTimeWindow ? JoystickTimeStartSeconds : null,
-                UseJoystickTimeWindow ? JoystickTimeEndSeconds : null);
-        }
-
-        var left = Analyze(SelectedActuatorLeftSignal);
-        var right = Analyze(SelectedActuatorRightSignal);
-        var front = Analyze(SelectedActuatorFrontSignal);
-        ActuatorStrokeMetrics.Add(new ActuatorMetricRow("Signaal", Name(left), Name(right), Name(front)));
-        ActuatorStrokeMetrics.Add(new ActuatorMetricRow("Meetpunten", Count(left), Count(right), Count(front)));
-        AddStrokeRow("Waargenomen minimum", left, right, front, static value => value.ObservedMinimum);
-        AddStrokeRow("P01", left, right, front, static value => value.Percentile01);
-        AddStrokeRow("Mediaan", left, right, front, static value => value.Median);
-        AddStrokeRow("P99", left, right, front, static value => value.Percentile99);
-        AddStrokeRow("Waargenomen maximum", left, right, front, static value => value.ObservedMaximum);
-        AddStrokeRow("Robuust gebruikte slag [%]", left, right, front, static value => value.RobustStrokeUsedPercent);
-        AddStrokeRow("Tijd nabij lage uiterste [%]", left, right, front, static value => value.TimeNearMinimumPercent);
-        AddStrokeRow("Tijd nabij hoge uiterste [%]", left, right, front, static value => value.TimeNearMaximumPercent);
-        AddStrokeRow("Tijd buiten referentieslag [%]", left, right, front, static value => value.TimeOutsideReferencePercent);
-        ActuatorStrokeMetrics.Add(new ActuatorMetricRow(
-            "Uitersten geraakt (laag/hoog)",
-            Reached(left),
-            Reached(right),
-            Reached(front)));
-        ActuatorStrokeSummary =
-            $"Referentieslag {F(minimum)} .. {F(maximum)}; ‘nabij uiterste’ is de buitenste {F(band)}% aan elke zijde. " +
-            "Robuuste slag gebruikt P01–P99, zodat één meetpiek het resultaat niet domineert.";
-    }
-
-    private void AddStrokeRow(
-        string metric,
-        ActuatorStrokeUsageResult? left,
-        ActuatorStrokeUsageResult? right,
-        ActuatorStrokeUsageResult? front,
-        Func<ActuatorStrokeUsageResult, double> selector) =>
-        ActuatorStrokeMetrics.Add(new ActuatorMetricRow(metric, StrokeValue(left, selector), StrokeValue(right, selector), StrokeValue(front, selector)));
-
-    private static string StrokeValue(ActuatorStrokeUsageResult? result, Func<ActuatorStrokeUsageResult, double> selector) =>
-        result is null || result.SampleCount == 0 || !double.IsFinite(selector(result)) ? "—" : F(selector(result));
-
-    private static string Name(ActuatorStrokeUsageResult? result) => result?.SignalLabel ?? "—";
-    private static string Count(ActuatorStrokeUsageResult? result) => result is null ? "—" : result.SampleCount.ToString("N0", CultureInfo.CurrentCulture);
-    private static string Reached(ActuatorStrokeUsageResult? result) => result is null || result.SampleCount == 0
-        ? "—"
-        : $"{(result.ReachedMinimumBand ? "ja" : "nee")}/{(result.ReachedMaximumBand ? "ja" : "nee")}";
-
     private void AddActuatorMatrixRow(string metric, double left, double right, double front)
         => ActuatorMatrix.Add(new ActuatorMetricRow(metric, F(left), F(right), F(front)));
 
@@ -786,7 +749,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private void BuildDelayAnalytics()
     {
         DelayMetrics.Clear();
-        if (!TryGetSeries(SelectedCommandSignal, out var cmd) || !TryGetSeries(SelectedResponseSignal, out var rsp))
+        if (!TryGetAnalysisSeries(SelectedCommandSignal, out var cmd) || !TryGetAnalysisSeries(SelectedResponseSignal, out var rsp))
         {
             _lastDelayResult = null;
             DelayHistogramModel = EmptyPlot("Dode tijd histogram");
@@ -972,9 +935,6 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         SelectedJoystickXSignal = Pick(joy, ["pos_x", "joystick_x", "_x", ".x", " axisx"]) ?? Pick(labels, ["pos_x", "joystick_x", "_x", ".x", " axisx"]);
         SelectedJoystickYSignal = Pick(joy, ["pos_y", "joystick_y", "_y", ".y", " axisy"]) ?? Pick(labels, ["pos_y", "joystick_y", "_y", ".y", " axisy"]);
         SelectedJoystickYawSignal = Pick(joy, ["yaw", "twist", "rz", "rot"]) ?? Pick(labels, ["yaw", "twist", "rz", "rot"]);
-        SelectedJoystickXSignal ??= labels.FirstOrDefault();
-        SelectedJoystickYSignal ??= labels.Skip(1).FirstOrDefault() ?? labels.FirstOrDefault();
-        SelectedJoystickYawSignal ??= labels.Skip(2).FirstOrDefault() ?? SelectedJoystickYSignal;
     }
 
     private void AutoDetectButterflySignals()
@@ -982,13 +942,9 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         AutoDetectJoystickSignals();
         if (AvailableSignals.Count == 0) return;
         var labels = AvailableSignals.ToList();
-        var act = labels.Where(v => Has(v, ["act", "actuator", "actual", "realpos", "feedback", "position"])).ToList();
-        SelectedActuatorLeftSignal = BestActuator(labels, ["left", "links"]) ?? Pick(act, ["left", "links"]) ?? Pick(labels, ["left", "links"]);
-        SelectedActuatorRightSignal = BestActuator(labels, ["right", "rechts"]) ?? Pick(act, ["right", "rechts"]) ?? Pick(labels, ["right", "rechts"]);
-        SelectedActuatorFrontSignal = BestActuator(labels, ["front", "voor"]) ?? Pick(act, ["front", "voor"]) ?? Pick(labels, ["front", "voor"]);
-        SelectedActuatorLeftSignal ??= act.FirstOrDefault() ?? labels.FirstOrDefault();
-        SelectedActuatorRightSignal ??= act.Skip(1).FirstOrDefault() ?? SelectedActuatorLeftSignal;
-        SelectedActuatorFrontSignal ??= act.Skip(2).FirstOrDefault() ?? SelectedActuatorRightSignal;
+        SelectedActuatorLeftSignal = BestActuator(labels, ["left", "links"]);
+        SelectedActuatorRightSignal = BestActuator(labels, ["right", "rechts"]);
+        SelectedActuatorFrontSignal = BestActuator(labels, ["front", "voor"]);
     }
 
     private void AutoDetectDelaySignals()
@@ -1028,10 +984,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             _suppressTimeWindowAutoRecompute = false;
         }
 
-        _ = RecomputeAsync();
+        _ = RecomputeUsageAsync();
     }
 
-    private bool TryGetSeries(string? label, out SignalSeries series)
+    private bool TryGetAnalysisSeries(string? label, out SignalSeries series)
     {
         series = default!;
         if (_dataset is null || string.IsNullOrWhiteSpace(label) || !_dataset.SignalSeriesByLabel.TryGetValue(label, out var found))
@@ -1050,130 +1006,16 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return true;
     }
 
-    private List<TimeNormalizedPoint> BuildTimedNormalizedPath(SignalSeries xSeries, SignalSeries ySeries)
+    private bool TryGetSeries(string? label, out SignalSeries series)
     {
-        _lastTimedPathFailure = null;
-        if (xSeries.Time.Length == 0 || ySeries.Time.Length == 0 || xSeries.Value.Length == 0 || ySeries.Value.Length == 0)
+        series = default!;
+        if (_dataset is null || string.IsNullOrWhiteSpace(label) || !_dataset.SignalSeriesByLabel.TryGetValue(label, out var found))
         {
-            return [];
+            return false;
         }
 
-        var overlapStart = Math.Max(xSeries.Time[0], ySeries.Time[0]);
-        var overlapEnd = Math.Min(xSeries.Time[^1], ySeries.Time[^1]);
-        if (overlapEnd < overlapStart)
-        {
-            return [];
-        }
-
-        var time = xSeries.Time.Concat(ySeries.Time)
-            .Where(t => t >= overlapStart && t <= overlapEnd)
-            .Distinct()
-            .OrderBy(static t => t)
-            .ToArray();
-        var maximumAllowedGap = 5d * Math.Max(MedianPositiveInterval(xSeries.Time), MedianPositiveInterval(ySeries.Time));
-        var maximumObservedGap = 0d;
-        foreach (var timestamp in time)
-        {
-            maximumObservedGap = Math.Max(maximumObservedGap, Math.Max(BracketGap(xSeries.Time, timestamp), BracketGap(ySeries.Time, timestamp)));
-        }
-
-        if (maximumAllowedGap > 0 && maximumObservedGap > maximumAllowedGap)
-        {
-            _lastTimedPathFailure = $"ONGELDIG: max sampleafstand {maximumObservedGap:G15}s > 5× traagste mediane interval ({maximumAllowedGap:G15}s)";
-            return [];
-        }
-
-        var rawX = new double[time.Length];
-        var rawY = new double[time.Length];
-        for (var i = 0; i < time.Length; i++)
-        {
-            rawX[i] = Interpolate(xSeries.Time, xSeries.Value, time[i]);
-            rawY[i] = Interpolate(ySeries.Time, ySeries.Value, time[i]);
-        }
-
-        var sortedX = rawX.OrderBy(static v => v).ToArray();
-        var sortedY = rawY.OrderBy(static v => v).ToArray();
-        var centerX = Percentile(sortedX, 0.50);
-        var centerY = Percentile(sortedY, 0.50);
-        var scale = Math.Max(
-            1e-9,
-            Math.Max(
-                Percentile(sortedX, 0.99) - Percentile(sortedX, 0.01),
-                Percentile(sortedY, 0.99) - Percentile(sortedY, 0.01)) / 2.0);
-
-        var points = new List<TimeNormalizedPoint>(time.Length);
-        for (var i = 0; i < time.Length; i++)
-        {
-            var nx = (rawX[i] - centerX) / scale;
-            var ny = (rawY[i] - centerY) / scale;
-            points.Add(new TimeNormalizedPoint(time[i], nx, ny));
-        }
-
-        return points;
-    }
-
-    private static double MedianPositiveInterval(double[] times)
-    {
-        var intervals = new List<double>(Math.Max(0, times.Length - 1));
-        for (var i = 1; i < times.Length; i++)
-        {
-            var interval = times[i] - times[i - 1];
-            if (interval > 0) intervals.Add(interval);
-        }
-
-        if (intervals.Count == 0) return 0;
-        intervals.Sort();
-        var middle = intervals.Count / 2;
-        return intervals.Count % 2 == 0 ? (intervals[middle - 1] + intervals[middle]) / 2d : intervals[middle];
-    }
-
-    private static double BracketGap(double[] times, double timestamp)
-    {
-        var upper = UpperBound(times, timestamp);
-        if (upper > 0 && times[upper - 1] == timestamp) return 0;
-        return upper <= 0 || upper >= times.Length ? 0 : times[upper] - times[upper - 1];
-    }
-
-    private List<TimeNormalizedPoint> FilterTimedPath(IReadOnlyList<TimeNormalizedPoint> path)
-    {
-        if (path.Count == 0 || !UseJoystickTimeWindow)
-        {
-            return path.ToList();
-        }
-
-        var start = Math.Max(JoystickAvailableStartSeconds, Math.Min(JoystickTimeStartSeconds, JoystickTimeEndSeconds));
-        var end = Math.Min(JoystickAvailableEndSeconds, Math.Max(JoystickTimeStartSeconds, JoystickTimeEndSeconds));
-        return path.Where(p => p.Time >= start && p.Time <= end).ToList();
-    }
-
-    private static double Interpolate(double[] time, double[] value, double sampleTime)
-    {
-        if (time.Length == 0 || value.Length == 0)
-        {
-            return 0;
-        }
-
-        if (sampleTime <= time[0])
-        {
-            return value[0];
-        }
-
-        if (sampleTime >= time[^1])
-        {
-            return value[^1];
-        }
-
-        var hi = UpperBound(time, sampleTime);
-        var i1 = Math.Clamp(hi, 1, time.Length - 1);
-        var i0 = i1 - 1;
-        var dt = time[i1] - time[i0];
-        if (Math.Abs(dt) <= 1e-12)
-        {
-            return value[i1];
-        }
-
-        var p = (sampleTime - time[i0]) / dt;
-        return value[i0] + ((value[i1] - value[i0]) * p);
+        series = found;
+        return true;
     }
 
     private static int UpperBound(double[] values, double threshold)
@@ -1197,7 +1039,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     }
 
     private static PlotModel BuildPointCloud(
-        IReadOnlyList<NormalizedPoint> points,
+        IReadOnlyList<JoystickUsagePoint> points,
         double deadzone,
         double saturation,
         NormalizedPoint? currentPoint = null)
@@ -1216,7 +1058,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         {
             var bx = (int)Math.Clamp((p.X - min) / span * n, 0, n - 1);
             var by = (int)Math.Clamp((p.Y - min) / span * n, 0, n - 1);
-            counts[bx, by] += 1;
+            counts[bx, by] += p.Seconds;
         }
 
         var data = new double[n, n];
@@ -1224,13 +1066,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         {
             for (var j = 0; j < n; j++)
             {
-                data[i, j] = counts[i, j] > 0 ? Math.Sqrt(counts[i, j]) : 0d;
+                data[i, j] = counts[i, j] > 0 ? counts[i, j] : double.NaN;
             }
         }
 
         var model = new PlotModel
         {
-            Title = "Genormaliseerde joystick dichtheid",
+            Title = "Waar staat de joystick?",
+            TitleFontSize = 14,
             IsLegendVisible = false
         };
         model.Axes.Add(Axis(AxisPosition.Bottom, "Joystick X (genormaliseerd)", min, max));
@@ -1238,10 +1081,11 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         model.Axes.Add(new LinearColorAxis
         {
             Position = AxisPosition.Right,
-            Palette = OxyPalettes.Jet(200),
+            Palette = OxyPalette.Interpolate(200, OxyColor.Parse("#93C5FD"), OxyColor.Parse("#2563EB"), OxyColor.Parse("#172554")),
             LowColor = OxyColors.Transparent,
-            Minimum = 0.5,
-            Title = "Dichtheid (√n)"
+            InvalidNumberColor = OxyColors.White,
+            Minimum = 0,
+            Title = "Tijd [s]"
         });
 
         var cellHalf = span / (2.0 * n);
@@ -1251,7 +1095,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             X1 = max - cellHalf,
             Y0 = min + cellHalf,
             Y1 = max - cellHalf,
-            Interpolate = true,
+            Interpolate = false,
             RenderMethod = HeatMapRenderMethod.Bitmap,
             Data = data
         });
@@ -1282,7 +1126,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         NormalizedPoint? currentPoint = null)
     {
         if (points.Count == 0) return EmptyPlot("Joystick traject (geen data)");
-        var model = new PlotModel { Title = "Joystick traject (genormaliseerd)", IsLegendVisible = true };
+        var model = new PlotModel { Title = "Traject · laatste 5 seconden", TitleFontSize = 14, IsLegendVisible = false };
         model.Axes.Add(Axis(AxisPosition.Bottom, "Joystick X (genormaliseerd)", -1.2, 1.2));
         model.Axes.Add(Axis(AxisPosition.Left, "Joystick Y (genormaliseerd)", -1.2, 1.2));
         var series = new LineSeries { Title = "Traject", Color = OxyColor.Parse("#4E79A7"), StrokeThickness = 1.2 };
@@ -1347,7 +1191,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 Color = OxyColor.Parse("#59A14F"),
                 LineStyle = LineStyle.Dash,
                 StrokeThickness = 1.2,
-                Text = "saturatie",
+                Text = "buitenrand",
                 TextColor = OxyColor.Parse("#59A14F")
             });
         }
@@ -2123,7 +1967,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private static string? BestActuator(IReadOnlyList<string> labels, IReadOnlyList<string> sideTokens)
     {
-        var ranked = labels.Select(l => new { Label = l, Score = ActuatorScore(l, sideTokens) }).OrderByDescending(v => v.Score).ThenBy(v => v.Label, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var ranked = labels.Where(l => sideTokens.Any(t => l.Contains(t, StringComparison.OrdinalIgnoreCase)) && (l.Contains("pos", StringComparison.OrdinalIgnoreCase) || l.Contains("position", StringComparison.OrdinalIgnoreCase)) && !new[] { "target", "setpoint", "command", "desired" }.Any(t => l.Contains(t, StringComparison.OrdinalIgnoreCase))).Select(l => new { Label = l, Score = ActuatorScore(l, sideTokens) }).OrderByDescending(v => v.Score).ThenBy(v => v.Label, StringComparer.CurrentCultureIgnoreCase).ToList();
         return ranked.Count == 0 || ranked[0].Score <= 0 ? null : ranked[0].Label;
     }
 
@@ -2269,5 +2113,5 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private sealed record ChangeEvent(double Time, double Value, int Direction, double Magnitude);
     private sealed record DelayVisualMatch(ChangeEvent Command, ChangeEvent Response, double DelaySeconds);
-    private sealed record TimeNormalizedPoint(double Time, double X, double Y);
+
 }

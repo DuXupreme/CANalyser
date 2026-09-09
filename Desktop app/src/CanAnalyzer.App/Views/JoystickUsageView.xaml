@@ -1,0 +1,282 @@
+<UserControl x:Class="CanAnalyzer.App.Views.JoystickUsageView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:infra="clr-namespace:CanAnalyzer.App.Infrastructure" xmlns:oxy="http://oxyplot.org/wpf">
+    <UserControl.Resources>
+        <infra:FlexibleDoubleConverter x:Key="FlexibleDoubleConverter" />
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#DCE4EF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="5,4" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="4" />
+        </Style>
+    </UserControl.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#F4F7FB">
+        <StackPanel Margin="18" MinWidth="860" TextElement.Foreground="#172B4D" TextElement.FontSize="13">
+            <Grid Margin="0,0,10,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Joystickgebruik &amp; actuatorbereik" FontSize="23" FontWeight="SemiBold" />
+                    <TextBlock Text="Hoeveel slag gebruik je, en waar breng je de meeste tijd door?" Margin="0,5,0,0" Foreground="#64748B" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Bereken analyse" Command="{Binding RecomputeUsageCommand}" Background="#2563EB" Foreground="White" BorderThickness="0" VerticalAlignment="Center" />
+            </Grid>
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <WrapPanel VerticalAlignment="Center">
+                        <CheckBox Content="Selecteer tijdvenster" IsChecked="{Binding UseJoystickTimeWindow}" VerticalAlignment="Center" Margin="0,0,18,10" />
+                        <StackPanel Width="125" Margin="0,0,12,10">
+                            <TextBlock Text="Start [s]" Style="{StaticResource Label}" />
+                            <TextBox IsEnabled="{Binding UseJoystickTimeWindow}" Text="{Binding JoystickTimeStartSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                        </StackPanel>
+                        <StackPanel Width="125" Margin="0,0,12,10">
+                            <TextBlock Text="Einde [s]" Style="{StaticResource Label}" />
+                            <TextBox IsEnabled="{Binding UseJoystickTimeWindow}" Text="{Binding JoystickTimeEndSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                        </StackPanel>
+                        <Button Content="Volledige log" Command="{Binding ResetJoystickTimeWindowCommand}" VerticalAlignment="Center" />
+                        <TextBlock VerticalAlignment="Center" Foreground="#64748B" Margin="8,0,0,10">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="Beschikbaar: {0:N1} – {1:N1} s">
+                                    <Binding Path="JoystickAvailableStartSeconds" />
+                                    <Binding Path="JoystickAvailableEndSeconds" />
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </WrapPanel>
+                    <Expander Header="Signalen en instellingen" Margin="0,6,0,0">
+                        <StackPanel Margin="0,12,0,0">
+                            <WrapPanel>
+                                <StackPanel Width="280" Margin="0,0,12,10">
+                                    <TextBlock Text="Joystick X" Style="{StaticResource Label}" />
+                                    <ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickXSignal, Mode=TwoWay}" ToolTip="{Binding SelectedJoystickXSignal}" />
+                                </StackPanel>
+                                <StackPanel Width="280" Margin="0,0,12,10">
+                                    <TextBlock Text="Joystick Y" Style="{StaticResource Label}" />
+                                    <ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedJoystickYSignal, Mode=TwoWay}" ToolTip="{Binding SelectedJoystickYSignal}" />
+                                </StackPanel>
+                                <Button Content="Detecteer signalen" Command="{Binding AutoDetectActuatorPairCommand}" VerticalAlignment="Center" />
+                            </WrapPanel>
+                            <WrapPanel>
+                                <StackPanel Width="280" Margin="0,0,12,10">
+                                    <TextBlock Text="Actuator links · gemeten positie" Style="{StaticResource Label}" />
+                                    <ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorLeftSignal, Mode=TwoWay}" ToolTip="{Binding SelectedActuatorLeftSignal}" />
+                                </StackPanel>
+                                <StackPanel Width="280" Margin="0,0,12,10">
+                                    <TextBlock Text="Actuator rechts · gemeten positie" Style="{StaticResource Label}" />
+                                    <ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorRightSignal, Mode=TwoWay}" ToolTip="{Binding SelectedActuatorRightSignal}" />
+                                </StackPanel>
+                                <StackPanel Width="280" Margin="0,0,12,10">
+                                    <TextBlock Text="Actuator voor · gemeten positie" Style="{StaticResource Label}" />
+                                    <ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorFrontSignal, Mode=TwoWay}" ToolTip="{Binding SelectedActuatorFrontSignal}" />
+                                </StackPanel>
+                            </WrapPanel>
+                            <WrapPanel>
+                                <StackPanel Width="135" Margin="0,0,12,10">
+                                    <TextBlock Text="Deadzone [0–1]" Style="{StaticResource Label}" />
+                                    <TextBox Text="{Binding DeadzoneThreshold, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                                </StackPanel>
+                                <StackPanel Width="135" Margin="0,0,12,10">
+                                    <TextBlock Text="Buitenrand [0–1]" Style="{StaticResource Label}" />
+                                    <TextBox Text="{Binding SaturationThreshold, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                                </StackPanel>
+                                <StackPanel Width="135" Margin="0,0,12,10">
+                                    <TextBlock Text="Uiterste band [%]" Style="{StaticResource Label}" />
+                                    <TextBox Text="{Binding StrokeEdgePercent, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                                </StackPanel>
+                                <StackPanel Width="110">
+                                    <TextBlock Text="Aantal bins" Style="{StaticResource Label}" />
+                                    <TextBox Text="{Binding HistogramBins, UpdateSourceTrigger=LostFocus}" />
+                                </StackPanel>
+                            </WrapPanel>
+                            <TextBlock Text="Slaggrenzen worden automatisch per actuator uit de volledige log afgeleid. Geen handmatige 0–100-invoer nodig." TextWrapping="Wrap" Foreground="#64748B" />
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </Border>
+            <TextBlock Text="Slagbenutting per actuator" FontSize="18" FontWeight="SemiBold" Margin="0,8,0,5" />
+            <TextBlock Text="0% = laagste positie in de log · 100% = hoogste positie in de log. Dit is het waargenomen bereik, geen bewezen mechanische eindstop." TextWrapping="Wrap" Foreground="#64748B" Margin="0,0,10,12" />
+            <ItemsControl ItemsSource="{Binding StrokeCards}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Columns="3" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" Foreground="{Binding Color}" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Signal}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Signal}" Foreground="#64748B" Margin="0,4,0,12" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Used}" FontSize="30" FontWeight="SemiBold" />
+                                    <TextBlock Text="typisch benut" Margin="9,0,0,5" VerticalAlignment="Bottom" Foreground="#64748B" />
+                                </StackPanel>
+                                <ProgressBar Value="{Binding BarValue, Mode=OneWay}" Maximum="100" Height="6" Foreground="{Binding Color}" Background="#E8EEF7" BorderThickness="0" Margin="0,8,0,10" />
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Bereik log" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding LogRange}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Slag log" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding LogStroke}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Bereik selectie" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding WindowRange}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="P01–P99" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding RobustRange}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Totale benutting" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding TotalUsed}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Separator Margin="0,10,0,6" />
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Tijd nabij minimum" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Low}" FontWeight="SemiBold" />
+                                </Grid>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Tijd nabij maximum" Foreground="#64748B" />
+                                    <TextBlock Grid.Column="1" Text="{Binding High}" FontWeight="SemiBold" />
+                                </Grid>
+                                <TextBlock Text="{Binding Coverage}" Foreground="#64748B" Margin="0,12,0,3" />
+                                <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Foreground="#64748B" FontSize="12" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="Posities en slag in de gedecodeerde signaalwaarden. P01–P99 omvat de middelste 98% van meetpunten; tijd nabij uitersten gebruikt de ingestelde band (standaard 5% per kant)." TextWrapping="Wrap" Foreground="#64748B" Margin="0,0,10,10" />
+            <Expander Header="Waar in de slag zitten de actuatoren?" Margin="0,0,10,14">
+                <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+                    <oxy:PlotView Model="{Binding StrokeDistributionModel}" Height="260" />
+                </Border>
+            </Expander>
+            <TextBlock Text="Gebruik van de joystick" FontSize="18" FontWeight="SemiBold" Margin="0,6,0,10" />
+            <UniformGrid Columns="3">
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Tijd in deadzone" Style="{StaticResource Label}" />
+                        <TextBlock Text="{Binding JoystickDeadzoneText}" FontSize="26" FontWeight="SemiBold" Foreground="#2563EB" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Tijd aan buitenrand" Style="{StaticResource Label}" />
+                        <TextBlock Text="{Binding JoystickSaturationText}" FontSize="26" FontWeight="SemiBold" Foreground="#D97706" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Gezamenlijke meetdekking" Style="{StaticResource Label}" />
+                        <TextBlock Text="{Binding JoystickCoverageText}" FontSize="26" FontWeight="SemiBold" Foreground="#0D9488" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+            <TextBlock Text="{Binding JoystickUsageStatus}" TextWrapping="Wrap" Margin="0,0,10,12" />
+            <TextBlock Text="Joystickassen zijn geschaald op hun min/max in de volledige log. De nulstand is het midden van dat bereik; percentages zijn indicatief zolang de fysieke joystickkalibratie onbekend is." Foreground="#64748B" TextWrapping="Wrap" Margin="0,0,10,12" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Style="{StaticResource Card}">
+                    <Viewbox Stretch="Uniform">
+                        <oxy:PlotView Model="{Binding JoystickDensityModel}" Width="440" Height="370" />
+                    </Viewbox>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource Card}">
+                    <oxy:PlotView Model="{Binding RadiusHistogramModel}" MinHeight="320" />
+                </Border>
+            </Grid>
+            <Expander Header="Traject afspelen · kort spoor van 5 seconden" Margin="0,5,10,12">
+                <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="340" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,20,0">
+                            <TextBlock Text="Volg een beweging zonder de hele log over elkaar te tekenen." TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <WrapPanel>
+                                <CheckBox Content="Afspeelpositie gebruiken" IsChecked="{Binding IsJoystickPlaybackEnabled}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <Button Content="Play / pauze" Command="{Binding ToggleJoystickPlaybackCommand}" />
+                                <Button Content="Naar begin" Command="{Binding ResetJoystickPlaybackCommand}" />
+                            </WrapPanel>
+                            <Slider Minimum="{Binding JoystickPlaybackStartSeconds}" Maximum="{Binding JoystickPlaybackEndSeconds}" Value="{Binding JoystickPlaybackPositionSeconds}" IsEnabled="{Binding IsJoystickPlaybackEnabled}" Margin="0,16,0,8" />
+                            <TextBlock Text="{Binding JoystickPlaybackPositionSeconds, StringFormat=Tijd: {0:N2} s}" Margin="0,0,0,10" />
+                            <StackPanel Width="110" Margin="0,0,12,10">
+                                <TextBlock Text="Snelheid ×" Style="{StaticResource Label}" />
+                                <TextBox Text="{Binding JoystickPlaybackSpeed, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <TextBlock Text="De gebruikscijfers en dichtheid blijven over het hele gekozen tijdvenster berekend." TextWrapping="Wrap" Foreground="#64748B" />
+                        </StackPanel>
+                        <oxy:PlotView Grid.Column="1" Model="{Binding TrajectoryModel}" Width="330" Height="310" />
+                    </Grid>
+                </Border>
+            </Expander>
+            <Expander Header="Berekeningsdetails" Margin="0,0,10,10">
+                <ItemsControl ItemsSource="{Binding JoystickUsageMetrics}" Margin="0,12,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="170" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Name}" Foreground="#64748B" />
+                                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
