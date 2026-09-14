@@ -3,6 +3,9 @@ const MAX_EXPORT_LIMIT = 10_000;
 
 const ALLOWED_EVENTS = new Set([
   "app_started",
+  "app_crashed",
+  "app_unexpected_exit",
+  "previous_operation_interrupted",
   "load_decode_completed",
   "load_decode_failed",
   "load_decode_cancelled",

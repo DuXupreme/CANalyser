@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace CanAnalyzer.App.Infrastructure;
 
 /// <inheritdoc />
-public sealed class TelemetryService : ITelemetryService
+public sealed class TelemetryService : ITelemetryService, IDisposable
 {
     private static readonly HttpClient HttpClient = new()
     {
@@ -30,6 +30,8 @@ public sealed class TelemetryService : ITelemetryService
     private readonly string _activeOperationPath;
     private TelemetryOptions _options = new();
     private DateTime _lastRetentionCleanupUtc = DateTime.MinValue;
+    private readonly CrashTelemetryJournal _crashJournal;
+    private bool _sessionStarted;
 
     public TelemetryService(ILogger<TelemetryService> logger)
     {
@@ -38,6 +40,7 @@ public sealed class TelemetryService : ITelemetryService
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "CanAnalyzer");
         LocalLogPath = Path.Combine(root, "telemetry-events.jsonl");
+        _crashJournal = new CrashTelemetryJournal(Path.Combine(root, "pending-crashes"));
         _activeOperationPath = Path.Combine(root, "telemetry-active-operation.json");
     }
 
@@ -60,6 +63,64 @@ public sealed class TelemetryService : ITelemetryService
         {
             _options = CopyOptions(options);
         }
+        try
+        {
+            if (!options.Enabled)
+            {
+                _crashJournal.Dispose();
+                _sessionStarted = false;
+                return;
+            }
+            if (_sessionStarted) return;
+            _crashJournal.Start(Guid.NewGuid().ToString("N"), JsonSerializer.Serialize(
+                CreatePayload("app_unexpected_exit", _options, new Dictionary<string, object?>
+                {
+                    ["reason"] = "unclean_shutdown",
+                    ["timestamp_basis"] = "session_start"
+                }), SerializerOptions));
+            _sessionStarted = true;
+            _ = Task.Run(ReplayCrashesAsync);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Crash journal unavailable."); }
+    }
+
+    public void RecordCrash(Exception? exception, string source)
+    {
+        try
+        {
+            TelemetryOptions options;
+            lock (_sync) { options = CopyOptions(_options); }
+            if (!options.Enabled) return;
+            // Do not include messages, stack traces, paths, or CAN data.
+            _crashJournal.RecordCrash(JsonSerializer.Serialize(CreatePayload("app_crashed", options,
+                new Dictionary<string, object?>
+                {
+                    ["exception_type"] = exception?.GetType().Name ?? "unknown",
+                    ["source"] = source
+                }), SerializerOptions));
+        }
+        catch { /* Never replace the original fatal exception with telemetry failure. */ }
+    }
+
+    private async Task ReplayCrashesAsync()
+    {
+        try
+        {
+            await _crashJournal.ReplayAsync(async json =>
+            {
+                TelemetryOptions options;
+                lock (_sync) { options = CopyOptions(_options); }
+                if (!options.Enabled) return false;
+                return await PostRemoteAsync(json, options, CancellationToken.None).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Crash upload deferred until next start."); }
+    }
+
+    public void Dispose()
+    {
+        try { _crashJournal.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Could not close crash journal."); }
     }
 
     public async Task TrackEventAsync(
@@ -296,17 +357,17 @@ public sealed class TelemetryService : ITelemetryService
         await File.AppendAllTextAsync(LocalLogPath, json + Environment.NewLine, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task PostRemoteAsync(string json, TelemetryOptions options, CancellationToken cancellationToken)
+    private async Task<bool> PostRemoteAsync(string json, TelemetryOptions options, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(options.EndpointUrl))
         {
-            return;
+            return false;
         }
 
         if (!Uri.TryCreate(options.EndpointUrl.Trim(), UriKind.Absolute, out var endpoint) ||
             (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
         {
-            return;
+            return false;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
@@ -324,6 +385,7 @@ public sealed class TelemetryService : ITelemetryService
         {
             _logger.LogDebug("Telemetry endpoint returned HTTP {StatusCode}.", response.StatusCode);
         }
+        return response.IsSuccessStatusCode;
     }
 
     private async Task PruneLocalLogAsync(TelemetryOptions options, CancellationToken cancellationToken)

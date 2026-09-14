@@ -147,7 +147,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         ClearFlagsCommand = new RelayCommand(ClearFlags);
         ResetAllPlotsCommand = new RelayCommand(ResetAllPlots);
         ExportPresetCommand = new AsyncRelayCommand(ExportPresetAsync);
-        ImportPresetCommand = new AsyncRelayCommand(ImportPresetAsync);
+        ImportPresetCommand = new AsyncRelayCommand(ImportPresetAsync, () => !IsBusy);
 
         FilteredSignalsView = CollectionViewSource.GetDefaultView(AvailableSignals);
         FilteredSignalsView.Filter = item => item is SignalSelectionItem signal && MatchesSignalSearch(signal);
@@ -231,7 +231,11 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnTimeEndChanged(double? value) => ActiveUsage.SetTimeWindow(TimeStart, value);
 
-    partial void OnIsBusyChanged(bool value) => ApplyGroupsCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        ApplyGroupsCommand.NotifyCanExecuteChanged();
+        ImportPresetCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnSignalSearchTextChanged(string value)
     {
@@ -750,6 +754,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private async Task ImportPresetAsync()
     {
+        if (IsBusy) return;
         try
         {
             var filePath = _fileDialogService.PickPresetFile(null);
@@ -772,7 +777,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 signal.IsSelected = selectedLabels.Contains(signal.Label);
             }
 
-            RebuildPlots();
+            await RebuildPlotsAsync();
             _ = _telemetryService.TrackEventAsync("analysis_layout_imported", new Dictionary<string, object?>
             {
                 ["group_count"] = resolvedGroups.Count,

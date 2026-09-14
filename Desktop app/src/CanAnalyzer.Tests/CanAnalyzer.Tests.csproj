@@ -19,5 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CanAnalyzer.Core\CanAnalyzer.Core.csproj" />
+    <Compile Include="..\CanAnalyzer.App\Infrastructure\CrashTelemetryJournal.cs" Link="CrashTelemetryJournal.cs" />
   </ItemGroup>
 </Project>

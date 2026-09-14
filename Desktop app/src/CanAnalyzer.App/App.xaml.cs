@@ -16,6 +16,7 @@ namespace CanAnalyzer.App;
 public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
+    private TelemetryService? _crashTelemetry;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -25,6 +26,14 @@ public partial class App : Application
         splash.Show();
 
         _serviceProvider = BuildServiceProvider();
+        _crashTelemetry = (TelemetryService)_serviceProvider.GetRequiredService<ITelemetryService>();
+        DispatcherUnhandledException += (_, args) =>
+            _crashTelemetry.RecordCrash(args.Exception, "dispatcher");
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.IsTerminating)
+                _crashTelemetry.RecordCrash(args.ExceptionObject as Exception, "app_domain");
+        };
         var window = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = window;
 
