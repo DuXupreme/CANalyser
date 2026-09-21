@@ -49,6 +49,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         DateTimeOffset? startTimeUtc)
     {
         InitializeComponent();
+        var history = new PlotInteractionHistory(this, () => Panels.Select(p => p.PlotModel));
+        Panels.CollectionChanged += (_, _) => history.Clear();
         _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
         _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 200_000);
         _useDownsampling = useDownsampling;

@@ -11,6 +11,9 @@ public interface ICanAnalysisPipeline
     Task<PreparedCanAnalysis> PrepareForReviewAsync(
         string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken);
 
+    Task<PreparedCanAnalysis> RetryForReviewAsync(PreparedCanAnalysis previous,
+        string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken);
+
     Task<CanDataset> LoadAsync(
         string logFilePath,
         string dbcFilePath,

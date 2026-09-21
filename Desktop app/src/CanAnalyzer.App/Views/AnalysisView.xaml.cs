@@ -15,6 +15,14 @@ public partial class AnalysisView : UserControl
     public AnalysisView()
     {
         InitializeComponent();
+        var history = new PlotInteractionHistory(this, () => (DataContext as AnalysisViewModel)?.PlotPanels.Select(p => p.PlotModel) ?? []);
+        System.Collections.Specialized.NotifyCollectionChangedEventHandler clearHistory = (_, _) => history.Clear();
+        DataContextChanged += (_, e) =>
+        {
+            if (e.OldValue is AnalysisViewModel oldVm) oldVm.PlotPanels.CollectionChanged -= clearHistory;
+            if (e.NewValue is AnalysisViewModel newVm) newVm.PlotPanels.CollectionChanged += clearHistory;
+            history.Clear();
+        };
     }
 
     private void OnPlotMouseMove(object sender, MouseEventArgs e)

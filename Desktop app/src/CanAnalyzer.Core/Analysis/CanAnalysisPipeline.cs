@@ -29,6 +29,24 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken) =>
         new(await LoadCoreAsync(logFilePath, dbcFilePath, ImportMode.Partial, progress, cancellationToken, forReview: true).ConfigureAwait(false));
 
+    public async Task<PreparedCanAnalysis> RetryForReviewAsync(PreparedCanAnalysis previous,
+        string logFilePath, string dbcFilePath, IProgress<LoadProgress>? progress, CancellationToken cancellationToken)
+    {
+        progress?.Report(new LoadProgress("Bronbestanden controleren voor hergebruik...", 2));
+        if (await previous.MatchesSourcesAsync(logFilePath, dbcFilePath, cancellationToken).ConfigureAwait(false))
+            return previous;
+        if (previous.Dataset.OriginalParseResult is { } parsed &&
+            await previous.MatchesLogAsync(logFilePath, cancellationToken).ConfigureAwait(false))
+        {
+            var dataset = await LoadCoreAsync(logFilePath, dbcFilePath, ImportMode.Partial, progress,
+                cancellationToken, forReview: true, reusedParse: parsed,
+                reusedLogHash: previous.Dataset.SourceLogSha256).ConfigureAwait(false);
+            previous.Dataset.OwnsRawFrames = false;
+            return new PreparedCanAnalysis(dataset);
+        }
+        return await PrepareForReviewAsync(logFilePath, dbcFilePath, progress, cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<CanDataset> LoadAsync(
         string logFilePath, string dbcFilePath, ImportMode importMode,
         IProgress<LoadProgress>? progress, CancellationToken cancellationToken) =>
@@ -36,12 +54,13 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
 
     private async Task<CanDataset> LoadCoreAsync(
         string logFilePath, string dbcFilePath, ImportMode importMode,
-        IProgress<LoadProgress>? progress, CancellationToken cancellationToken, bool forReview = false)
+        IProgress<LoadProgress>? progress, CancellationToken cancellationToken, bool forReview = false,
+        CanLogParseResult? reusedParse = null, string? reusedLogHash = null)
     {
         _logger.LogInformation("Starting strict load/decode: log={LogFile}, dbc={DbcFile}, mode={Mode}", logFilePath, dbcFilePath, importMode);
         progress?.Report(new LoadProgress("Logbestand valideren en inlezen...", 2));
         var timer = Stopwatch.StartNew();
-        var parseResult = await _parsingService.ParseAsync(logFilePath, importMode, progress, cancellationToken).ConfigureAwait(false);
+        var parseResult = reusedParse ?? await _parsingService.ParseAsync(logFilePath, importMode, progress, cancellationToken).ConfigureAwait(false);
         var parseMs = timer.ElapsedMilliseconds;
         DecodeResult? decodeResult = null;
         try
@@ -88,7 +107,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
 
             progress?.Report(new LoadProgress("Dataset cache opbouwen...", 92));
             timer.Restart();
-            var logHashTask = ComputeSha256Async(logFilePath, cancellationToken);
+            var logHashTask = reusedLogHash is null ? ComputeSha256Async(logFilePath, cancellationToken) : Task.FromResult(reusedLogHash);
             var dbcHashTask = ComputeSha256Async(dbcFilePath, cancellationToken);
             await Task.WhenAll(logHashTask, dbcHashTask).ConfigureAwait(false);
             var hashMs = timer.ElapsedMilliseconds;
@@ -102,6 +121,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
             var dataset = await Task.Run(() => _datasetBuilder.Build(
                 parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
                 combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
+            dataset.OriginalParseResult = parseResult;
             dataset.LoadTimings = new LoadTimings(parseMs, dbcMs, decodeMs, hashMs, timer.ElapsedMilliseconds);
             dataset.SourceLogPath = Path.GetFullPath(logFilePath);
             dataset.SourceDbcPath = Path.GetFullPath(dbcFilePath);
@@ -115,7 +135,7 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
         catch
         {
             (decodeResult?.Samples as IDisposable)?.Dispose();
-            (parseResult.Frames as IDisposable)?.Dispose();
+            if (reusedParse is null) (parseResult.Frames as IDisposable)?.Dispose();
             throw;
         }
     }

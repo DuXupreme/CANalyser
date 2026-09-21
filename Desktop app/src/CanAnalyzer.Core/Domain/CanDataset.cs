@@ -54,9 +54,12 @@ public sealed class CanDataset : IDisposable
     public IReadOnlyCollection<string> Channels => RawFrames is DiskBackedFrameStore store
         ? store.Channels : RawFrames.Select(frame => frame.Channel).Distinct(StringComparer.Ordinal).ToArray();
 
+    internal CanLogParseResult? OriginalParseResult { get; set; }
+    internal bool OwnsRawFrames { get; set; } = true;
+
     public void Dispose()
     {
-        (RawFrames as IDisposable)?.Dispose();
+        if (OwnsRawFrames) (RawFrames as IDisposable)?.Dispose();
         (DecodedSamples as IDisposable)?.Dispose();
     }
 }

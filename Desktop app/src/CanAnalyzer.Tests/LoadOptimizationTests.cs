@@ -248,6 +248,44 @@ public sealed class LoadOptimizationTests
         Assert.Equal(["1", "2"], frames.Channels.Order());
     }
 
+    [Theory]
+    [InlineData("unchanged", 1, 1)]
+    [InlineData("dbc", 1, 2)]
+    [InlineData("log", 2, 2)]
+    public async Task Retry_ReusesOnlyUnchangedSources(string change, int parses, int decodes)
+    {
+        var logPath = Path.GetTempFileName();
+        var dbcPath = Path.GetTempFileName();
+        var parsing = new CountingParsingService();
+        var decoder = new CountingDecoder();
+        var pipeline = new CanAnalysisPipeline(parsing, new DbcLoader(), decoder, new DatasetBuilder(), NullLogger<CanAnalysisPipeline>.Instance);
+        try
+        {
+            await File.WriteAllTextAsync(logPath, "(1.0) can1 123#2A\n");
+            var dbc = "BO_ 291 M: 2 Vector__XXX\n SG_ S : 0|8@1+ (1,0) [0|255] \"V\" Vector__XXX\n";
+            await File.WriteAllTextAsync(dbcPath, dbc);
+            using var original = await pipeline.PrepareForReviewAsync(logPath, dbcPath, null, CancellationToken.None);
+            Assert.True(original.RequiresPartialConfirmation);
+            if (change == "dbc") await File.WriteAllTextAsync(dbcPath, dbc.Replace("M: 2", "M: 1"));
+            if (change == "log") await File.WriteAllTextAsync(logPath, "(1.0) can1 123#2B00\n");
+            using var retry = await pipeline.RetryForReviewAsync(original, logPath, dbcPath, null, CancellationToken.None);
+            Assert.Equal(parses, parsing.Calls);
+            Assert.Equal(decodes, decoder.Calls);
+            Assert.Equal(change == "unchanged", retry.RequiresPartialConfirmation);
+            if (change == "unchanged") Assert.Same(original, retry);
+            using var dataset = retry.Accept(allowPartial: change == "unchanged");
+            original.Dispose();
+            Assert.Single(dataset.RawFrames);
+            if (change != "unchanged")
+            {
+                Assert.Equal(change == "dbc" ? 42 : 43, Assert.Single(dataset.DecodedSamples).Value);
+                Assert.False(dataset.ImportReport!.HasErrors);
+                Assert.Equal(ImportMode.Strict, dataset.ImportReport.Mode);
+            }
+        }
+        finally { File.Delete(logPath); File.Delete(dbcPath); }
+    }
+
     private sealed class CountingParsingService : ICanLogParsingService
     {
         public int Calls;

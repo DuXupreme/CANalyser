@@ -658,90 +658,97 @@ public sealed partial class MainWindowViewModel : ObservableObject
         long reviewMilliseconds = 0;
         var processingAttempts = 0;
 
-        while (true)
+        PreparedCanAnalysis? prepared = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            processingAttempts++;
-            using var prepared = await _analysisPipeline.PrepareForReviewAsync(
-                activeLogPath, activeDbcPath, progress, cancellationToken);
-            if (!prepared.RequiresPartialConfirmation)
-                return new ImportLoadResult(prepared.Accept(), ImportMode.Strict, activeLogPath, activeDbcPath, reviewMilliseconds, processingAttempts);
-            var report = prepared.Report!;
-            SettingsDiagnostics.LastErrorDetails = FormatImportReport(report);
-            ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
-
-            ImportRepairWizardResult repair;
-            IsRepairWizardOpen = true;
-            var reviewTimer = Stopwatch.StartNew();
-            try
-            {
-                repair = await _importRepairWizardService.ShowAsync(
-                    report,
-                    activeLogPath,
-                    activeDbcPath,
-                    cancellationToken);
-            }
-            finally
-            {
-                IsRepairWizardOpen = false;
-                reviewMilliseconds += reviewTimer.ElapsedMilliseconds;
-            }
-            if (repair.Decision == ImportRepairDecision.Cancel)
-            {
-                return null;
-            }
-
-            if (repair.Decision == ImportRepairDecision.ContinuePartial)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ProgressLabel = "Gecontroleerde PARTIAL-dataset openen...";
-                if (await prepared.MatchesSourcesAsync(repair.LogPath, repair.DbcPath, cancellationToken))
-                    return new ImportLoadResult(prepared.Accept(allowPartial: true), ImportMode.Partial, repair.LogPath, repair.DbcPath, reviewMilliseconds, processingAttempts);
-                prepared.Dispose();
                 processingAttempts++;
-                var partialDataset = await _analysisPipeline.LoadAsync(
-                    repair.LogPath,
-                    repair.DbcPath,
-                    ImportMode.Partial,
-                    progress,
-                    cancellationToken);
-                return new ImportLoadResult(
-                    partialDataset,
-                    ImportMode.Partial,
-                    repair.LogPath,
-                    repair.DbcPath,
-                    reviewMilliseconds,
-                    processingAttempts);
-            }
+                var next = prepared is null
+                    ? await _analysisPipeline.PrepareForReviewAsync(activeLogPath, activeDbcPath, progress, cancellationToken)
+                    : await _analysisPipeline.RetryForReviewAsync(prepared, activeLogPath, activeDbcPath, progress, cancellationToken);
+                if (!ReferenceEquals(next, prepared)) prepared?.Dispose();
+                prepared = next;
+                if (!prepared.RequiresPartialConfirmation)
+                    return new ImportLoadResult(prepared.Accept(), ImportMode.Strict, activeLogPath, activeDbcPath, reviewMilliseconds, processingAttempts);
+                var report = prepared.Report!;
+                SettingsDiagnostics.LastErrorDetails = FormatImportReport(report);
+                ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
 
-            prepared.Dispose();
-            if (repair.RemoveRejectedLogLines)
-            {
+                ImportRepairWizardResult repair;
+                IsRepairWizardOpen = true;
+                var reviewTimer = Stopwatch.StartNew();
                 try
                 {
-                    ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
-                    var removed = await _importRepairService.CreateRepairedLogCopyAsync(
-                        activeLogPath,
-                        repair.LogPath,
+                    repair = await _importRepairWizardService.ShowAsync(
                         report,
+                        activeLogPath,
+                        activeDbcPath,
                         cancellationToken);
-                    activeLogPath = repair.LogPath;
-                    ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                finally
                 {
-                    _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
-                    _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
-                    continue;
+                    IsRepairWizardOpen = false;
+                    reviewMilliseconds += reviewTimer.ElapsedMilliseconds;
                 }
-            }
-            else
-            {
-                activeLogPath = repair.LogPath;
-            }
+                if (repair.Decision == ImportRepairDecision.Cancel)
+                {
+                    return null;
+                }
 
-            activeDbcPath = repair.DbcPath;
+                if (repair.Decision == ImportRepairDecision.ContinuePartial)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ProgressLabel = "Gecontroleerde PARTIAL-dataset openen...";
+                    if (await prepared.MatchesSourcesAsync(repair.LogPath, repair.DbcPath, cancellationToken))
+                        return new ImportLoadResult(prepared.Accept(allowPartial: true), ImportMode.Partial, repair.LogPath, repair.DbcPath, reviewMilliseconds, processingAttempts);
+                    prepared.Dispose();
+                    processingAttempts++;
+                    var partialDataset = await _analysisPipeline.LoadAsync(
+                        repair.LogPath,
+                        repair.DbcPath,
+                        ImportMode.Partial,
+                        progress,
+                        cancellationToken);
+                    return new ImportLoadResult(
+                        partialDataset,
+                        ImportMode.Partial,
+                        repair.LogPath,
+                        repair.DbcPath,
+                        reviewMilliseconds,
+                        processingAttempts);
+                }
+
+                if (repair.RemoveRejectedLogLines)
+                {
+                    try
+                    {
+                        ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
+                        var removed = await _importRepairService.CreateRepairedLogCopyAsync(
+                            activeLogPath,
+                            repair.LogPath,
+                            report,
+                            cancellationToken);
+                        activeLogPath = repair.LogPath;
+                        ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                    {
+                        _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
+                        _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
+                        continue;
+                    }
+                }
+                else
+                {
+                    activeLogPath = repair.LogPath;
+                }
+
+                activeDbcPath = repair.DbcPath;
+            }
         }
+        finally { prepared?.Dispose(); }
     }
 
     private void LoadDefaultActuatorComparisonGroups(CanDataset dataset)

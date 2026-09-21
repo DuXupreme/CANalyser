@@ -6,6 +6,8 @@ namespace CanAnalyzer.Core.Domain;
 public sealed class PreparedCanAnalysis(CanDataset dataset) : IDisposable
 {
     private CanDataset? _dataset = dataset;
+    internal CanDataset Dataset => _dataset ?? throw new ObjectDisposedException(nameof(PreparedCanAnalysis));
+    internal Task<bool> MatchesLogAsync(string path, CancellationToken token) => MatchesHashAsync(path, Dataset.SourceLogSha256, token);
     public ImportReport? Report { get; } = dataset.ImportReport;
     public bool RequiresPartialConfirmation => Report?.HasErrors == true;
 

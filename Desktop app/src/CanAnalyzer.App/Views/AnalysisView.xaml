@@ -176,7 +176,7 @@
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="Max punten" />
                             <TextBox Width="95" Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=PropertyChanged}" />
-                            <CheckBox Content="Snelheidsmodus (downsampling)"
+                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Snelheidsmodus (downsampling)"
                                       IsChecked="{Binding UseDownsampling}"
                                       Margin="0,4,0,0" />
                             <TextBlock Text="Alleen plotweergave: brondata, analyse, cursors/flags en export blijven volledig. Visuele details kunnen minder exact lijken; zoom in of zet dit uit voor detailinspectie."
@@ -241,7 +241,7 @@
                                 <Button Content="Flag B = cursor" Command="{Binding SetFlagBFromCursorCommand}" Margin="0,0,6,0" />
                                 <Button Content="Volgende verandering (A->B)" Command="{Binding JumpFlagBToNextChangeCommand}" Margin="0,0,6,0" />
                                 <Button Content="Wis flags" Command="{Binding ClearFlagsCommand}" Margin="0,0,6,0" />
-                                <Button Content="Reset zoom" Command="{Binding ResetAllPlotsCommand}" />
+                                <Button ToolTip="Slepen en zoomen ongedaan maken: Ctrl+Z" Content="Reset zoom" Command="{Binding ResetAllPlotsCommand}" />
                             </WrapPanel>
                             <TextBlock Text="{Binding CursorInfo}" TextWrapping="Wrap" Margin="0,3,0,0" />
                             <TextBlock Text="{Binding CursorValueInfo}" Margin="0,1,0,0" />
