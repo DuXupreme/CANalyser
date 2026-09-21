@@ -8,9 +8,9 @@ namespace CanAnalyzer.Core.Parsing;
 /// <summary>Imports CANedge MDF4 files and ZIP downloads as one chronological CAN timeline.</summary>
 public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser peakParser) : ICanLogParser
 {
-    private const int MaximumArchiveFiles = 200;
-    private const long MaximumArchiveFileBytes = 512L * 1024 * 1024;
-    private const long MaximumArchiveBytes = 4L * 1024 * 1024 * 1024;
+    private const int MaximumArchiveFiles = Mdf4ImportLimits.MaximumFiles;
+    private const long MaximumArchiveFileBytes = Mdf4ImportLimits.MaximumFileBytes;
+    private const long MaximumArchiveBytes = Mdf4ImportLimits.MaximumBytes;
 
     public string Name => "CANedge MDF4";
 

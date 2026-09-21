@@ -13,7 +13,7 @@ public partial class OnlineLogsWindow : Window
     private readonly IOnlineLogService _onlineLogService;
     private readonly IOnlineLogSelectionHistoryStore _historyStore;
     private readonly CancellationTokenSource _windowCts = new();
-    private int _maximumSelection = 200;
+    private int _maximumSelection = Mdf4ImportLimits.MaximumFiles;
     private bool _isTruncated;
     private int _unknownRecordingTimes;
     private HashSet<string>? _keysToRestore;
@@ -231,6 +231,8 @@ public partial class OnlineLogsWindow : Window
         var selected = Rows.Where(static row => row.IsSelected).ToArray();
         var validation = ValidateSelection(CreateSelections(selected));
         var withinMaximum = selected.Length <= _maximumSelection;
+        var withinSize = selected.Sum(static row => row.SizeBytes) <= Mdf4ImportLimits.MaximumBytes &&
+                         selected.All(static row => row.SizeBytes >= 0 && row.SizeBytes <= Mdf4ImportLimits.MaximumFileBytes);
         if (Rows.Count == 0)
         {
             StatusText.Text = "Geen MF4-bestanden gevonden met een meetstart in deze periode.";
@@ -239,6 +241,11 @@ public partial class OnlineLogsWindow : Window
         else if (!withinMaximum)
         {
             StatusText.Text = $"Selecteer maximaal {_maximumSelection:N0} bestanden per analyse. Kies één sessie of een korter deel daarvan.";
+            StatusText.Foreground = Brushes.Firebrick;
+        }
+        else if (!withinSize)
+        {
+            StatusText.Text = "De selectie is groter dan 4 GB of bevat een bestand groter dan 512 MB. Kies een kleinere periode.";
             StatusText.Foreground = Brushes.Firebrick;
         }
         else if (!validation.IsValid)
@@ -257,7 +264,7 @@ public partial class OnlineLogsWindow : Window
         if (!string.IsNullOrWhiteSpace(_restoreNotice)) StatusText.Text = _restoreNotice + " " + StatusText.Text;
         if (_unknownRecordingTimes > 0)
             StatusText.Text += $" Van {_unknownRecordingTimes:N0} bestand(en) is de meettijd niet leesbaar; deze vallen buiten de datumselectie.";
-        DownloadButton.IsEnabled = withinMaximum && validation.IsValid;
+        DownloadButton.IsEnabled = withinMaximum && withinSize && validation.IsValid;
     }
 
     private void ReloadHistory()

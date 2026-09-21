@@ -34,6 +34,25 @@ public sealed class Mdf4ConversionService : IMdf4ConversionService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(inputPaths);
+        if (inputPaths.Count <= 32)
+            return await ConvertBatchAsync(inputPaths, outputDirectory, progress, cancellationToken).ConfigureAwait(false);
+        var outputs = new List<string>(inputPaths.Count);
+        var batchIndex = 0;
+        // Keep extracted file paths below Windows' process command-line limit.
+        foreach (var batch in inputPaths.Chunk(32))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var batchDirectory = Path.Combine(outputDirectory, $"batch-{++batchIndex:D4}");
+            outputs.AddRange(await ConvertBatchAsync(batch, batchDirectory, progress, cancellationToken).ConfigureAwait(false));
+        }
+        return outputs;
+    }
+
+    private async Task<IReadOnlyList<string>> ConvertBatchAsync(
+        IReadOnlyList<string> inputPaths, string outputDirectory,
+        IProgress<LoadProgress>? progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(inputPaths);
         if (inputPaths.Count == 0) throw new ArgumentException("Er zijn geen MF4-bestanden geselecteerd.", nameof(inputPaths));
         var converterPath = await ResolveConverterPathAsync(cancellationToken).ConfigureAwait(false);
 
