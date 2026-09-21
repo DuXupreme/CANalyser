@@ -34,6 +34,9 @@ public sealed class CanDataset : IDisposable
     /// <summary>Absolute UTC start time supplied by the logger, when available.</summary>
     public DateTimeOffset? StartTimeUtc { get; init; }
 
+    /// <summary>First imported record offset from the logger time origin.</summary>
+    public long FirstRecordOffsetNanoseconds => RawFrames.Count == 0 ? 0 : RawFrames[0].TimestampNanoseconds;
+
     public LoadTimings? LoadTimings { get; internal set; }
 
     public string SourceLogPath { get; internal set; } = string.Empty;

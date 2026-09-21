@@ -36,6 +36,27 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         DateTimeOffset toUtc,
         CancellationToken cancellationToken)
     {
+        var result = await GetLogPageAsync(loggerId, fromUtc, toUtc, cancellationToken).ConfigureAwait(false);
+        if (!result.Truncated) return result;
+        // The API caps each response at 200 newest files. Split the half-open
+        // recording interval so older morning logs cannot silently disappear.
+        if (toUtc - fromUtc <= TimeSpan.FromMilliseconds(1))
+            throw new InvalidDataException("Te veel logs met dezelfde meettijd; de loglijst kan niet volledig worden geladen.");
+        var middle = fromUtc.AddTicks((toUtc - fromUtc).Ticks / 2);
+        var earlier = await GetLogsAsync(loggerId, fromUtc, middle, cancellationToken).ConfigureAwait(false);
+        var later = await GetLogsAsync(loggerId, middle, toUtc, cancellationToken).ConfigureAwait(false);
+        return new OnlineLogQueryResult(earlier.Files.Concat(later.Files)
+            .DistinctBy(static file => file.Key)
+            .OrderByDescending(static file => file.RecordedAt).ToArray(), false,
+            Math.Min(earlier.MaximumSelection, later.MaximumSelection),
+            Math.Max(earlier.UnknownRecordingTimes, later.UnknownRecordingTimes));
+    }
+
+    internal OnlineLogService(HttpClient httpClient) => _httpClient = httpClient;
+
+    private async Task<OnlineLogQueryResult> GetLogPageAsync(
+        string loggerId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+    {
         var url = "api/logs?machine=" + Uri.EscapeDataString(loggerId)
                   + "&from=" + Uri.EscapeDataString(fromUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture))
@@ -197,9 +218,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         return Path.Combine(directory, $"online-logs-{hash}.zip");
     }
 
-    private static string GetCacheDirectory() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "CANalyser", "online-cache");
+    private static string GetCacheDirectory() => CanAnalyzer.Core.Storage.OnlineDownloadCache.DefaultDirectory;
 
     private static bool IsUsableCachedArchive(string path, IReadOnlyList<OnlineLogSelection> files)
     {

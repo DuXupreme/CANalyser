@@ -888,7 +888,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
     {
         var measurementTimeText = dataset.StartTimeUtc is { } startTimeUtc
-            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\n"
             : "Meetstart: niet beschikbaar in dit logbestand\n";
         var speedModeText = useDownsampling
             ? $"LOD/downsampling actief: de grafiek tekent maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace om grote logs soepel te tonen. " +

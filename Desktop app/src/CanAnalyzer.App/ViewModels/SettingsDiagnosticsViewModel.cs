@@ -4,6 +4,7 @@ using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Utilities;
+using CanAnalyzer.Core.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -18,6 +19,16 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private readonly IMessageDialogService _messageDialogService;
     private readonly ITelemetryService _telemetryService;
     private Func<Task>? _applySettingsAsync;
+    private readonly OnlineDownloadCache _downloadCache = new(OnlineDownloadCache.DefaultDirectory);
+
+    [ObservableProperty]
+    private string _onlineCacheStatus = "Opslag wordt berekend...";
+
+    [ObservableProperty]
+    private bool _isCacheBusy;
+
+    public IAsyncRelayCommand RefreshOnlineCacheCommand { get; }
+    public IAsyncRelayCommand ClearOnlineCacheCommand { get; }
 
     [ObservableProperty]
     private string? _logFilePath;
@@ -107,6 +118,33 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         TelemetryLocalLogPath = _telemetryService.LocalLogPath;
         ApplyProgramSettingsCommand = new AsyncRelayCommand(ApplyProgramSettingsAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);
+        RefreshOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(false), () => !IsCacheBusy);
+        ClearOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(true), () => !IsCacheBusy);
+    }
+
+    private async Task UpdateOnlineCacheAsync(bool clear)
+    {
+        IsCacheBusy = true;
+        RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
+        ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        var preserve = string.IsNullOrEmpty(CurrentSourceLogPath) ? LogFilePath : CurrentSourceLogPath;
+        try
+        {
+            OnlineCacheStatus = clear ? "Downloadcache opruimen..." : "Opslag berekenen...";
+            var usage = await Task.Run(() => clear ? _downloadCache.Clear(preserve) : _downloadCache.Inspect());
+            OnlineCacheStatus = $"{usage.Bytes / 1024d / 1024d:N1} MB in {usage.Files:N0} cachebestand(en).";
+            if (clear) OnlineCacheStatus += $" {usage.DeletedBytes / 1024d / 1024d:N1} MB vrijgemaakt. Actieve of vergrendelde bestanden blijven bewaard.";
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            OnlineCacheStatus = $"Cache kon niet volledig worden verwerkt: {ex.Message}";
+        }
+        finally
+        {
+            IsCacheBusy = false;
+            RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
+            ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        }
     }
 
     /// <summary>Versie van de draaiende app, voor weergave.</summary>
@@ -178,13 +216,13 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
             $"Geopend: {CurrentSourceFiles.Count:N0} logbestand(en) · {sessions:N0} herkenbare sessie(s)\n" +
             $"Sessies: {string.Join(", ", dataset.SourceFiles.Select(source => source.Session).Where(session => session is not null).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).DefaultIfEmpty("Niet beschikbaar"))}\n" +
             (dataset.StartTimeUtc is { } sourceStart
-                ? $"Meetstart: {MeasurementTimestamp.FormatLocal(sourceStart, 0)}\n"
+                ? $"Meetstart: {MeasurementTimestamp.FormatLocal(sourceStart, dataset.FirstRecordOffsetNanoseconds)}\n"
                 : "Meetstart: niet beschikbaar in de bron\n") +
             $"Dataset: {dataset.Completeness.ToString().ToUpperInvariant()}";
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
         var report = dataset.ImportReport;
         var measurementStart = dataset.StartTimeUtc is { } startTimeUtc
-            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\n"
             : "Meetstart: niet beschikbaar in dit logbestand\n";
         IntegritySummary =
             $"DATASETSTATUS: {dataset.Completeness.ToString().ToUpperInvariant()}\n" +

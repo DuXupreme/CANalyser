@@ -23,10 +23,12 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
+
                     <TextBlock Text="{Binding CurrentMeasurementSummary}" FontWeight="SemiBold"
                                FontSize="14" TextWrapping="Wrap" Margin="0,0,0,8" />
                     <Expander Header="Bronarchief en gebruikte DBC">
                         <StackPanel>
+
                             <TextBox Text="{Binding CurrentSourceLogPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,4,0,4" />
                             <TextBox Text="{Binding CurrentSourceDbcPath, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" />
                         </StackPanel>
@@ -57,6 +59,17 @@
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
+
+
+            <GroupBox Header="Opslag online logs" Margin="0,0,0,8">
+                <StackPanel Margin="8">
+                    <TextBlock Text="{Binding OnlineCacheStatus}" TextWrapping="Wrap" />
+                    <TextBlock Text="Gedownloade ZIP-bestanden worden tijdelijk bewaard om herhaald downloaden te voorkomen. Na wissen worden ze zo nodig opnieuw gedownload. De logs op AWS blijven behouden. Tijdelijke analysebestanden worden bij het sluiten van de dataset opgeruimd."
+                               TextWrapping="Wrap" Margin="0,6,0,8" />
+                    <Button Content="Downloadcache wissen" Command="{Binding ClearOnlineCacheCommand}" />
+                    <Button Content="Opslag vernieuwen" Command="{Binding RefreshOnlineCacheCommand}" Margin="0,6,0,0" />
+                </StackPanel>
+            </GroupBox>
             <GroupBox Header="Geselecteerd voor volgende import" Margin="0,0,0,8">
                 <StackPanel Margin="8">
                     <TextBlock Text="Logbestand" FontWeight="SemiBold" />
