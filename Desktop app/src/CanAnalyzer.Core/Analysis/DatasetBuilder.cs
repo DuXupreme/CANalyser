@@ -20,9 +20,14 @@ public sealed class DatasetBuilder : IDatasetBuilder
         DateTimeOffset? startTimeUtc = null)
     {
         var counts = new Dictionary<SignalIdentity, int>();
-        foreach (var sample in decodedSamples)
+        if (decodedSamples is ISignalSampleLookup lookup)
         {
-            counts[sample.Identity] = counts.TryGetValue(sample.Identity, out var count) ? checked(count + 1) : 1;
+            foreach (var summary in lookup.GetSignalSummaries()) counts.Add(summary.Latest.Identity, summary.Count);
+        }
+        else
+        {
+            foreach (var sample in decodedSamples)
+                counts[sample.Identity] = counts.TryGetValue(sample.Identity, out var count) ? checked(count + 1) : 1;
         }
 
         var seriesByIdentity = new Dictionary<SignalIdentity, SignalSeries>();
@@ -68,9 +73,15 @@ public sealed class DatasetBuilder : IDatasetBuilder
         int expectedCount)
     {
         var buffer = new SeriesBuffer(expectedCount);
-        foreach (var sample in decodedSamples)
+        if (decodedSamples is ISignalSampleLookup lookup)
         {
-            if (sample.Identity == identity) buffer.Append(sample);
+            foreach (var point in lookup.ReadSignalSeries(identity)) buffer.Append(point);
+        }
+        else
+        {
+            foreach (var sample in decodedSamples)
+                if (sample.Identity == identity)
+                    buffer.Append(new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
         }
 
         return buffer.Complete();
@@ -90,7 +101,7 @@ public sealed class DatasetBuilder : IDatasetBuilder
             _values = new double[count];
         }
 
-        public void Append(DecodedSignalSample sample)
+        public void Append(SignalSeriesPoint sample)
         {
             _timestamps[_index] = sample.TimestampNanoseconds;
             _frameIndices[_index] = sample.FrameIndex;

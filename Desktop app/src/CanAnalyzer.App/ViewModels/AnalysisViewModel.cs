@@ -56,9 +56,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private int _subplotHeight = 280;
 
     [ObservableProperty]
-    private int _signalListHeight = 420;
-
-    [ObservableProperty]
     private string _signalSearchText = string.Empty;
 
     [ObservableProperty]
@@ -129,7 +126,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
         BuildGroupsFromSelectionCommand = new RelayCommand(BuildGroupsFromSelection);
         CreateSingleGroupFromSelectionCommand = new RelayCommand(CreateSingleGroupFromSelection);
         SelectAllVisibleSignalsCommand = new RelayCommand(() => SetSelectionForVisibleSignals(true));
-        SelectNoVisibleSignalsCommand = new RelayCommand(() => SetSelectionForVisibleSignals(false));
+        // "Selecteer niets" is deliberately global: filtering is only a view concern.
+        SelectNoVisibleSignalsCommand = new RelayCommand(ClearAllSignalSelections);
         ClearSignalSearchCommand = new RelayCommand(ClearSignalSearch);
         AddGroupCommand = new RelayCommand(AddGroup);
         RemoveSelectedGroupCommand = new RelayCommand(RemoveSelectedGroup);
@@ -152,6 +150,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
     }
 
     public ObservableCollection<SignalSelectionItem> AvailableSignals { get; } = [];
+
+    public ActiveUsageViewModel ActiveUsage { get; } = new();
 
     public ICollectionView FilteredSignalsView { get; }
 
@@ -223,6 +223,10 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnUseDownsamplingChanged(bool value) => TriggerLiveRebuild();
 
+    partial void OnTimeStartChanged(double? value) => ActiveUsage.SetTimeWindow(value, TimeEnd);
+
+    partial void OnTimeEndChanged(double? value) => ActiveUsage.SetTimeWindow(TimeStart, value);
+
     partial void OnIsBusyChanged(bool value) => ApplyGroupsCommand.NotifyCanExecuteChanged();
 
     partial void OnSignalSearchTextChanged(string value)
@@ -233,6 +237,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
     public void LoadDataset(CanDataset dataset)
     {
         _dataset = dataset;
+        ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
         foreach (var label in dataset.SignalLabels)
         {
@@ -272,7 +277,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
             TimeEnd = options.TimeEnd;
             MaxPointsPerTrace = options.MaxPointsPerTrace;
             SubplotHeight = options.SubplotHeight;
-            SignalListHeight = options.SignalListHeight;
             var legacyOptions = options.PlotOptions ?? [];
             UseDownsampling = options.UseDownsampling && !legacyOptions.Contains("disable_downsampling");
             NormalizeSignals = options.NormalizeSignals || legacyOptions.Contains("normalize");
@@ -330,7 +334,6 @@ public sealed partial class AnalysisViewModel : ObservableObject
             MaxPointsPerTrace = Math.Clamp(MaxPointsPerTrace, 200, 200_000),
             UseDownsampling = UseDownsampling,
             SubplotHeight = Math.Clamp(SubplotHeight, 160, 1200),
-            SignalListHeight = Math.Clamp(SignalListHeight, 180, 1200),
             NormalizeSignals = NormalizeSignals,
             StepPlot = StepPlot,
             MarkersOnly = MarkersOnly,
@@ -476,6 +479,14 @@ public sealed partial class AnalysisViewModel : ObservableObject
         foreach (var signal in AvailableSignals.Where(MatchesSignalSearch))
         {
             signal.IsSelected = selected;
+        }
+    }
+
+    private void ClearAllSignalSelections()
+    {
+        foreach (var signal in AvailableSignals)
+        {
+            signal.IsSelected = false;
         }
     }
 

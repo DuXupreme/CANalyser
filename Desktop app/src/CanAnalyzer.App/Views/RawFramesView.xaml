@@ -27,6 +27,14 @@
                         <TextBox Width="140" Text="{Binding DataContainsHex, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Byte-index (0-based)" />
+                        <TextBox Width="105" Text="{Binding ByteIndex, UpdateSourceTrigger=PropertyChanged}" ToolTip="Eerste byte is index 0" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
+                        <TextBlock Text="Bytewaarde (hex)" />
+                        <TextBox Width="105" Text="{Binding ByteValueHex, UpdateSourceTrigger=PropertyChanged}" ToolTip="Bijvoorbeeld 7F of 0x7F" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,8,6">
                         <TextBlock Text="Type bevat" />
                         <TextBox Width="90" Text="{Binding TypeContains, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>

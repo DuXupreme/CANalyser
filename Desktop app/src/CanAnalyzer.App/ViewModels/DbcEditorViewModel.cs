@@ -36,6 +36,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private readonly List<DbcSignalRow> _attachedSignals = [];
     private DbcFrameRow? _attachedFrame;
     private string? _repairSourcePath;
+    private bool _requiresNormalizationWarning;
 
     [ObservableProperty]
     private DbcFrameRow? _selectedFrame;
@@ -152,6 +153,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         Frames.Clear();
         CurrentFilePath = null;
         _repairSourcePath = null;
+        _requiresNormalizationWarning = false;
         IsReadOnly = false;
         StatusText = "Nieuwe lege database.";
         UpdateValidation();
@@ -178,10 +180,11 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             LoadFromDatabase(database);
             CurrentFilePath = path;
             _repairSourcePath = null;
-            IsReadOnly = !database.IsLosslessWritable;
+            _requiresNormalizationWarning = !database.IsLosslessWritable;
+            IsReadOnly = false;
             HasUnsavedChanges = false;
-            StatusText = IsReadOnly
-                ? $"ALLEEN-LEZEN: {path} — deze geïmporteerde DBC bevat constructies die de editor niet aantoonbaar lossless kan terugschrijven."
+            StatusText = _requiresNormalizationWarning
+                ? $"Geladen voor bewerken: {path} — bij opslaan maakt CANalyser een genormaliseerde DBC; niet-ondersteunde opmerkingen en attributen worden niet meegenomen."
                 : $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
         }
         catch (Exception ex)
@@ -199,6 +202,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
         LoadFromDatabase(database);
         _repairSourcePath = Path.GetFullPath(path);
         CurrentFilePath = GetDefaultRepairPath(path);
+        _requiresNormalizationWarning = false;
         IsReadOnly = false;
         HasUnsavedChanges = false;
         StatusText =
@@ -300,14 +304,6 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
     private async Task SaveDbcAsync()
     {
-        if (IsReadOnly)
-        {
-            _messageDialogService.ShowError(
-                "Lossless opslaan niet mogelijk",
-                "Deze geïmporteerde DBC is bewust alleen-lezen. De editor kan niet garanderen dat alle metadata en multiplexconstructies semantisch identiek worden teruggeschreven.");
-            return;
-        }
-
         if (Frames.Count == 0)
         {
             _messageDialogService.ShowInfo("Niets op te slaan", "Voeg eerst minstens één frame toe.");
@@ -320,11 +316,22 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             return;
         }
 
+        if (_requiresNormalizationWarning &&
+            !_messageDialogService.Confirm(
+                "DBC genormaliseerd opslaan",
+                "CANalyser slaat alle bewerkbare frames, signalen en multiplexdefinities op. " +
+                "Niet-ondersteunde DBC-metadata, zoals opmerkingen en attributen, wordt niet meegenomen.\n\n" +
+                "Het oorspronkelijke bestand blijft behouden zolang je in het opslagvenster een andere bestandsnaam kiest. Doorgaan?"))
+        {
+            return;
+        }
+
         try
         {
             var database = BuildDatabase();
             await _dbcWriter.WriteAsync(database, path, CancellationToken.None);
             CurrentFilePath = path;
+            _requiresNormalizationWarning = false;
             HasUnsavedChanges = false;
             var signalCount = Frames.Sum(f => f.Signals.Count);
             StatusText = $"Opgeslagen: {path}  ({Frames.Count} frames, {signalCount} signalen)";

@@ -14,6 +14,7 @@ public partial class OnlineLogsWindow : Window
     private readonly CancellationTokenSource _windowCts = new();
     private int _maximumSelection = 200;
     private bool _isTruncated;
+    private int _unknownRecordingTimes;
 
     public OnlineLogsWindow(IOnlineLogService onlineLogService)
     {
@@ -60,7 +61,8 @@ public partial class OnlineLogsWindow : Window
             Rows.Clear();
             _maximumSelection = result.MaximumSelection;
             _isTruncated = result.Truncated;
-            var newestFile = result.Files.OrderByDescending(static file => file.CreatedAt).FirstOrDefault();
+            _unknownRecordingTimes = result.UnknownRecordingTimes;
+            var newestFile = result.Files.Where(static file => file.RecordedAt.HasValue).OrderByDescending(static file => file.RecordedAt).FirstOrDefault();
             foreach (var file in result.Files)
             {
                 var row = new OnlineLogRow
@@ -73,7 +75,8 @@ public partial class OnlineLogsWindow : Window
                     Machine = file.Machine,
                     Logger = file.Logger,
                     Session = file.Session,
-                    CreatedAt = file.CreatedAt,
+                    RecordedAt = file.RecordedAt,
+                    UploadedAt = file.UploadedAt,
                     SizeBytes = file.SizeBytes
                 };
                 row.PropertyChanged += OnRowPropertyChanged;
@@ -88,6 +91,7 @@ public partial class OnlineLogsWindow : Window
         {
             Rows.Clear();
             _isTruncated = false;
+            _unknownRecordingTimes = 0;
             StatusText.Text = "Online logs konden niet worden opgehaald.";
             MessageBox.Show(this, ex.Message, "Online logs ophalen mislukt", MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -148,6 +152,17 @@ public partial class OnlineLogsWindow : Window
         }
     }
 
+    private void OnSelectSessionClick(object sender, RoutedEventArgs e) => SelectSession(true);
+    private void OnDeselectSessionClick(object sender, RoutedEventArgs e) => SelectSession(false);
+    private void SelectSession(bool selected)
+    {
+        LogsGrid.CommitEdit();
+        if (LogsGrid.SelectedItem is not OnlineLogRow active) return;
+        foreach (var row in Rows.Where(row => row.Logger == active.Logger && row.Session == active.Session))
+            row.IsSelected = selected;
+        UpdateSelectionStatus();
+    }
+
     private void OnSelectAllClick(object sender, RoutedEventArgs e)
     {
         foreach (var row in Rows) row.IsSelected = true;
@@ -188,12 +203,14 @@ public partial class OnlineLogsWindow : Window
         }
         else
         {
-            var sessionText = selected.Length > 1 ? $" uit sessie {selected[0].Session}" : string.Empty;
+            var sessionText = $" uit {selected.Select(row => (row.Logger, row.Session)).Distinct().Count()} sessie(s)";
             StatusText.Text = $"{selected.Length:N0} van {Rows.Count:N0} bestand(en){sessionText} geselecteerd, " +
                               $"{FormatBytes(selected.Sum(static row => row.SizeBytes))}." +
                               (_isTruncated ? " Er zijn meer resultaten; kies een kortere periode om alles te zien." : string.Empty);
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
         }
+        if (_unknownRecordingTimes > 0)
+            StatusText.Text += $" {_unknownRecordingTimes:N0} online log(s) hebben een onbekende meettijd en kunnen niet op datum worden ingedeeld.";
         DownloadButton.IsEnabled = withinMaximum && validation.IsValid;
     }
 

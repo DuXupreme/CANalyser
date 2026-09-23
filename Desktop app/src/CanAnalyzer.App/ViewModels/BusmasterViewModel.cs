@@ -1,9 +1,11 @@
 using CanAnalyzer.App.Models;
+using CanAnalyzer.App.Services;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
 using CanAnalyzer.Core.Utilities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Diagnostics;
 
 namespace CanAnalyzer.App.ViewModels;
 
@@ -14,6 +16,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
 {
     private CanDataset? _dataset;
     private IFrameSampleLookup? _sampleLookup;
+    private readonly ITelemetryService? _telemetryService;
 
     [ObservableProperty]
     private string? _searchText;
@@ -50,8 +53,9 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
     private IReadOnlyList<BusmasterSignalWatchRow> _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
 
-    public BusmasterViewModel()
+    public BusmasterViewModel(ITelemetryService? telemetryService = null)
     {
+        _telemetryService = telemetryService;
         ApplyFiltersCommand = new RelayCommand(() => ApplyFilters(resetPage: true));
         ResetFiltersCommand = new RelayCommand(ResetFilters);
         PreviousPageCommand = new RelayCommand(PreviousPage, () => PageNumber > 1);
@@ -92,6 +96,41 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
     private void ApplyFilters(bool resetPage = false)
     {
+        var timer = Stopwatch.StartNew();
+        var search = SearchText?.Trim();
+        _ = _telemetryService?.TrackEventAsync("busmaster_filter_started", new Dictionary<string, object?>
+        {
+            ["has_search"] = !string.IsNullOrWhiteSpace(search),
+            ["search_kind"] = TryParseId(search ?? string.Empty, out _) ? "can_id" : string.IsNullOrWhiteSpace(search) ? "none" : "text",
+            ["show_only_decoded"] = ShowOnlyDecoded,
+            ["max_rows_bucket"] = TelemetryBuckets.Count(MaxRows)
+        });
+        try
+        {
+            ApplyFiltersCore(resetPage, search);
+            timer.Stop();
+            _ = _telemetryService?.TrackEventAsync("busmaster_filter_completed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = (long)timer.Elapsed.TotalMilliseconds,
+                ["result_rows_bucket"] = TelemetryBuckets.Count(Messages.Count),
+                ["page"] = PageNumber
+            });
+        }
+        catch (Exception ex)
+        {
+            timer.Stop();
+            _ = _telemetryService?.TrackEventAsync("busmaster_filter_failed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = (long)timer.Elapsed.TotalMilliseconds,
+                ["exception_type"] = ex.GetType().Name,
+                ["source"] = "apply_filters"
+            });
+            throw;
+        }
+    }
+
+    private void ApplyFiltersCore(bool resetPage, string? search)
+    {
         if (resetPage) PageNumber = 1;
         if (_dataset is null)
         {
@@ -104,7 +143,6 @@ public sealed partial class BusmasterViewModel : ObservableObject
             return;
         }
 
-        var search = SearchText?.Trim();
         var maxRows = Math.Clamp(MaxRows, 1, 2_000_000);
         var offset = checked((Math.Max(1, PageNumber) - 1) * maxRows);
         var rows = _dataset.RawFrames
@@ -169,6 +207,18 @@ public sealed partial class BusmasterViewModel : ObservableObject
             _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchStatistics = "Geen gedecodeerde signalen beschikbaar.";
+            return;
+        }
+
+        if (dataset.DecodedSamples is ISignalSampleLookup lookup)
+        {
+            _allSignalWatchRows = lookup.GetSignalSummaries()
+                .Select(summary => new BusmasterSignalWatchRow(summary.Latest.Identity,
+                    summary.Latest.TimestampNanoseconds, summary.Latest.FrameIndex, summary.Latest.Value,
+                    summary.Latest.RawValueHex, summary.Latest.Unit, summary.Count, summary.Minimum, summary.Maximum))
+                .OrderBy(row => row.MessageName).ThenBy(row => row.Name).ThenBy(row => row.Channel).ThenBy(row => row.FrameIdHex)
+                .ToList();
+            ApplySignalWatchFilter();
             return;
         }
 

@@ -25,6 +25,12 @@ public sealed partial class RawFramesViewModel : ObservableObject
     private string? _dataContainsHex;
 
     [ObservableProperty]
+    private string? _byteIndex;
+
+    [ObservableProperty]
+    private string? _byteValueHex;
+
+    [ObservableProperty]
     private string? _typeContains;
 
     [ObservableProperty]
@@ -81,6 +87,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
     {
         IdFilter = options.IdFilter;
         DataContainsHex = options.DataContainsHex;
+        ByteIndex = options.ByteIndex?.ToString(CultureInfo.InvariantCulture);
+        ByteValueHex = options.ByteValue?.ToString("X2", CultureInfo.InvariantCulture);
         TypeContains = options.TypeContains;
         ChannelContains = options.ChannelContains;
         TimeStart = options.TimeStart;
@@ -100,6 +108,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
         {
             IdFilter = IdFilter,
             DataContainsHex = DataContainsHex,
+            ByteIndex = ParseByteIndex(ByteIndex),
+            ByteValue = ParseByteValue(ByteValueHex),
             TypeContains = TypeContains,
             ChannelContains = ChannelContains,
             TimeStart = TimeStart,
@@ -201,6 +211,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
     {
         IdFilter = null;
         DataContainsHex = null;
+        ByteIndex = null;
+        ByteValueHex = null;
         TypeContains = null;
         ChannelContains = null;
         TimeStart = null;
@@ -208,6 +220,15 @@ public sealed partial class RawFramesViewModel : ObservableObject
         MaxRows = 50_000;
         ExtendedFilterMode = "All";
         ApplyFilters(resetPage: true);
+    }
+
+    private static int? ParseByteIndex(string? value) =>
+        int.TryParse(value?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 ? index : null;
+
+    private static byte? ParseByteValue(string? value)
+    {
+        var token = value?.Trim().Replace("0x", string.Empty, StringComparison.OrdinalIgnoreCase);
+        return byte.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
     }
 
     private void PreviousPage()

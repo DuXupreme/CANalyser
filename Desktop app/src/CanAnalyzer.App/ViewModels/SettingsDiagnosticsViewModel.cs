@@ -3,6 +3,7 @@ using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Utilities;
+using CanAnalyzer.Core.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -17,6 +18,16 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private readonly IMessageDialogService _messageDialogService;
     private readonly ITelemetryService _telemetryService;
     private Func<Task>? _applySettingsAsync;
+    private readonly OnlineDownloadCache _downloadCache = new(OnlineDownloadCache.DefaultDirectory);
+
+    [ObservableProperty]
+    private string _onlineCacheStatus = "Opslag wordt berekend...";
+
+    [ObservableProperty]
+    private bool _isCacheBusy;
+
+    public IAsyncRelayCommand RefreshOnlineCacheCommand { get; }
+    public IAsyncRelayCommand ClearOnlineCacheCommand { get; }
 
     [ObservableProperty]
     private string? _logFilePath;
@@ -44,9 +55,6 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _defaultSubplotHeight = 280;
-
-    [ObservableProperty]
-    private int _defaultSignalListHeight = 420;
 
     [ObservableProperty]
     private bool _defaultUseDownsampling;
@@ -95,6 +103,33 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         TelemetryLocalLogPath = _telemetryService.LocalLogPath;
         ApplyProgramSettingsCommand = new AsyncRelayCommand(ApplyProgramSettingsAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);
+        RefreshOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(false), () => !IsCacheBusy);
+        ClearOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(true), () => !IsCacheBusy);
+    }
+
+    private async Task UpdateOnlineCacheAsync(bool clear)
+    {
+        IsCacheBusy = true;
+        RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
+        ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        var preserve = LogFilePath;
+        try
+        {
+            OnlineCacheStatus = clear ? "Downloadcache opruimen..." : "Opslag berekenen...";
+            var usage = await Task.Run(() => clear ? _downloadCache.Clear(preserve) : _downloadCache.Inspect());
+            OnlineCacheStatus = $"{usage.Bytes / 1024d / 1024d:N1} MB in {usage.Files:N0} cachebestand(en).";
+            if (clear) OnlineCacheStatus += $" {usage.DeletedBytes / 1024d / 1024d:N1} MB vrijgemaakt. Actieve of vergrendelde bestanden blijven bewaard.";
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            OnlineCacheStatus = $"Cache kon niet volledig worden verwerkt: {ex.Message}";
+        }
+        finally
+        {
+            IsCacheBusy = false;
+            RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
+            ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        }
     }
 
     /// <summary>Versie van de draaiende app, voor weergave.</summary>
@@ -135,7 +170,6 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
         DefaultMaxPointsPerTrace = settings.LastPlotViewOptions.MaxPointsPerTrace;
         DefaultSubplotHeight = settings.LastPlotViewOptions.SubplotHeight;
-        DefaultSignalListHeight = settings.LastPlotViewOptions.SignalListHeight;
         DefaultUseDownsampling = settings.LastPlotViewOptions.UseDownsampling;
         DefaultShowLegend = settings.LastPlotViewOptions.ShowLegend;
         DefaultLinkXAxisAcrossPanels = settings.LastPlotViewOptions.LinkXAxisAcrossPanels;
@@ -153,7 +187,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
         var report = dataset.ImportReport;
         var measurementStart = dataset.StartTimeUtc is { } startTimeUtc
-            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\n"
             : "Meetstart: niet beschikbaar in dit logbestand\n";
         IntegritySummary =
             $"DATASETSTATUS: {dataset.Completeness.ToString().ToUpperInvariant()}\n" +
@@ -179,7 +213,6 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     {
         settings.LastPlotViewOptions.MaxPointsPerTrace = Math.Clamp(DefaultMaxPointsPerTrace, 200, 200_000);
         settings.LastPlotViewOptions.SubplotHeight = Math.Clamp(DefaultSubplotHeight, 160, 1200);
-        settings.LastPlotViewOptions.SignalListHeight = Math.Clamp(DefaultSignalListHeight, 180, 1500);
         settings.LastPlotViewOptions.UseDownsampling = DefaultUseDownsampling;
         settings.LastPlotViewOptions.ShowLegend = DefaultShowLegend;
         settings.LastPlotViewOptions.LinkXAxisAcrossPanels = DefaultLinkXAxisAcrossPanels;

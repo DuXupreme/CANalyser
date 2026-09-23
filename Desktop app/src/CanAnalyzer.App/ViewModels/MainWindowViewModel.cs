@@ -1,3 +1,7 @@
+using System.IO.Compression;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using CanAnalyzer.Core.Analysis;
 using System.Diagnostics;
 using System.ComponentModel;
 using CanAnalyzer.App.Services;
@@ -95,6 +99,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         Analysis.PropertyChanged += OnBackgroundOperationPropertyChanged;
         JoystickAnalytics.PropertyChanged += OnBackgroundOperationPropertyChanged;
+        Analysis.ActiveUsage.PropertyChanged += (_, e) =>
+        { if (e.PropertyName == nameof(ActiveUsageViewModel.IsBusy)) ExportAnalysesCommand?.NotifyCanExecuteChanged(); };
 
         LoadedSettings = _settingsStore.Load();
         _telemetryService.Configure(LoadedSettings.Telemetry);
@@ -113,6 +119,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RepairPartialImportCommand = new AsyncRelayCommand(RepairPartialImportAsync, () => HasRepairablePartialImport && !IsAnyBusy);
         CancelCommand = new RelayCommand(CancelLoad, () => IsBusy);
         ExportDecodedCsvCommand = new AsyncRelayCommand(ExportDecodedCsvAsync, CanExportDecodedCsv);
+        ExportAnalysesCommand = new AsyncRelayCommand(ExportAnalysesAsync, () => CanExportDecodedCsv() && !Analysis.ActiveUsage.IsBusy);
         ExportLayoutCommand = new AsyncRelayCommand(ExportLayoutAsync);
         ImportLayoutCommand = new AsyncRelayCommand(ImportLayoutAsync);
         UpdateCommandStates();
@@ -166,6 +173,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public IRelayCommand CancelCommand { get; }
 
     public IAsyncRelayCommand ExportDecodedCsvCommand { get; }
+    public IAsyncRelayCommand ExportAnalysesCommand { get; }
 
     public IAsyncRelayCommand ExportLayoutCommand { get; }
 
@@ -337,6 +345,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
 
             _dataset = loadResult.Dataset;
+            var confirmationMs = loadResult.ReviewMilliseconds;
             importMode = loadResult.Mode;
             LogFilePath = loadResult.LogPath;
             DbcFilePath = loadResult.DbcPath;
@@ -344,8 +353,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 _dataset.Completeness == DatasetCompleteness.Partial &&
                 _dataset.ImportReport?.HasErrors == true;
 
-            var channels = _dataset.RawFrames
-                .Select(static frame => string.IsNullOrWhiteSpace(frame.Channel) ? "(onbekend)" : frame.Channel)
+            var channels = _dataset.Channels
+                .Select(static channel => string.IsNullOrWhiteSpace(channel) ? "(onbekend)" : channel)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(static channel => channel, StringComparer.Ordinal)
                 .ToArray();
@@ -353,10 +362,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 var dbcName = Path.GetFileName(DbcFilePath);
                 var mapping = string.Join(Environment.NewLine, channels.Select(channel => $"• {channel} → {dbcName}"));
+                var confirmationTimer = Stopwatch.StartNew();
                 var confirmed = _messageDialogService.Confirm(
                     "DBC-toewijzing per kanaal bevestigen",
                     $"De log bevat {channels.Length} kanalen. Bevestig expliciet dat dezelfde DBC op ieder kanaal van toepassing is:\n\n{mapping}\n\n" +
                     "Kies Annuleren als een kanaal een andere DBC vereist; de analyse wordt dan niet geopend.");
+                confirmationMs += confirmationTimer.ElapsedMilliseconds;
                 if (!confirmed)
                 {
                     _dataset.Dispose();
@@ -368,11 +379,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 }
             }
 
+            var viewTimer = Stopwatch.StartNew();
             Analysis.LoadDataset(_dataset);
             JoystickAnalytics.LoadDataset(_dataset);
             RawFrames.LoadDataset(_dataset);
             Busmaster.LoadDataset(_dataset);
             SettingsDiagnostics.UpdateDataset(_dataset);
+            viewTimer.Stop();
+            var timings = _dataset.LoadTimings;
 
             StatusText = BuildStatusText(_dataset, Analysis.UseDownsampling, Analysis.MaxPointsPerTrace);
             SettingsDiagnostics.LastOperationSummary =
@@ -380,7 +394,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 $"Duur: {stopwatch.Elapsed}\n" +
                 $"Ruwe frames: {_dataset.RawCount:N0}\n" +
                 $"Gedecodeerde meetpunten: {_dataset.DecodedSamples.Count:N0}\n" +
-                $"Signalen: {_dataset.SignalCount:N0}";
+                $"Signalen: {_dataset.SignalCount:N0}\n" +
+                (timings is null ? string.Empty :
+                    $"Inlezen/converteren: {timings.ParseMilliseconds:N0} ms\n" +
+                    $"DBC laden: {timings.DbcMilliseconds:N0} ms\n" +
+                    $"Decoderen: {timings.DecodeMilliseconds:N0} ms\n" +
+                    $"Bestandshashes: {timings.HashMilliseconds:N0} ms\n" +
+                    $"Dataset opbouwen: {timings.DatasetMilliseconds:N0} ms\n") +
+                $"Weergaven voorbereiden: {viewTimer.ElapsedMilliseconds:N0} ms\n" +
+                $"Bevestigingsvensters: {confirmationMs:N0} ms\n" +
+                $"Verwerkingspogingen: {loadResult.ProcessingAttempts}";
 
             ProgressLabel = "Klaar.";
             ProgressValue = 100;
@@ -401,6 +424,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 ["duration_ms"] = stopwatch.ElapsedMilliseconds,
                 ["duration_bucket"] = TelemetryBuckets.DurationMilliseconds(stopwatch.ElapsedMilliseconds),
+                ["parse_duration_ms"] = timings?.ParseMilliseconds,
+                ["dbc_duration_ms"] = timings?.DbcMilliseconds,
+                ["decode_duration_ms"] = timings?.DecodeMilliseconds,
+                ["hash_duration_ms"] = timings?.HashMilliseconds,
+                ["dataset_duration_ms"] = timings?.DatasetMilliseconds,
+                ["view_duration_ms"] = viewTimer.ElapsedMilliseconds,
+                ["confirmation_duration_ms"] = confirmationMs,
+                ["processing_attempts"] = loadResult.ProcessingAttempts,
                 ["import_mode"] = importMode.ToString(),
                 ["dataset_completeness"] = _dataset.Completeness.ToString(),
                 ["raw_frame_bucket"] = TelemetryBuckets.Count(_dataset.RawCount),
@@ -629,88 +660,100 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         var activeLogPath = initialLogPath;
         var activeDbcPath = initialDbcPath;
+        long reviewMilliseconds = 0;
+        var processingAttempts = 0;
 
+        PreparedCanAnalysis? prepared = null;
+        try
+        {
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            processingAttempts++;
+            var next = prepared is null
+                ? await _analysisPipeline.PrepareForReviewAsync(activeLogPath, activeDbcPath, progress, cancellationToken)
+                : await _analysisPipeline.RetryForReviewAsync(prepared, activeLogPath, activeDbcPath, progress, cancellationToken);
+            if (!ReferenceEquals(next, prepared)) prepared?.Dispose();
+            prepared = next;
+            if (!prepared.RequiresPartialConfirmation)
+                return new ImportLoadResult(prepared.Accept(), ImportMode.Strict, activeLogPath, activeDbcPath, reviewMilliseconds, processingAttempts);
+            var report = prepared.Report!;
+            SettingsDiagnostics.LastErrorDetails = FormatImportReport(report);
+            ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
+
+            ImportRepairWizardResult repair;
+            IsRepairWizardOpen = true;
+            var reviewTimer = Stopwatch.StartNew();
             try
             {
-                var dataset = await _analysisPipeline.LoadAsync(
+                repair = await _importRepairWizardService.ShowAsync(
+                    report,
                     activeLogPath,
                     activeDbcPath,
-                    ImportMode.Strict,
+                    cancellationToken);
+            }
+            finally
+            {
+                IsRepairWizardOpen = false;
+                reviewMilliseconds += reviewTimer.ElapsedMilliseconds;
+            }
+            if (repair.Decision == ImportRepairDecision.Cancel)
+            {
+                return null;
+            }
+
+            if (repair.Decision == ImportRepairDecision.ContinuePartial)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ProgressLabel = "Gecontroleerde PARTIAL-dataset openen...";
+                if (await prepared.MatchesSourcesAsync(repair.LogPath, repair.DbcPath, cancellationToken))
+                    return new ImportLoadResult(prepared.Accept(allowPartial: true), ImportMode.Partial, repair.LogPath, repair.DbcPath, reviewMilliseconds, processingAttempts);
+                prepared.Dispose();
+                processingAttempts++;
+                var partialDataset = await _analysisPipeline.LoadAsync(
+                    repair.LogPath,
+                    repair.DbcPath,
+                    ImportMode.Partial,
                     progress,
                     cancellationToken);
-                return new ImportLoadResult(dataset, ImportMode.Strict, activeLogPath, activeDbcPath);
+                return new ImportLoadResult(
+                    partialDataset,
+                    ImportMode.Partial,
+                    repair.LogPath,
+                    repair.DbcPath,
+                    reviewMilliseconds,
+                    processingAttempts);
             }
-            catch (ImportIntegrityException integrityException)
-            {
-                SettingsDiagnostics.LastErrorDetails = FormatImportReport(integrityException.Report);
-                ProgressLabel = "STRICT-validatie vond herstelbare problemen.";
 
-                ImportRepairWizardResult repair;
-                IsRepairWizardOpen = true;
+            if (repair.RemoveRejectedLogLines)
+            {
                 try
                 {
-                    repair = await _importRepairWizardService.ShowAsync(
-                        integrityException.Report,
+                    ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
+                    var removed = await _importRepairService.CreateRepairedLogCopyAsync(
                         activeLogPath,
-                        activeDbcPath,
-                        cancellationToken);
-                }
-                finally
-                {
-                    IsRepairWizardOpen = false;
-                }
-                if (repair.Decision == ImportRepairDecision.Cancel)
-                {
-                    return null;
-                }
-
-                if (repair.Decision == ImportRepairDecision.ContinuePartial)
-                {
-                    ProgressLabel = "Bewust laden in PARTIAL-modus...";
-                    var partialDataset = await _analysisPipeline.LoadAsync(
                         repair.LogPath,
-                        repair.DbcPath,
-                        ImportMode.Partial,
-                        progress,
+                        report,
                         cancellationToken);
-                    return new ImportLoadResult(
-                        partialDataset,
-                        ImportMode.Partial,
-                        repair.LogPath,
-                        repair.DbcPath);
-                }
-
-                if (repair.RemoveRejectedLogLines)
-                {
-                    try
-                    {
-                        ProgressLabel = "Veilige, opgeschoonde logkopie maken...";
-                        var removed = await _importRepairService.CreateRepairedLogCopyAsync(
-                            activeLogPath,
-                            repair.LogPath,
-                            integrityException.Report,
-                            cancellationToken);
-                        activeLogPath = repair.LogPath;
-                        ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-                    {
-                        _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
-                        _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
-                        continue;
-                    }
-                }
-                else
-                {
                     activeLogPath = repair.LogPath;
+                    ProgressLabel = $"{removed:N0} afgewezen regel(s) verwijderd; STRICT opnieuw controleren...";
                 }
-
-                activeDbcPath = repair.DbcPath;
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                {
+                    _logger.LogWarning(ex, "Could not create repaired CAN log copy.");
+                    _messageDialogService.ShowError("Logherstel mislukt", ex.Message);
+                    continue;
+                }
             }
+            else
+            {
+                activeLogPath = repair.LogPath;
+            }
+
+            activeDbcPath = repair.DbcPath;
         }
+        }
+        finally { prepared?.Dispose(); }
     }
 
     private void LoadDefaultActuatorComparisonGroups(CanDataset dataset)
@@ -742,6 +785,64 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void CancelLoad()
     {
         _loadCts?.Cancel();
+    }
+
+    private async Task ExportAnalysesAsync()
+    {
+        if (_dataset is null || IsAnyBusy || Analysis.ActiveUsage.IsBusy) return;
+        var dataset = _dataset;
+        try
+        {
+            string[] sourceEntries = [];
+            if (System.IO.File.Exists(LogFilePath) && System.IO.Path.GetExtension(LogFilePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var archive = ZipFile.OpenRead(LogFilePath);
+                sourceEntries = archive.Entries.Where(e => e.Name.EndsWith(".mf4", StringComparison.OrdinalIgnoreCase))
+                    .Select(e => e.FullName).ToArray();
+            }
+            var loggerIds = sourceEntries.Select(e => Regex.Match(e, @"(?:^|[/\\])([A-Fa-f0-9]{8})[/\\]")).Where(m => m.Success)
+                .Select(m => m.Groups[1].Value.ToUpperInvariant()).Distinct().ToArray();
+            var dialog = new CanAnalyzer.App.Views.AnalysisExportDialog(loggerIds.Length == 1 ? loggerIds[0] : "");
+            if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner) dialog.Owner = owner;
+            if (dialog.ShowDialog() != true || dialog.Options is not { } options) return;
+            var save = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Analysepakket opslaan", Filter = "Analysepakket (*.zip)|*.zip", DefaultExt = ".zip",
+                FileName = "canalyser-analyses-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip", AddExtension = true
+            };
+            if (save.ShowDialog() != true) return;
+            IsBusy = true;
+            ProgressLabel = "Analysepakket berekenen en exporteren�";
+            _loadCts = new CancellationTokenSource();
+            var token = _loadCts.Token;
+            await JoystickAnalytics.RecomputeCommand.ExecuteAsync(null);
+            token.ThrowIfCancellationRequested();
+            await Analysis.ActiveUsage.CalculateCommand.ExecuteAsync(null);
+            token.ThrowIfCancellationRequested();
+            var active = Analysis.ActiveUsage;
+            // Freeze plain data on the UI thread before streaming the dataset on a worker.
+            var snapshot = JsonSerializer.SerializeToElement(new
+            {
+                CanAnalyses = JoystickAnalytics.CaptureExport(),
+                ActiveUsage = new { active.Status, active.Notes, active.ActivitySignal, active.SocSignal, active.OnSignal,
+                    Result = active.ExportResult, TimeMetrics = active.TimeMetrics.ToArray(),
+                    EnergyMetrics = active.EnergyMetrics.ToArray(), BatteryMetrics = active.BatteryMetrics.ToArray() }
+            }, AnalysisBundleExporter.JsonOptions);
+            await Task.Run(() => AnalysisBundleExporter.Export(save.FileName, dataset, options, snapshot, sourceEntries, token), token);
+            _messageDialogService.ShowInfo("Analyse-export", "Analysepakket opgeslagen:\n" + save.FileName +
+                "\nCSV-tabellen, JSON-resultaten en instellingen. Onbeschikbare analyses blijven als onbekend gemarkeerd.");
+        }
+        catch (OperationCanceledException) { StatusText = "Analyse-export geannuleerd."; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Analysis bundle export failed");
+            _messageDialogService.ShowError("Analyse-export mislukt", ex.Message);
+        }
+        finally
+        {
+            _loadCts?.Dispose(); _loadCts = null;
+            IsBusy = false; ProgressLabel = "Klaar.";
+        }
     }
 
     private async Task ExportDecodedCsvAsync()
@@ -851,13 +952,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ImportActuatorCsvCommand?.NotifyCanExecuteChanged();
         RepairPartialImportCommand?.NotifyCanExecuteChanged();
         ExportDecodedCsvCommand?.NotifyCanExecuteChanged();
+        ExportAnalysesCommand?.NotifyCanExecuteChanged();
         CancelCommand?.NotifyCanExecuteChanged();
     }
 
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
     {
         var measurementTimeText = dataset.StartTimeUtc is { } startTimeUtc
-            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, 0)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, 0)}\n"
+            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\n"
             : "Meetstart: niet beschikbaar in dit logbestand\n";
         var speedModeText = useDownsampling
             ? $"LOD/downsampling actief: de grafiek tekent maximaal {Math.Clamp(maxPointsPerTrace, 200, 200_000):N0} representatieve punten per trace om grote logs soepel te tonen. " +
@@ -929,5 +1031,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CanDataset Dataset,
         ImportMode Mode,
         string LogPath,
-        string DbcPath);
+        string DbcPath,
+        long ReviewMilliseconds,
+        int ProcessingAttempts);
 }

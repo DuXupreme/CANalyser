@@ -33,6 +33,11 @@ public sealed class RawFrameFilterService : IRawFrameFilterService
                     .Contains(payloadToken, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (options.ByteIndex is { } byteIndex && options.ByteValue is { } byteValue && byteIndex >= 0)
+        {
+            query = query.Where(frame => frame.Data is { } data && byteIndex < data.Length && data[byteIndex] == byteValue);
+        }
+
         if (!string.IsNullOrWhiteSpace(options.TypeContains))
         {
             query = query.Where(frame =>

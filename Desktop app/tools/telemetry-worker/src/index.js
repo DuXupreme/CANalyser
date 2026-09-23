@@ -1,23 +1,10 @@
+import DASHBOARD_HTML from "./dashboard.html";
+import { EVENT_CATALOG, USAGE_EVENTS } from "./event-catalog.js";
+
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_EXPORT_LIMIT = 10_000;
 
-const ALLOWED_EVENTS = new Set([
-  "app_started",
-  "load_decode_completed",
-  "load_decode_failed",
-  "load_decode_cancelled",
-  "export_decoded_csv",
-  "settings_applied",
-  "analysis_layout_exported",
-  "analysis_layout_imported",
-  "analysis_apply_plot_groups",
-  "analysis_open_detached_plots",
-  "analysis_lod_forced",
-  "update_check_skipped",
-  "update_check_completed",
-  "update_prompt_declined",
-  "update_apply_failed"
-]);
+const ALLOWED_EVENTS = new Set(Object.keys(EVENT_CATALOG));
 
 export default {
   async fetch(request, env) {
@@ -40,7 +27,7 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/summary") {
-      return withAdminAuth(request, env, () => getSummary(env));
+      return withAdminAuth(request, env, () => getSummary(url, env));
     }
 
     if (request.method === "GET" && url.pathname === "/export.ndjson") {
@@ -115,31 +102,55 @@ async function ingestEvent(request, env) {
   return json({ ok: true });
 }
 
-async function getSummary(env) {
-  const byEvent = await env.DB.prepare(`
-    SELECT event_name, COUNT(*) AS count, MAX(received_at) AS last_received_at
-    FROM telemetry_events
-    GROUP BY event_name
-    ORDER BY event_name
-  `).all();
+function periodFor(url) {
+  const days = url.searchParams.get("days") || "all";
+  if (!["all", "7", "30", "90"].includes(days)) return null;
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCHours(0, 0, 0, 0);
+  if (days !== "all") start.setUTCDate(start.getUTCDate() - Number(days) + 1);
+  return { days, from: days === "all" ? "0000" : start.toISOString(), to: end.toISOString() };
+}
 
-  const totals = await env.DB.prepare(`
-    SELECT
-      COUNT(*) AS event_count,
-      COUNT(DISTINCT installation_id) AS installation_count,
-      MIN(received_at) AS first_received_at,
-      MAX(received_at) AS last_received_at
-    FROM telemetry_events
-  `).first();
-
-  return json({
-    ok: true,
-    totals,
-    by_event: byEvent.results ?? []
-  });
+async function getSummary(url, env) {
+  const period = periodFor(url);
+  if (!period) return json({ error: "invalid_period" }, 400);
+  // These SQL literals come exclusively from the source-controlled event catalog.
+  const usage = "event_name IN (" + USAGE_EVENTS.map(name => "'" + name + "'").join(",") + ")";
+  const category = "CASE event_name " + USAGE_EVENTS.map(name =>
+    "WHEN '" + name + "' THEN '" + EVENT_CATALOG[name].category + "'"
+  ).join(" ") + " END";
+  const duration = "CASE WHEN json_valid(properties_json) THEN CASE WHEN json_type(properties_json, '$.duration_ms') IN ('integer', 'real') AND json_extract(properties_json, '$.duration_ms') >= 0 THEN json_extract(properties_json, '$.duration_ms') END END";
+  const where = "FROM telemetry_events WHERE received_at >= ? AND received_at <= ?";
+  const results = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) AS event_count,
+      COUNT(DISTINCT NULLIF(installation_id, '')) AS installation_count,
+      COUNT(DISTINCT CASE WHEN session_id != '' THEN installation_id || ':' || session_id END) AS session_count,
+      COALESCE(SUM(CASE WHEN ${usage} THEN 1 ELSE 0 END), 0) AS usage_count,
+      AVG(CASE WHEN event_name = 'load_decode_completed' THEN ${duration} END) AS avg_decode_ms,
+      COUNT(CASE WHEN event_name = 'load_decode_completed' THEN ${duration} END) AS decode_sample_count,
+      MIN(received_at) AS first_received_at, MAX(received_at) AS last_received_at ${where}`),
+    env.DB.prepare(`SELECT event_name, COUNT(*) AS count,
+      COUNT(DISTINCT NULLIF(installation_id, '')) AS installation_count,
+      MAX(received_at) AS last_received_at ${where} GROUP BY event_name ORDER BY count DESC, event_name`),
+    env.DB.prepare(`SELECT ${category} AS category, COUNT(*) AS count,
+      COUNT(DISTINCT NULLIF(installation_id, '')) AS installation_count
+      ${where} AND ${usage} GROUP BY category ORDER BY count DESC, category`),
+    env.DB.prepare(`SELECT SUBSTR(received_at, 1, 10) AS day, COUNT(*) AS event_count,
+      SUM(CASE WHEN ${usage} THEN 1 ELSE 0 END) AS usage_count
+      ${where} GROUP BY day ORDER BY day`),
+    env.DB.prepare(`SELECT COALESCE(NULLIF(app_version, ''), 'Onbekend') AS app_version,
+      COUNT(*) AS count, COUNT(DISTINCT NULLIF(installation_id, '')) AS installation_count
+      ${where} GROUP BY app_version ORDER BY count DESC, app_version`)
+  ].map(statement => statement.bind(period.from, period.to)));
+  return json({ ok: true, period, totals: results[0].results?.[0] ?? {},
+    by_event: results[1].results ?? [], by_category: results[2].results ?? [],
+    daily: results[3].results ?? [], by_version: results[4].results ?? [] });
 }
 
 async function getRecentEvents(url, env) {
+  const period = periodFor(url);
+  if (!period) return json({ error: "invalid_period" }, 400);
   const limit = clampInt(url.searchParams.get("limit"), 1, 500, 100);
   const result = await env.DB.prepare(`
     SELECT
@@ -151,9 +162,10 @@ async function getRecentEvents(url, env) {
       session_id,
       properties_json
     FROM telemetry_events
+    WHERE received_at >= ? AND received_at <= ?
     ORDER BY received_at DESC
     LIMIT ?
-  `).bind(limit).all();
+  `).bind(period.from, period.to, limit).all();
 
   return json({
     ok: true,
@@ -199,7 +211,7 @@ async function exportEvents(url, env) {
 }
 
 function dashboard() {
-  return new Response(DASHBOARD_HTML, {
+  return new Response(DASHBOARD_HTML.replace("/* EVENT_CATALOG */", "const EVENT_CATALOG = " + JSON.stringify(EVENT_CATALOG) + ";"), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store"
@@ -325,407 +337,3 @@ function parseProperties(value) {
     return {};
   }
 }
-
-const DASHBOARD_HTML = `<!doctype html>
-<html lang="nl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CANalyser Telemetry</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --text: #1d2733;
-      --muted: #617084;
-      --line: #dce2ea;
-      --accent: #0f6b7a;
-      --accent-soft: #dff3f6;
-      --danger: #9f2f2f;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Segoe UI, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    header {
-      background: #ffffff;
-      border-bottom: 1px solid var(--line);
-      padding: 16px 24px;
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-    h1 {
-      margin: 0;
-      font-size: 22px;
-      font-weight: 650;
-    }
-    main {
-      padding: 18px 24px 28px;
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-    .auth {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    input, button, select {
-      font: inherit;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      padding: 7px 9px;
-      background: #fff;
-      color: var(--text);
-    }
-    input[type="password"] {
-      width: min(420px, 80vw);
-    }
-    button {
-      cursor: pointer;
-      background: var(--accent);
-      color: white;
-      border-color: var(--accent);
-      font-weight: 600;
-    }
-    button.secondary {
-      background: #fff;
-      color: var(--accent);
-    }
-    button:disabled {
-      opacity: .55;
-      cursor: default;
-    }
-    .status {
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .status.error {
-      color: var(--danger);
-      font-weight: 600;
-    }
-    .grid {
-      display: grid;
-      gap: 14px;
-    }
-    .cards {
-      grid-template-columns: repeat(4, minmax(160px, 1fr));
-      margin-bottom: 14px;
-    }
-    .card, .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 14px;
-    }
-    .card .label {
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 7px;
-    }
-    .card .value {
-      font-size: 27px;
-      line-height: 1.05;
-      font-weight: 700;
-    }
-    .two-col {
-      grid-template-columns: minmax(300px, 0.9fr) minmax(460px, 1.6fr);
-    }
-    .panel h2 {
-      font-size: 16px;
-      margin: 0 0 12px;
-    }
-    .bar-row {
-      display: grid;
-      grid-template-columns: minmax(160px, 220px) 1fr 54px;
-      align-items: center;
-      gap: 8px;
-      margin: 8px 0;
-      font-size: 13px;
-    }
-    .bar-track {
-      height: 11px;
-      border-radius: 999px;
-      background: #eef2f5;
-      overflow: hidden;
-    }
-    .bar {
-      height: 100%;
-      min-width: 2px;
-      background: var(--accent);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    th, td {
-      text-align: left;
-      padding: 8px 7px;
-      border-bottom: 1px solid var(--line);
-      vertical-align: top;
-    }
-    th {
-      color: var(--muted);
-      font-weight: 650;
-      background: #fbfcfd;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }
-    .table-wrap {
-      max-height: 620px;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-    }
-    code {
-      font-family: Consolas, monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .muted { color: var(--muted); }
-    .controls {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-      align-items: center;
-    }
-    @media (max-width: 900px) {
-      .cards, .two-col { grid-template-columns: 1fr; }
-      header { align-items: flex-start; }
-      .bar-row { grid-template-columns: 1fr; }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <div>
-      <h1>CANalyser Telemetry</h1>
-      <div class="status" id="lastUpdated">Nog niet geladen</div>
-    </div>
-    <div class="auth">
-      <input id="token" type="password" autocomplete="current-password" placeholder="ADMIN_TOKEN">
-      <button id="saveToken">Opslaan</button>
-      <button class="secondary" id="refresh">Ververs</button>
-      <button class="secondary" id="export">Export NDJSON</button>
-    </div>
-  </header>
-  <main>
-    <section class="grid cards">
-      <div class="card"><div class="label">Events</div><div class="value" id="eventCount">-</div></div>
-      <div class="card"><div class="label">Installaties</div><div class="value" id="installationCount">-</div></div>
-      <div class="card"><div class="label">Gem. laden/decoderen</div><div class="value" id="avgDecode">-</div></div>
-      <div class="card"><div class="label">Laatste event</div><div class="value" id="lastEvent">-</div></div>
-    </section>
-    <section class="grid two-col">
-      <div class="panel">
-        <div class="controls">
-          <h2>Events per type</h2>
-          <label class="muted"><input type="checkbox" id="autoRefresh" checked> auto-refresh 30s</label>
-        </div>
-        <div id="eventBars" class="muted">Geen data geladen.</div>
-      </div>
-      <div class="panel">
-        <div class="controls">
-          <h2>Recente events</h2>
-          <span id="status" class="status"></span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Ontvangen</th>
-                <th>Event</th>
-                <th>Versie</th>
-                <th>Installatie</th>
-                <th>Properties</th>
-              </tr>
-            </thead>
-            <tbody id="recentEvents">
-              <tr><td colspan="5" class="muted">Vul je admin token in en klik Ververs.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  </main>
-  <script>
-    const tokenInput = document.getElementById('token');
-    const statusEl = document.getElementById('status');
-    const lastUpdatedEl = document.getElementById('lastUpdated');
-    const savedToken = sessionStorage.getItem('canalyser_admin_token') || '';
-    tokenInput.value = savedToken;
-
-    document.getElementById('saveToken').addEventListener('click', () => {
-      sessionStorage.setItem('canalyser_admin_token', tokenInput.value.trim());
-      load();
-    });
-    document.getElementById('refresh').addEventListener('click', load);
-    document.getElementById('export').addEventListener('click', exportNdjson);
-    setInterval(() => {
-      if (document.getElementById('autoRefresh').checked) load();
-    }, 30000);
-
-    if (savedToken) load();
-
-    async function load() {
-      const token = tokenInput.value.trim();
-      if (!token) {
-        setStatus('Vul je ADMIN_TOKEN in.', true);
-        return;
-      }
-
-      setStatus('Data ophalen...', false);
-      try {
-        const [summary, events] = await Promise.all([
-          fetchJson('/summary', token),
-          fetchJson('/events?limit=100', token)
-        ]);
-        renderSummary(summary);
-        renderEvents(events.events || []);
-        setStatus('Bijgewerkt.', false);
-        lastUpdatedEl.textContent = 'Laatst bijgewerkt: ' + new Date().toLocaleString();
-      } catch (error) {
-        setStatus(error.message || String(error), true);
-      }
-    }
-
-    async function fetchJson(path, token) {
-      const response = await fetch(path, {
-        headers: { authorization: 'Bearer ' + token },
-        cache: 'no-store'
-      });
-      const text = await response.text();
-      let data = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-      if (!response.ok) {
-        throw new Error(data.error || ('HTTP ' + response.status));
-      }
-      return data;
-    }
-
-    function renderSummary(summary) {
-      const totals = summary.totals || {};
-      document.getElementById('eventCount').textContent = number(totals.event_count);
-      document.getElementById('installationCount').textContent = number(totals.installation_count);
-      document.getElementById('lastEvent').textContent = shortDate(totals.last_received_at);
-      renderBars(summary.by_event || []);
-    }
-
-    function renderBars(rows) {
-      const container = document.getElementById('eventBars');
-      if (!rows.length) {
-        container.textContent = 'Nog geen events.';
-        return;
-      }
-      const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
-      container.innerHTML = rows.map((row) => {
-        const count = Number(row.count) || 0;
-        const width = Math.max(2, Math.round((count / max) * 100));
-        return '<div class="bar-row"><code>' + escapeHtml(row.event_name) + '</code><div class="bar-track"><div class="bar" style="width:' + width + '%"></div></div><div>' + number(count) + '</div></div>';
-      }).join('');
-    }
-
-    function renderEvents(events) {
-      const tbody = document.getElementById('recentEvents');
-      if (!events.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="muted">Nog geen events.</td></tr>';
-        document.getElementById('avgDecode').textContent = '-';
-        return;
-      }
-
-      const decodeDurations = events
-        .filter((event) => event.event_name === 'load_decode_completed')
-        .map((event) => Number(event.properties && event.properties.duration_ms))
-        .filter((value) => Number.isFinite(value));
-      document.getElementById('avgDecode').textContent = decodeDurations.length
-        ? formatDuration(decodeDurations.reduce((sum, value) => sum + value, 0) / decodeDurations.length)
-        : '-';
-
-      tbody.innerHTML = events.map((event) => {
-        return '<tr>'
-          + '<td>' + escapeHtml(shortDate(event.received_at)) + '</td>'
-          + '<td><code>' + escapeHtml(event.event_name) + '</code></td>'
-          + '<td>' + escapeHtml(event.app_version || '-') + '</td>'
-          + '<td><code>' + escapeHtml(shortId(event.installation_id)) + '</code></td>'
-          + '<td><code>' + escapeHtml(JSON.stringify(event.properties || {})) + '</code></td>'
-          + '</tr>';
-      }).join('');
-    }
-
-    function exportNdjson() {
-      const token = tokenInput.value.trim();
-      if (!token) {
-        setStatus('Vul je ADMIN_TOKEN in.', true);
-        return;
-      }
-      fetch('/export.ndjson?limit=5000', {
-        headers: { authorization: 'Bearer ' + token },
-        cache: 'no-store'
-      })
-        .then((response) => {
-          if (!response.ok) throw new Error('Export mislukt: HTTP ' + response.status);
-          return response.blob();
-        })
-        .then((blob) => {
-          const href = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = href;
-          link.download = 'canalyser-telemetry.ndjson';
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(href);
-        })
-        .catch((error) => setStatus(error.message || String(error), true));
-    }
-
-    function setStatus(message, isError) {
-      statusEl.textContent = message;
-      statusEl.className = isError ? 'status error' : 'status';
-    }
-
-    function number(value) {
-      const parsed = Number(value || 0);
-      return Number.isFinite(parsed) ? parsed.toLocaleString('nl-NL') : '-';
-    }
-
-    function shortDate(value) {
-      if (!value) return '-';
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('nl-NL');
-    }
-
-    function formatDuration(ms) {
-      if (ms < 1000) return Math.round(ms) + ' ms';
-      if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
-      return (ms / 60000).toFixed(1) + ' min';
-    }
-
-    function shortId(value) {
-      return value ? String(value).slice(0, 10) : '-';
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-      })[char]);
-    }
-  </script>
-</body>
-</html>`;

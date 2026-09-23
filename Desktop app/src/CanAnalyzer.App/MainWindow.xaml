@@ -22,6 +22,7 @@
                 <MenuItem Header="_Annuleren" Command="{Binding CancelCommand}" />
                 <Separator />
                 <MenuItem Header="Export _CSV..." Command="{Binding ExportDecodedCsvCommand}" />
+                <MenuItem Header="Export _analyses..." Command="{Binding ExportAnalysesCommand}" />
                 <MenuItem Header="Export _Layout..." Command="{Binding ExportLayoutCommand}" />
                 <MenuItem Header="Import L_ayout..." Command="{Binding ImportLayoutCommand}" />
                 <Separator />
@@ -52,12 +53,24 @@
                 <Button Content="Annuleren" Command="{Binding CancelCommand}" />
                 <Separator />
                 <Button Content="Export CSV" Command="{Binding ExportDecodedCsvCommand}" />
+                <Button Content="Export analyses" Command="{Binding ExportAnalysesCommand}" />
                 <Button Content="Export Layout" Command="{Binding ExportLayoutCommand}" />
                 <Button Content="Import Layout" Command="{Binding ImportLayoutCommand}" />
             </ToolBar>
         </ToolBarTray>
 
-        <StatusBar DockPanel.Dock="Bottom">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="240" />
+                <RowDefinition Height="6" />
+                <RowDefinition Height="125" MinHeight="38" />
+            </Grid.RowDefinitions>
+            <GridSplitter x:Name="InfoResizeGrip" Grid.Row="1" Height="6" HorizontalAlignment="Stretch"
+                          Cursor="SizeNS" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                          Background="#FFD0D0D0" KeyboardIncrement="10"
+                          ToolTip="Sleep om de hoogte van de informatiebalk te wijzigen"
+                          AutomationProperties.Name="Hoogte informatiebalk" />
+        <StatusBar Grid.Row="2" VerticalContentAlignment="Stretch">
             <StatusBarItem>
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                     <controls:TwistedWireLoader Width="52"
@@ -81,22 +94,31 @@
                              Value="{Binding ProgressValue}" />
             </StatusBarItem>
             <Separator />
-            <StatusBarItem>
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="Fouten oplossen"
+            <StatusBarItem HorizontalContentAlignment="Stretch">
+                <DockPanel>
+                    <Button DockPanel.Dock="Left" Content="Fouten oplossen"
                             Command="{Binding RepairPartialImportCommand}"
                             Visibility="{Binding HasRepairablePartialImport, Converter={StaticResource BoolToVisibilityConverter}}"
                             Margin="0,0,10,0"
                             Padding="10,2"
                             ToolTip="Open de herstelwizard voor deze PARTIAL-import." />
-                    <TextBlock Text="{Binding StatusText}"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
-                </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBlock Text="{Binding StatusText}" />
+                    </ScrollViewer>
+                </DockPanel>
             </StatusBarItem>
         </StatusBar>
 
         <TabControl>
+            <TabControl.Style>
+                <Style TargetType="TabControl">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                            <Setter Property="IsEnabled" Value="False" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TabControl.Style>
             <TabItem Header="Analyse">
                 <views:AnalysisView DataContext="{Binding Analysis}" />
             </TabItem>
@@ -116,5 +138,6 @@
                 <views:SettingsDiagnosticsView DataContext="{Binding SettingsDiagnostics}" />
             </TabItem>
         </TabControl>
+        </Grid>
     </DockPanel>
 </Window>

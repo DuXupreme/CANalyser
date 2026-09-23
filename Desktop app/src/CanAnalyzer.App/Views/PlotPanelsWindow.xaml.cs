@@ -48,6 +48,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         DateTimeOffset? startTimeUtc)
     {
         InitializeComponent();
+        var history = new PlotInteractionHistory(this, () => Panels.Select(p => p.PlotModel));
+        Panels.CollectionChanged += (_, _) => history.Clear();
         _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
         _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 200_000);
         _useDownsampling = useDownsampling;
@@ -851,6 +853,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
             for (var i = 0; i < x.Length; i++)
             {
+                if (i > 0 && series.Gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) stair.Points.Add(DataPoint.Undefined);
                 stair.Points.Add(new DataPoint(x[i], y[i]));
             }
 
@@ -870,7 +873,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
         for (var i = 0; i < x.Length; i++)
         {
-            line.Points.Add(new DataPoint(x[i], y[i]));
+            if (i > 0 && series.Gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) line.Points.Add(DataPoint.Undefined);
+                line.Points.Add(new DataPoint(x[i], y[i]));
         }
 
         return line;

@@ -123,6 +123,20 @@ public sealed class BranchBehaviorTests
     }
 
     [Fact]
+    public void RawFrameFilterCanMatchAnExactPayloadByteByZeroBasedIndex()
+    {
+        var frames = new[]
+        {
+            new RawCanFrame(0, 1, 2, [0x10, 0x7F], "Rx", "CAN1", false, FrameIndex: 0),
+            new RawCanFrame(1, 1, 2, [0x7F, 0x10], "Rx", "CAN1", false, FrameIndex: 1),
+            new RawCanFrame(2, 1, 1, [0x10], "Rx", "CAN1", false, FrameIndex: 2)
+        };
+        var result = new RawFrameFilterService().Apply(frames, new RawFrameFilterOptions { ByteIndex = 1, ByteValue = 0x7F });
+        var match = Assert.Single(result);
+        Assert.Equal(0, match.FrameIndex);
+    }
+
+    [Fact]
     public void AnalyticsEdgeCasesReportRisingFallingEmptyAndResourceLimit()
     {
         var service = new JoystickAnalyticsService();

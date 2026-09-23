@@ -71,6 +71,27 @@ https://canalyser-telemetry.<your-subdomain>.workers.dev/dashboard
 
 Paste `ADMIN_TOKEN` once. The dashboard stores it in browser `sessionStorage`, fetches `/summary` and `/events`, and refreshes every 30 seconds.
 
+The Dutch usage overview includes period filters (7, 30, 90 days or all time),
+feature rankings, a category donut, daily activity, load outcomes, app versions,
+and searchable recent activity with readable event and property labels.
+All totals, unique installation counts and average load durations are calculated
+over the complete selected period. Only the recent activity table is limited to
+100 events. Periods use receipt time and UTC calendar days, including today.
+
+Feature actions exclude startup, updates, failed loads and cancelled loads.
+An installation can perform an action repeatedly; installation counts are not
+person counts. Category installation counts are deduplicated across actions.
+Only already instrumented features appear. The actuator CSV comparison event is
+also accepted by the receiver. Display labels live in `src/event-catalog.js`;
+stored events and the technical NDJSON format remain unchanged.
+
+`GET /summary?days=30` and `GET /events?days=30&limit=100` select a period;
+omitting `days` preserves the all-time API default. NDJSON export remains
+independent of dashboard filters (the dashboard downloads the first 5,000 events).
+
+Run `npm test` with Node.js 24+ for SQLite-backed aggregate, period, auth and
+export checks. Run `npx wrangler deploy --dry-run` to validate the Worker bundle.
+
 Public ingest:
 
 ```text

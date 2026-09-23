@@ -44,6 +44,9 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export met relatieve én absolute meettijd
+- Actief gebruik en batterijduur in Analyse: instelbare detectie op motor-RPM,
+  BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
+  SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
 - Eén los online bestand is altijd toegestaan; meerdere bestanden alleen als hun deelnummers opeenvolgen en logger plus sessie exact gelijk zijn. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
 - Identieke online selecties worden maximaal zeven dagen lokaal hergebruikt; oude bestanden worden automatisch verwijderd en de cache wordt tot circa 2 GB begrensd.
@@ -137,6 +140,44 @@ Actuator Testbench runs vergelijken:
 Tests:
 
 - `dotnet test src/CanAnalyzer.Tests/CanAnalyzer.Tests.csproj`
+
+### Actief gebruik en batterijduur
+
+Open in **Analyse** het paneel **Actief gebruik en batterijduur** en klik na het
+controleren van de instellingen op **Bereken actief gebruik**. De tijdvelden
+bovenaan begrenzen ook deze analyse; plotzoom, frame-ID-filter, offsets en
+downsampling hebben geen invloed op de berekening uit de oorspronkelijke signalen.
+
+- Kies een gemeten activiteitssignaal: bijvoorbeeld motor-RPM, BMS current of
+  actuatorkracht. Herkenbare signalen worden voorgeselecteerd. Grenswaarden van
+  100 rpm, 5 A en 1000 N zijn alleen startwaarden; controleer de gedecodeerde eenheid
+  en de grens voor je machine. Bij stroom kies je de positieve of negatieve
+  ontlaadrichting van het BMS; beide richtingen tellen ook laadstroom mee.
+- Selecteer een SOC-signaal op een schaal van 0–100%. Als alternatief voor een
+  activiteitssignaal kan **Activiteit afleiden uit SOC-daling** worden aangevinkt.
+  Dat gebruikt standaard vensters van 60 s en een daling van 5 procentpunt/uur.
+- Een optioneel aan/uit-signaal bepaalt aan-tijd. Zonder dit signaal is de geldige
+  meetdekking een expliciet gelabelde schatting van aan-tijd. Onbekende activiteit
+  tijdens gemeten aan-tijd maakt het getoonde gebruiksaandeel een ondergrens.
+- Korte, bekende pauzes binnen een werkperiode tellen mee als actief gebruik
+  (standaard maximaal 10 s); werkperiodes korter dan 3 s worden verworpen. Deze
+  grenzen zijn instelbaar. Importgaten en sampleafstanden boven de ingestelde
+  limiet (standaard 5 s) worden nooit overbrugd of als stilstand geboekt.
+- De bruikbare capaciteit staat standaard op **15 kWh**, de SOC-reserve op **20%**.
+  Energie is een schatting: `SOC-afname / 100 × bruikbare kWh`. Per toestand wordt
+  deze energie alleen gedeeld door tijd met overeenkomstige SOC-dekking. Het
+  netto verschil tussen begin- en eind-SOC wordt apart getoond en kan ook daling
+  over onbekende periodes bevatten. SOC-stijging wordt afzonderlijk gerapporteerd.
+- Batterijduur wordt geschat voor continu actief gebruik en voor dezelfde gemeten
+  verhouding actief/inactief, inclusief resterende tijd tot de reserve. Daarvoor
+  is minstens 90% SOC-dekking per gebruikte toestand vereist. Onbekende
+  gebruiksverdeling, geen meetbare daling of meer dan 0,5 procentpunt SOC-stijging
+  leveren geen voorspelling op. Een verouderde laatste SOC geeft geen resterende
+  tijd. De werkelijke duur kan door belasting, temperatuur en BMS-correcties afwijken.
+
+De tijdlijn onder de resultaten laat actieve, inactieve, uitgeschakelde en
+onbekende periodes zien. Gewijzigde instellingen wissen de vorige resultaten,
+zodat oude cijfers niet bij nieuwe instellingen blijven staan.
 
 ## 6. Installer / Distribution (Send 1 File)
 

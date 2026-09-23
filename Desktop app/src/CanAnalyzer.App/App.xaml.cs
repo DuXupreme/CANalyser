@@ -10,6 +10,7 @@ using CanAnalyzer.Core.Interfaces;
 using CanAnalyzer.Core.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Windows.Threading;
 
 namespace CanAnalyzer.App;
 
@@ -37,9 +38,46 @@ public partial class App : Application
         window.ContentRendered += CloseSplash;
         window.Show();
 
+        RegisterCrashTelemetry();
+
         // Niet-blokkerende update-controle: bij een nieuwe versie krijgt de
         // gebruiker een prompt. Faalt stil bij geen internet / geen feed.
         _ = CheckForUpdatesOnStartupAsync();
+    }
+
+    private void RegisterCrashTelemetry()
+    {
+        if (_serviceProvider is null) return;
+        var telemetry = _serviceProvider.GetRequiredService<ITelemetryService>();
+        DispatcherUnhandledException += (_, args) =>
+        {
+            args.Handled = false;
+            SendCrashTelemetry(telemetry, "dispatcher_unhandled_exception", args.Exception, "ui_dispatcher");
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            SendCrashTelemetry(telemetry, "app_unhandled_exception", args.ExceptionObject as Exception, "app_domain");
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            SendCrashTelemetry(telemetry, "unobserved_task_exception", args.Exception, "task_scheduler");
+            args.SetObserved();
+        };
+    }
+
+    private static void SendCrashTelemetry(ITelemetryService telemetry, string eventName, Exception? exception, string source)
+    {
+        try
+        {
+            var task = telemetry.TrackEventAsync(eventName, new Dictionary<string, object?>
+            {
+                ["source"] = source,
+                ["exception_type"] = exception?.GetType().Name ?? "unknown",
+                ["exception_message"] = exception?.Message,
+                ["stack_present"] = !string.IsNullOrWhiteSpace(exception?.StackTrace),
+                ["process_terminating"] = eventName == "app_unhandled_exception"
+            });
+            task.Wait(TimeSpan.FromSeconds(2));
+        }
+        catch { /* telemetry must never prevent shutdown */ }
     }
 
     private async Task CheckForUpdatesOnStartupAsync()

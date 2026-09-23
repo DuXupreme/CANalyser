@@ -17,223 +17,234 @@ public sealed class CanDecodingService : ICanDecodingService
         CancellationToken cancellationToken)
     {
         var decodedSamples = new DiskBackedDecodedSampleStore();
-        var summaryCounts = new Dictionary<(uint FrameId, string MessageName), int>();
-        var unmatchedCounter = new Dictionary<uint, int>();
-        var decodeErrorCounter = new Dictionary<uint, int>();
-        var decodeFailureCounter = new Dictionary<DecodeFailureKey, int>();
-        var decodeFailureKeys = new Dictionary<DecodeFailureIdentity, DecodeFailureKey>();
-        var ambiguousCounter = new Dictionary<uint, int>();
-
-        var exactMap = new Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>>();
-        var pgnToMessages = new Dictionary<uint, List<DbcMessage>>();
-
-        foreach (var message in database.Messages)
+        try
         {
-            var normalized = message.NormalizedFrameId;
-            var key = (message.IsExtendedFrame, normalized);
-            if (!exactMap.TryGetValue(key, out var list))
-            {
-                list = [];
-                exactMap[key] = list;
-            }
+            var uniqueRawIds = new HashSet<uint>();
+            var summaryCounts = new Dictionary<(uint FrameId, string MessageName), int>();
+            var unmatchedCounter = new Dictionary<uint, int>();
+            var decodeErrorCounter = new Dictionary<uint, int>();
+            var decodeFailureCounter = new Dictionary<DecodeFailureKey, int>();
+            var decodeFailureKeys = new Dictionary<DecodeFailureIdentity, DecodeFailureKey>();
+            var ambiguousCounter = new Dictionary<uint, int>();
 
-            list.Add(message);
+            var exactMap = new Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>>();
+            var pgnToMessages = new Dictionary<uint, List<DbcMessage>>();
 
-            if (message.IsExtendedFrame)
+            foreach (var message in database.Messages)
             {
-                var pgn = CanIdUtilities.ExtractJ1939Pgn(normalized);
-                if (pgn.HasValue)
+                var normalized = message.NormalizedFrameId;
+                var key = (message.IsExtendedFrame, normalized);
+                if (!exactMap.TryGetValue(key, out var list))
                 {
-                    if (!pgnToMessages.TryGetValue(pgn.Value, out var pgnList))
-                    {
-                        pgnList = [];
-                        pgnToMessages[pgn.Value] = pgnList;
-                    }
+                    list = [];
+                    exactMap[key] = list;
+                }
 
-                    pgnList.Add(message);
+                list.Add(message);
+
+                if (message.IsExtendedFrame)
+                {
+                    var pgn = CanIdUtilities.ExtractJ1939Pgn(normalized);
+                    if (pgn.HasValue)
+                    {
+                        if (!pgnToMessages.TryGetValue(pgn.Value, out var pgnList))
+                        {
+                            pgnList = [];
+                            pgnToMessages[pgn.Value] = pgnList;
+                        }
+
+                        pgnList.Add(message);
+                    }
                 }
             }
-        }
 
-        // Prefer the most specific definition when a bus pads a shorter DBC
-        // message to a larger payload (a common pattern for Classic CAN).
-        foreach (var messages in exactMap.Values)
-        {
-            messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
-        }
-
-        foreach (var messages in pgnToMessages.Values)
-        {
-            messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
-        }
-
-        var reportStride = Math.Max(500, rawFrames.Count / 100);
-        var i = 0;
-        foreach (var frame in rawFrames)
-        {
-            var frameNumber = i++;
-            cancellationToken.ThrowIfCancellationRequested();
-            if (frameNumber % reportStride == 0)
+            // Prefer the most specific definition when a bus pads a shorter DBC
+            // message to a larger payload (a common pattern for Classic CAN).
+            foreach (var messages in exactMap.Values)
             {
-                var percent = Math.Clamp(20 + (int)Math.Round((frameNumber / (double)Math.Max(1, rawFrames.Count)) * 60.0), 20, 80);
-                progress?.Report(new LoadProgress($"DBC decode: frame {frameNumber:N0} / {rawFrames.Count:N0}", percent));
+                messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
             }
 
-            var rawFrameId = frame.Id;
-            var isExtended = frame.IsExtended || rawFrameId > 0x7FF;
-            var normalizedFrameId = CanIdUtilities.NormalizeDbcFrameId(rawFrameId, isExtended);
-
-            var candidates = new List<DbcMessage>();
-            if (exactMap.TryGetValue((isExtended, normalizedFrameId), out var exact))
+            foreach (var messages in pgnToMessages.Values)
             {
-                candidates.AddRange(exact);
+                messages.Sort(static (left, right) => right.Dlc.CompareTo(left.Dlc));
             }
-            else if (isExtended)
+
+            var reportStride = Math.Max(500, rawFrames.Count / 100);
+            var i = 0;
+            foreach (var frame in rawFrames)
             {
-                var pgn = CanIdUtilities.ExtractJ1939Pgn(normalizedFrameId);
-                if (pgn.HasValue && pgnToMessages.TryGetValue(pgn.Value, out var pgnMatches))
+                var frameNumber = i++;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (frameNumber % reportStride == 0)
                 {
-                    if (pgnMatches.Count == 1)
+                    var percent = Math.Clamp(20 + (int)Math.Round((frameNumber / (double)Math.Max(1, rawFrames.Count)) * 60.0), 20, 80);
+                    progress?.Report(new LoadProgress($"DBC decode: frame {frameNumber:N0} / {rawFrames.Count:N0}", percent));
+                }
+
+                var rawFrameId = frame.Id;
+                uniqueRawIds.Add(rawFrameId);
+                var isExtended = frame.IsExtended || rawFrameId > 0x7FF;
+                var normalizedFrameId = CanIdUtilities.NormalizeDbcFrameId(rawFrameId, isExtended);
+
+                IReadOnlyList<DbcMessage> candidates = [];
+                if (exactMap.TryGetValue((isExtended, normalizedFrameId), out var exact))
+                {
+                    candidates = exact;
+                }
+                else if (isExtended)
+                {
+                    var pgn = CanIdUtilities.ExtractJ1939Pgn(normalizedFrameId);
+                    if (pgn.HasValue && pgnToMessages.TryGetValue(pgn.Value, out var pgnMatches))
                     {
-                        candidates.Add(pgnMatches[0]);
+                        if (pgnMatches.Count == 1)
+                        {
+                            candidates = pgnMatches;
+                        }
+                        else
+                        {
+                            Count(ambiguousCounter, rawFrameId);
+                            continue;
+                        }
                     }
-                    else
+                }
+
+                if (candidates.Count == 0)
+                {
+                    Count(unmatchedCounter, rawFrameId);
+                    continue;
+                }
+
+                Dictionary<string, DecodedSignalValue>? decoded = null;
+                DbcMessage? decodedMessage = null;
+                string? failingSignalName = null;
+                var hasUsableCandidate = false;
+                var hasCompatibleLengthCandidate = false;
+                foreach (var message in candidates)
+                {
+                    if (message.SuppressDecoding || message.IsExtendedFrame != isExtended)
                     {
-                        Count(ambiguousCounter, rawFrameId);
                         continue;
                     }
-                }
-            }
 
-            if (candidates.Count == 0)
-            {
-                Count(unmatchedCounter, rawFrameId);
-                continue;
-            }
+                    hasUsableCandidate = true;
+                    // Extra trailing payload bytes do not invalidate signals that are
+                    // fully described by a shorter DBC message. A shorter frame is
+                    // still rejected because signal extraction would be incomplete.
+                    if (message.Dlc > frame.PayloadLength)
+                    {
+                        continue;
+                    }
 
-            Dictionary<string, DecodedSignalValue>? decoded = null;
-            DbcMessage? decodedMessage = null;
-            string? failingSignalName = null;
-            var hasUsableCandidate = false;
-            var hasCompatibleLengthCandidate = false;
-            foreach (var message in candidates)
-            {
-                if (message.SuppressDecoding || message.IsExtendedFrame != isExtended)
-                {
-                    continue;
-                }
+                    hasCompatibleLengthCandidate = true;
+                    if (TryDecodeMessage(message, frame.Data, out var strict, out var candidateFailingSignal))
+                    {
+                        decoded = strict;
+                        decodedMessage = message;
+                        break;
+                    }
 
-                hasUsableCandidate = true;
-                // Extra trailing payload bytes do not invalidate signals that are
-                // fully described by a shorter DBC message. A shorter frame is
-                // still rejected because signal extraction would be incomplete.
-                if (message.Dlc > frame.PayloadLength)
-                {
-                    continue;
+                    failingSignalName ??= candidateFailingSignal;
                 }
 
-                hasCompatibleLengthCandidate = true;
-                if (TryDecodeMessage(message, frame.Data, out var strict, out var candidateFailingSignal))
+                if (decodedMessage is null || decoded is null)
                 {
-                    decoded = strict;
-                    decodedMessage = message;
-                    break;
-                }
-
-                failingSignalName ??= candidateFailingSignal;
-            }
-
-            if (decodedMessage is null || decoded is null)
-            {
-                Count(decodeErrorCounter, rawFrameId);
-                var failureKind = !hasUsableCandidate
-                    ? candidates.All(message => message.SuppressDecoding)
-                        ? DecodeFailureKind.SuppressedDefinition
-                        : DecodeFailureKind.FrameFormatMismatch
-                    : !hasCompatibleLengthCandidate
-                        ? DecodeFailureKind.DlcMismatch
-                        : DecodeFailureKind.SignalExtraction;
-                var failureIdentity = new DecodeFailureIdentity(
-                    rawFrameId,
-                    isExtended,
-                    failureKind,
-                    frame.PayloadLength,
-                    failingSignalName);
-                if (!decodeFailureKeys.TryGetValue(failureIdentity, out var failureKey))
-                {
-                    var diagnosticCandidates = hasUsableCandidate
-                        ? candidates.Where(message => !message.SuppressDecoding && message.IsExtendedFrame == isExtended)
-                        : candidates;
-                    var materializedCandidates = diagnosticCandidates.ToArray();
-                    failureKey = new DecodeFailureKey(
+                    Count(decodeErrorCounter, rawFrameId);
+                    var failureKind = !hasUsableCandidate
+                        ? candidates.All(message => message.SuppressDecoding)
+                            ? DecodeFailureKind.SuppressedDefinition
+                            : DecodeFailureKind.FrameFormatMismatch
+                        : !hasCompatibleLengthCandidate
+                            ? DecodeFailureKind.DlcMismatch
+                            : DecodeFailureKind.SignalExtraction;
+                    var failureIdentity = new DecodeFailureIdentity(
                         rawFrameId,
                         isExtended,
-                        materializedCandidates.FirstOrDefault()?.NormalizedFrameId,
-                        string.Join(
-                            "\u001F",
-                            materializedCandidates.Select(message => message.Name).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)),
                         failureKind,
                         frame.PayloadLength,
-                        string.Join(",", materializedCandidates.Select(message => message.Dlc).Distinct().Order()),
                         failingSignalName);
-                    decodeFailureKeys[failureIdentity] = failureKey;
-                }
+                    if (!decodeFailureKeys.TryGetValue(failureIdentity, out var failureKey))
+                    {
+                        var diagnosticCandidates = hasUsableCandidate
+                            ? candidates.Where(message => !message.SuppressDecoding && message.IsExtendedFrame == isExtended)
+                            : candidates;
+                        var materializedCandidates = diagnosticCandidates.ToArray();
+                        failureKey = new DecodeFailureKey(
+                            rawFrameId,
+                            isExtended,
+                            materializedCandidates.FirstOrDefault()?.NormalizedFrameId,
+                            string.Join(
+                                "\u001F",
+                                materializedCandidates.Select(message => message.Name).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)),
+                            failureKind,
+                            frame.PayloadLength,
+                            string.Join(",", materializedCandidates.Select(message => message.Dlc).Distinct().Order()),
+                            failingSignalName);
+                        decodeFailureKeys[failureIdentity] = failureKey;
+                    }
 
-                Count(decodeFailureCounter, failureKey);
-                continue;
-            }
-
-            Count(summaryCounts, (normalizedFrameId, decodedMessage.Name));
-
-            foreach (var pair in decoded)
-            {
-                if (double.IsNaN(pair.Value.PhysicalValue) || double.IsInfinity(pair.Value.PhysicalValue))
-                {
+                    Count(decodeFailureCounter, failureKey);
                     continue;
                 }
 
-                decodedSamples.Append(
-                    new DecodedSignalSample(
-                        TimestampNanoseconds: frame.TimestampNanoseconds,
-                        FrameIndex: frame.FrameIndex,
-                        SourceLineNumber: frame.SourceLineNumber,
-                        Identity: new SignalIdentity(frame.Channel, frame.FrameFormat, isExtended, normalizedFrameId, decodedMessage.Name, pair.Key),
-                        Value: pair.Value.PhysicalValue,
-                        RawValue: pair.Value.RawValue,
-                        Unit: pair.Value.Unit));
+                Count(summaryCounts, (normalizedFrameId, decodedMessage.Name));
+
+                foreach (var pair in decoded)
+                {
+                    if (double.IsNaN(pair.Value.PhysicalValue) || double.IsInfinity(pair.Value.PhysicalValue))
+                    {
+                        continue;
+                    }
+
+                    decodedSamples.Append(
+                        new DecodedSignalSample(
+                            TimestampNanoseconds: frame.TimestampNanoseconds,
+                            FrameIndex: frame.FrameIndex,
+                            SourceLineNumber: frame.SourceLineNumber,
+                            Identity: new SignalIdentity(frame.Channel, frame.FrameFormat, isExtended, normalizedFrameId, decodedMessage.Name, pair.Key),
+                            Value: pair.Value.PhysicalValue,
+                            RawValue: pair.Value.RawValue,
+                            Unit: pair.Value.Unit));
+                }
+
             }
 
+            decodedSamples.Complete();
+
+            progress?.Report(new LoadProgress("Bouw berichtsamenvatting...", 85));
+
+            var summaries = summaryCounts
+                .Select(pair => new MessageSummary(pair.Key.FrameId, pair.Key.MessageName, pair.Value))
+                .OrderByDescending(item => item.Count)
+                .ThenBy(item => item.FrameId)
+                .ToList();
+
+            var diagnostics = new DecoderDiagnostics(
+                UnmatchedFrameCount: unmatchedCounter.Values.Sum(),
+                UnmatchedUniqueIds: unmatchedCounter.Count,
+                DbcMessageCount: database.Messages.Count,
+                ManualDecodeFrameCount: 0,
+                ManualDecodeUniqueIds: 0,
+                DecodeNote: BuildDecodeDiagnostics(
+                    rawFrames.Count,
+                    uniqueRawIds.Count,
+                    database,
+                    unmatchedCounter,
+                    decodedSamples.Count,
+                    exactMap,
+                    decodeErrorCounter),
+                DecodeErrorFrameCount: decodeErrorCounter.Values.Sum(),
+                AmbiguousFrameCount: ambiguousCounter.Values.Sum(),
+                DecodeFailures: BuildDecodeFailureSummaries(decodeFailureCounter));
+
+            progress?.Report(new LoadProgress("Decode klaar.", 90));
+            return new DecodeResult(decodedSamples, summaries, diagnostics);
         }
-
-        decodedSamples.Complete();
-
-        progress?.Report(new LoadProgress("Bouw berichtsamenvatting...", 85));
-
-        var summaries = summaryCounts
-            .Select(pair => new MessageSummary(pair.Key.FrameId, pair.Key.MessageName, pair.Value))
-            .OrderByDescending(item => item.Count)
-            .ThenBy(item => item.FrameId)
-            .ToList();
-
-        var diagnostics = new DecoderDiagnostics(
-            UnmatchedFrameCount: unmatchedCounter.Values.Sum(),
-            UnmatchedUniqueIds: unmatchedCounter.Count,
-            DbcMessageCount: database.Messages.Count,
-            ManualDecodeFrameCount: 0,
-            ManualDecodeUniqueIds: 0,
-            DecodeNote: BuildDecodeDiagnostics(
-                rawFrames,
-                database,
-                unmatchedCounter,
-                decodedSamples.Count,
-                exactMap,
-                decodeErrorCounter),
-            DecodeErrorFrameCount: decodeErrorCounter.Values.Sum(),
-            AmbiguousFrameCount: ambiguousCounter.Values.Sum(),
-            DecodeFailures: BuildDecodeFailureSummaries(decodeFailureCounter));
-
-        progress?.Report(new LoadProgress("Decode klaar.", 90));
-        return new DecodeResult(decodedSamples, summaries, diagnostics);
+        catch
+        {
+            decodedSamples.Dispose();
+            throw;
+        }
     }
 
     private static bool TryDecodeMessage(
@@ -425,15 +436,14 @@ public sealed class CanDecodingService : ICanDecodingService
     }
 
     private static string BuildDecodeDiagnostics(
-        IReadOnlyList<RawCanFrame> rawFrames,
+        int totalFrames,
+        int uniqueRawIds,
         DbcDatabase database,
         Dictionary<uint, int> unmatchedCounter,
         int decodedRowsCount,
         Dictionary<(bool IsExtended, uint FrameId), List<DbcMessage>> exactMap,
         Dictionary<uint, int> decodeErrorCounter)
     {
-        var totalFrames = rawFrames.Count;
-        var uniqueRawIds = rawFrames.Select(frame => frame.Id).Distinct().Count();
         var unmatchedTotal = unmatchedCounter.Values.Sum();
         var unmatchedUnique = unmatchedCounter.Count;
 

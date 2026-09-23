@@ -232,6 +232,8 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         double thresholdFraction = 0.2,
         int maxPlotPoints = 5000)
     {
+        ValidateDelaySeries(commandSeries);
+        ValidateDelaySeries(responseSeries);
         if (commandSeries.Time.Length < 2 || responseSeries.Time.Length < 2 || commandSeries.Value.Length < 2 || responseSeries.Value.Length < 2)
         {
             return CreateEmptyDelayResult(commandSeries.Label, responseSeries.Label, searchRangeSeconds);
@@ -271,6 +273,10 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var rDynamics = SmoothedDerivative(r, dt);
 
         var maxK = Math.Clamp((int)Math.Round(Math.Max(0.01, searchRangeSeconds) / Math.Max(1e-9, dt)), 1, Math.Max(1, cDynamics.Length - 2));
+        if ((long)n * (2L * maxK + 1) > 50_000_000)
+            throw new InvalidOperationException("Kruiscorrelatie te groot op bronresolutie; kies een korter tijdvenster. Eerste-reactiemeting blijft afzonderlijk beschikbaar.");
+        if (cDynamics.All(v => Math.Abs(v) < 1e-12) || rDynamics.All(v => Math.Abs(v) < 1e-12))
+            throw new InvalidOperationException("Geen dynamiek in commando of feedback; correlatievertraging is niet bepaalbaar.");
         var curve = new List<DelayCorrelationPoint>();
         var bestK = 0;
         var bestCorr = double.NegativeInfinity;
@@ -347,6 +353,8 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         double responseThresholdFraction = 0.02,
         int histogramBins = 30)
     {
+        ValidateDelaySeries(commandSeries);
+        ValidateDelaySeries(responseSeries);
         var frac = Math.Clamp(responseThresholdFraction, 0.001, 0.5);
         if (commandSeries.Time.Length < 2 || responseSeries.Time.Length < 2 || commandSeries.Value.Length < 2 || responseSeries.Value.Length < 2)
         {
@@ -366,16 +374,24 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
         var rspRange = Math.Max(1e-9, Percentile(rspSorted, 0.99) - Percentile(rspSorted, 0.01));
         var responseThreshold = Math.Max(1e-9, rspRange * frac);
 
-        var medianDt = EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length);
-        var minGap = Math.Max(0.02, Math.Min(window * 0.5, medianDt * 4.0));
+        var commandGap = UsageAnalytics.GapLimit(commandSeries.Time);
+        var responseGap = UsageAnalytics.GapLimit(responseSeries.Time);
+        var nextChange = new double[cmdValues.Length];
+        var nextChangeTime = double.PositiveInfinity;
+        for (var i = cmdValues.Length - 1; i >= 0; i--)
+        {
+            nextChange[i] = nextChangeTime;
+            if (i > 0 && Math.Abs(cmdValues[i] - cmdValues[i - 1]) >= stepThreshold)
+                nextChangeTime = commandSeries.Time[i];
+        }
 
         var deadTimes = new List<double>();
         var risingValues = new List<double>();
         var fallingValues = new List<double>();
         var edgeCount = 0;
-        var lastEdgeTime = double.NegativeInfinity;
         for (var i = 1; i < commandSeries.Time.Length; i++)
         {
+            if (commandSeries.Time[i] - commandSeries.Time[i - 1] > commandGap) continue;
             var delta = cmdValues[i] - cmdValues[i - 1];
             if (Math.Abs(delta) < stepThreshold)
             {
@@ -383,22 +399,20 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
             }
 
             var edgeTime = commandSeries.Time[i];
-            if ((edgeTime - lastEdgeTime) < minGap)
-            {
-                continue;
-            }
-
             var direction = Math.Sign(delta);
             if (direction == 0)
             {
                 continue;
             }
 
-            lastEdgeTime = edgeTime;
             edgeCount++;
 
             // Resting feedback value at the moment the command changes (before it could react).
-            var baseline = Lerp(responseSeries.Time, responseSeries.Value, edgeTime);
+            var baselineIndex = UpperBound(responseSeries.Time, edgeTime) - 1;
+            if (baselineIndex < 0 || baselineIndex + 1 >= responseSeries.Time.Length ||
+                responseSeries.Time[baselineIndex + 1] - responseSeries.Time[baselineIndex] > responseGap) continue;
+            // Do not use a future feedback value to construct the pre-reaction baseline.
+            var baseline = responseSeries.Value[baselineIndex];
             var target = baseline + (direction * responseThreshold);
 
             // First feedback sample after the edge that deviates past the threshold in the command direction.
@@ -416,6 +430,11 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
                     break;
                 }
 
+                // A missing interval invalidates this entire event, even if crossing happens later.
+                if (j > 0 && responseSeries.Time[j] - responseSeries.Time[j - 1] > responseGap) break;
+                // Do not attribute a later command's reaction to the current command.
+                if (reactionTime >= nextChange[i]) break;
+
                 var value = responseSeries.Value[j];
                 var crossed = direction > 0 ? value >= target : value <= target;
                 if (!crossed)
@@ -426,9 +445,7 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
                 var previousTime = j > 0 ? Math.Max(edgeTime, responseSeries.Time[j - 1]) : edgeTime;
                 var previousValue = previousTime == edgeTime ? baseline : responseSeries.Value[j - 1];
                 var interval = reactionTime - previousTime;
-                var allowedGap = 5d * Math.Max(
-                    EstimateMedianDt(commandSeries.Time, commandSeries.Time.Length),
-                    EstimateMedianDt(responseSeries.Time, responseSeries.Time.Length));
+                var allowedGap = responseGap;
                 if (allowedGap > 0 && interval > allowedGap) break;
                 var valueDelta = value - previousValue;
                 var fraction = Math.Abs(valueDelta) <= 1e-15 ? 1d : Math.Clamp((target - previousValue) / valueDelta, 0d, 1d);
@@ -472,6 +489,14 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
     {
         var empty = new DelayEventStatistics(0, null, null, null, null);
         return new FirstResponseDelayResult(commandLabel, responseLabel, 0, 0, thresholdFraction, null, null, null, null, empty, empty, []);
+    }
+
+    private static void ValidateDelaySeries(SignalSeries series)
+    {
+        for (var i = 0; i < series.Time.Length; i++)
+            if (!double.IsFinite(series.Time[i]) || !double.IsFinite(series.Value[i]) ||
+                (i > 0 && series.Time[i] <= series.Time[i - 1]))
+                throw new ArgumentException($"Signaal {series.Label}: delay vereist eindige waarden en strikt oplopende tijd; kies een geldige meetperiode.");
     }
 
     public ButterflyKinematicsResult AnalyzeButterflyKinematics(

@@ -9,6 +9,11 @@ public sealed class RawFrameFilterOptions
 
     public string? DataContainsHex { get; set; }
 
+    /// <summary>Optional zero-based payload byte filter. Value is compared exactly (0..255).</summary>
+    public int? ByteIndex { get; set; }
+
+    public byte? ByteValue { get; set; }
+
     public string? TypeContains { get; set; }
 
     public string? ChannelContains { get; set; }

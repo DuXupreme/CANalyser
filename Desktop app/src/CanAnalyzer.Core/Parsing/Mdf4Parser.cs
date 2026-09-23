@@ -195,7 +195,23 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
             var nonDataLines = parsedFiles.Sum(static file => file.Result.Report.NonDataLines);
             var acceptedLines = parsedFiles.Sum(static file => file.Result.Report.AcceptedLines);
             var rejectedLines = parsedFiles.Sum(static file => file.Result.Report.RejectedLines);
-            var report = new ImportReport(Name, totalLines, nonDataLines, acceptedLines, rejectedLines, issues, mode);
+            var ranges = ordered.Where(file => file.Result.Frames.Count > 0).Select(file =>
+            {
+                var offset = file.Result.StartTimeUtc is null ? 0L : checked((file.Result.StartTimeUtc.Value - earliest).Ticks * 100L);
+                return (Start: checked(offset + file.Result.Frames.Min(frame => frame.TimestampNanoseconds)),
+                        End: checked(offset + file.Result.Frames.Max(frame => frame.TimestampNanoseconds)));
+            }).OrderBy(range => range.Start).ToArray();
+            var gaps = new List<MeasurementGap>();
+            if (ranges.Length > 0)
+            {
+                var end = ranges[0].End;
+                foreach (var range in ranges.Skip(1))
+                {
+                    if (range.Start > end) gaps.Add(new(end / 1e9, range.Start / 1e9));
+                    end = Math.Max(end, range.End);
+                }
+            }
+            var report = new ImportReport(Name, totalLines, nonDataLines, acceptedLines, rejectedLines, issues, mode) { Gaps = gaps };
             var completeness = parsedFiles.Any(static file => file.Result.Completeness == DatasetCompleteness.Partial) || report.HasErrors
                 ? DatasetCompleteness.Partial
                 : DatasetCompleteness.Complete;
