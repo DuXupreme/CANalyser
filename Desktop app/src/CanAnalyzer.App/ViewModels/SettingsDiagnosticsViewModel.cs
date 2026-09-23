@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using CanAnalyzer.Core.Domain;
@@ -43,6 +44,17 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     [ObservableProperty]
     private string _integritySummary = "Nog geen dataset geladen.";
+
+    [ObservableProperty]
+    private string _currentMeasurementSummary = "Geen meting geopend.";
+
+    [ObservableProperty]
+    private string _currentSourceLogPath = string.Empty;
+
+    [ObservableProperty]
+    private string _currentSourceDbcPath = string.Empty;
+
+    public ObservableCollection<DatasetSourceRow> CurrentSourceFiles { get; } = [];
 
     [ObservableProperty]
     private string _lastErrorDetails = string.Empty;
@@ -112,7 +124,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         IsCacheBusy = true;
         RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
         ClearOnlineCacheCommand.NotifyCanExecuteChanged();
-        var preserve = LogFilePath;
+        var preserve = string.IsNullOrEmpty(CurrentSourceLogPath) ? LogFilePath : CurrentSourceLogPath;
         try
         {
             OnlineCacheStatus = clear ? "Downloadcache opruimen..." : "Opslag berekenen...";
@@ -184,6 +196,25 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void UpdateDataset(CanDataset dataset)
     {
+        CurrentSourceFiles.Clear();
+        foreach (var source in dataset.SourceFiles.OrderBy(source => source.Logger, StringComparer.Ordinal)
+                     .ThenBy(source => source.Session, StringComparer.Ordinal).ThenBy(source => source.Name, StringComparer.Ordinal))
+            CurrentSourceFiles.Add(new DatasetSourceRow(source));
+        CurrentSourceLogPath = dataset.SourceLogPath;
+        CurrentSourceDbcPath = dataset.SourceDbcPath;
+        var machines = CurrentSourceFiles.Select(row => row.Machine).Distinct(StringComparer.Ordinal);
+        var loggers = CurrentSourceFiles.Select(row => row.Logger).Distinct(StringComparer.Ordinal);
+        var sessions = dataset.SourceFiles.Where(source => source.Session is not null)
+            .Select(source => (source.Logger, source.Session)).Distinct().Count();
+        CurrentMeasurementSummary =
+            $"Machine: {string.Join(", ", machines.DefaultIfEmpty("Onbekend"))}\n" +
+            $"Logger: {string.Join(", ", loggers.DefaultIfEmpty("Niet beschikbaar"))}\n" +
+            $"Geopend: {CurrentSourceFiles.Count:N0} logbestand(en) · {sessions:N0} herkenbare sessie(s)\n" +
+            $"Sessies: {string.Join(", ", dataset.SourceFiles.Select(source => source.Session).Where(session => session is not null).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).DefaultIfEmpty("Niet beschikbaar"))}\n" +
+            (dataset.StartTimeUtc is { } sourceStart
+                ? $"Meetstart: {MeasurementTimestamp.FormatLocal(sourceStart, dataset.FirstRecordOffsetNanoseconds)}\n"
+                : "Meetstart: niet beschikbaar in de bron\n") +
+            $"Dataset: {dataset.Completeness.ToString().ToUpperInvariant()}";
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
         var report = dataset.ImportReport;
         var measurementStart = dataset.StartTimeUtc is { } startTimeUtc
@@ -207,6 +238,17 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         {
             MessageSummaries.Add(summary);
         }
+    }
+
+    public void ClearCurrentDataset()
+    {
+        CurrentSourceFiles.Clear();
+        CurrentMeasurementSummary = "Geen meting geopend.";
+        CurrentSourceLogPath = string.Empty;
+        CurrentSourceDbcPath = string.Empty;
+        IntegritySummary = "Nog geen dataset geladen.";
+        DecodeDiagnostics = string.Empty;
+        MessageSummaries.Clear();
     }
 
     public void WriteBackToSettings(AppSettings settings)

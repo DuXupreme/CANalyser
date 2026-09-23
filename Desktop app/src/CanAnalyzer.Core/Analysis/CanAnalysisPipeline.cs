@@ -123,6 +123,10 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
                 combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
             dataset.OriginalParseResult = parseResult;
             dataset.LoadTimings = new LoadTimings(parseMs, dbcMs, decodeMs, hashMs, timer.ElapsedMilliseconds);
+            dataset.SourceLogPath = Path.GetFullPath(logFilePath);
+            dataset.SourceDbcPath = Path.GetFullPath(dbcFilePath);
+            dataset.SourceFiles = parseResult.SourceFiles.Count > 0
+                ? parseResult.SourceFiles : [SourceLogFile.FromLocalFile(dataset.SourceLogPath)];
             _logger.LogInformation("Load phases (ms): parse={Parse}, dbc={Dbc}, decode={Decode}, hash={Hash}, dataset={Dataset}",
                 parseMs, dbcMs, decodeMs, hashMs, dataset.LoadTimings.DatasetMilliseconds);
             progress?.Report(new LoadProgress("Klaar.", 100));

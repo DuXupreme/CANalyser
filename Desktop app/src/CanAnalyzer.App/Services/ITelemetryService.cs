@@ -17,4 +17,12 @@ public interface ITelemetryService
         string eventName,
         IReadOnlyDictionary<string, object?>? properties = null,
         CancellationToken cancellationToken = default);
+
+    string BeginCriticalOperation(
+        string operationName,
+        IReadOnlyDictionary<string, object?>? properties = null);
+
+    void CompleteCriticalOperation(string operationId);
+
+    Task ReportInterruptedOperationAsync(CancellationToken cancellationToken = default);
 }

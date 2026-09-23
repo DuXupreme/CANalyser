@@ -31,7 +31,23 @@ public sealed partial class DbcLoader : IDbcLoader
 
     public async Task<DbcDatabase> LoadAsync(string filePath, CancellationToken cancellationToken)
     {
-        var text = await File.ReadAllTextAsync(filePath, cancellationToken).ConfigureAwait(false);
+        var isDbf = Path.GetExtension(filePath).Equals(".dbf", StringComparison.OrdinalIgnoreCase);
+        var text = isDbf
+            ? await File.ReadAllTextAsync(filePath, System.Text.Encoding.Latin1, cancellationToken).ConfigureAwait(false)
+            : await File.ReadAllTextAsync(filePath, cancellationToken).ConfigureAwait(false);
+        if (isDbf)
+        {
+            var dbf = BusmasterDbfSerializer.Parse(text);
+            var dbfIssues = dbf.Issues.ToList();
+            ValidateSignalLayouts(dbf.Messages, dbfIssues);
+            return new DbcDatabase
+            {
+                Messages = dbf.Messages,
+                Issues = dbfIssues,
+                IsLosslessWritable = false
+            };
+        }
+
         var observer = new SimpleFailureObserver();
         Dbc parsed;
         lock (ParserLock)

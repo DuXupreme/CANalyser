@@ -11,6 +11,29 @@ registerHooks({ load(url, context, nextLoad) {
 } });
 const { default: worker } = await import('../src/index.js');
 
+test('crash events are accepted, deduplicated and shown as errors', async () => {
+  const f = fixture();
+  for (const name of ['app_crashed', 'app_unexpected_exit', 'previous_operation_interrupted']) {
+    const payload = { event_id: name + '-test', event_name: name, timestamp_utc: new Date().toISOString(),
+      app_version: '2.4.3-test', installation_id: 'test', session_id: 'previous-session',
+      properties: { source: 'dispatcher', exception_type: 'InvalidOperationException' } };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await worker.fetch(new Request('https://test.local/events', {
+        method: 'POST', body: JSON.stringify(payload), headers: { 'content-type': 'application/json' }
+      }), { DB: f.DB });
+      assert.equal(response.status, 200);
+    }
+  }
+  const rows = f.sqlite.prepare('SELECT event_name FROM telemetry_events').all();
+  assert.equal(rows.length, 3);
+  const { EVENT_CATALOG } = await import('../src/event-catalog.js');
+  assert.equal(EVENT_CATALOG.app_crashed.outcome, 'error');
+  assert.equal(EVENT_CATALOG.app_unexpected_exit.outcome, 'error');
+  const dashboard = await (await f.request('/dashboard')).text();
+  assert.match(dashboard, /App gecrasht/);
+  assert.match(dashboard, /App onverwacht afgesloten/);
+});
+
 function fixture() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));

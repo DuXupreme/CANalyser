@@ -244,7 +244,8 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         string label,
         string yAxisKey,
         OxyColor color,
-        PlotViewOptions options, IReadOnlyList<MeasurementGap> gaps)
+        PlotViewOptions options,
+        IReadOnlyList<MeasurementGap> gaps)
     {
         if (options.MarkersOnly)
         {
@@ -283,7 +284,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             };
             for (var i = 0; i < x.Length; i++)
             {
-                if (i > 0 && gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) stair.Points.Add(DataPoint.Undefined);
+                if (CrossesGap(x, i, gaps)) stair.Points.Add(DataPoint.Undefined);
                 stair.Points.Add(new DataPoint(x[i], y[i]));
             }
 
@@ -303,12 +304,15 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         };
         for (var i = 0; i < x.Length; i++)
         {
-            if (i > 0 && gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) line.Points.Add(DataPoint.Undefined);
-                line.Points.Add(new DataPoint(x[i], y[i]));
+            if (CrossesGap(x, i, gaps)) line.Points.Add(DataPoint.Undefined);
+            line.Points.Add(new DataPoint(x[i], y[i]));
         }
 
         model.Series.Add(line);
     }
+
+    private static bool CrossesGap(double[] time, int index, IReadOnlyList<MeasurementGap> gaps) =>
+        index > 0 && gaps.Any(gap => time[index - 1] <= gap.StartSeconds && time[index] >= gap.EndSeconds);
 
     private static IPlotController CreateInteractionController()
     {

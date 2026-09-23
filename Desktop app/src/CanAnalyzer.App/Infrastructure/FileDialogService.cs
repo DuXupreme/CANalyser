@@ -35,8 +35,8 @@ public sealed class FileDialogService : IFileDialogService
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Open DBC file",
-            Filter = "DBC files (*.dbc)|*.dbc|All files (*.*)|*.*",
+            Title = "Open CAN-database",
+            Filter = "CAN-databases (*.dbc;*.dbf)|*.dbc;*.dbf|DBC files (*.dbc)|*.dbc|BUSMASTER DBF files (*.dbf)|*.dbf|All files (*.*)|*.*",
             Multiselect = false
         };
         ApplyInitialPath(dialog, initialPath);
@@ -47,14 +47,45 @@ public sealed class FileDialogService : IFileDialogService
     {
         var dialog = new SaveFileDialog
         {
-            Title = "Database opslaan als DBC",
-            Filter = "DBC files (*.dbc)|*.dbc|All files (*.*)|*.*",
+            Title = "CAN-database opslaan of converteren",
+            Filter = "DBC files (*.dbc)|*.dbc|BUSMASTER DBF files (*.dbf)|*.dbf|All files (*.*)|*.*",
             AddExtension = true,
             DefaultExt = ".dbc",
-            FileName = "can_database.dbc"
+            FileName = GetSuggestedDatabaseName(initialPath)
         };
         ApplyInitialPath(dialog, initialPath);
-        return dialog.ShowDialog() == true ? dialog.FileName : null;
+        if (dialog.ShowDialog() != true)
+        {
+            return null;
+        }
+
+        return dialog.FilterIndex switch
+        {
+            1 => Path.ChangeExtension(dialog.FileName, ".dbc"),
+            2 => Path.ChangeExtension(dialog.FileName, ".dbf"),
+            _ => dialog.FileName
+        };
+    }
+
+    private static string GetSuggestedDatabaseName(string? initialPath)
+    {
+        if (!string.IsNullOrWhiteSpace(initialPath) && !Directory.Exists(initialPath))
+        {
+            try
+            {
+                var stem = Path.GetFileNameWithoutExtension(initialPath);
+                if (!string.IsNullOrWhiteSpace(stem))
+                {
+                    return stem;
+                }
+            }
+            catch
+            {
+                // Fall back to a neutral file name.
+            }
+        }
+
+        return "can_database";
     }
 
     public string? PickPresetFile(string? initialPath)

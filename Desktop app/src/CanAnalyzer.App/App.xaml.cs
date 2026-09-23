@@ -17,6 +17,7 @@ namespace CanAnalyzer.App;
 public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
+    private TelemetryService? _crashTelemetry;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -26,6 +27,14 @@ public partial class App : Application
         splash.Show();
 
         _serviceProvider = BuildServiceProvider();
+        _crashTelemetry = (TelemetryService)_serviceProvider.GetRequiredService<ITelemetryService>();
+        DispatcherUnhandledException += (_, args) =>
+            _crashTelemetry.RecordCrash(args.Exception, "dispatcher");
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.IsTerminating)
+                _crashTelemetry.RecordCrash(args.ExceptionObject as Exception, "app_domain");
+        };
         var window = _serviceProvider.GetRequiredService<MainWindow>();
         MainWindow = window;
 
@@ -49,13 +58,6 @@ public partial class App : Application
     {
         if (_serviceProvider is null) return;
         var telemetry = _serviceProvider.GetRequiredService<ITelemetryService>();
-        DispatcherUnhandledException += (_, args) =>
-        {
-            args.Handled = false;
-            SendCrashTelemetry(telemetry, "dispatcher_unhandled_exception", args.Exception, "ui_dispatcher");
-        };
-        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            SendCrashTelemetry(telemetry, "app_unhandled_exception", args.ExceptionObject as Exception, "app_domain");
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
             SendCrashTelemetry(telemetry, "unobserved_task_exception", args.Exception, "task_scheduler");
@@ -71,7 +73,6 @@ public partial class App : Application
             {
                 ["source"] = source,
                 ["exception_type"] = exception?.GetType().Name ?? "unknown",
-                ["exception_message"] = exception?.Message,
                 ["stack_present"] = !string.IsNullOrWhiteSpace(exception?.StackTrace),
                 ["process_terminating"] = eventName == "app_unhandled_exception"
             });
@@ -162,6 +163,7 @@ public partial class App : Application
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
         services.AddSingleton<IImportRepairWizardService, ImportRepairWizardService>();
         services.AddSingleton<IOnlineLogService, OnlineLogService>();
+        services.AddSingleton<IOnlineLogSelectionHistoryStore, OnlineLogSelectionHistoryStore>();
         services.AddSingleton<IOnlineLogDialogService, OnlineLogDialogService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IAppSettingsStore, AppSettingsStore>();
@@ -191,6 +193,7 @@ public partial class App : Application
         services.AddSingleton<IPresetSerializer, PresetSerializer>();
         services.AddSingleton<ICanAnalysisPipeline, CanAnalysisPipeline>();
 
+        services.AddSingleton<ActiveUsageViewModel>();
         services.AddSingleton<AnalysisViewModel>();
         services.AddSingleton<JoystickAnalyticsViewModel>();
         services.AddSingleton<RawFramesViewModel>();

@@ -58,6 +58,30 @@ internal sealed class DiskBackedSignalIndex(string path) : ISignalSampleLookup, 
         }
     }
 
+    public IEnumerable<SignalSeriesPoint> ReadSignalSeriesSampled(SignalIdentity identity, int maximumPoints)
+    {
+        Complete();
+        if (maximumPoints < 2) throw new ArgumentOutOfRangeException(nameof(maximumPoints));
+        if (!_signals.TryGetValue(identity, out var signal) || signal.Count == 0) yield break;
+        if (signal.Count <= maximumPoints)
+        {
+            foreach (var point in ReadSignalSeries(identity)) yield return point;
+            yield break;
+        }
+
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, PointBytes * BlockPoints, FileOptions.RandomAccess);
+        using var reader = new BinaryReader(stream);
+        for (var outputIndex = 0; outputIndex < maximumPoints; outputIndex++)
+        {
+            var sourceIndex = (long)outputIndex * (signal.Count - 1L) / (maximumPoints - 1L);
+            var blockIndex = (int)(sourceIndex / BlockPoints);
+            var pointIndex = (int)(sourceIndex % BlockPoints);
+            var block = signal.Blocks[blockIndex];
+            stream.Position = block.Offset + (pointIndex * PointBytes);
+            yield return new SignalSeriesPoint(reader.ReadInt64(), reader.ReadInt64(), reader.ReadDouble());
+        }
+    }
+
     private void Flush(SignalBuffer signal)
     {
         if (signal.PendingCount == 0) return;

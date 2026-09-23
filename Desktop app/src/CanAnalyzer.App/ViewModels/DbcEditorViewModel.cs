@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 namespace CanAnalyzer.App.ViewModels;
 
 /// <summary>
-/// Database (DBC) editor tab: author frames + signals with a live bit-layout grid and save to a .dbc file.
+/// CAN database editor: author frames and signals, then save or convert between DBC and BUSMASTER DBF.
 /// </summary>
 public sealed partial class DbcEditorViewModel : ObservableObject
 {
@@ -48,7 +48,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
     private string _validationSummary = "Geen frame geselecteerd.";
 
     [ObservableProperty]
-    private string _statusText = "Maak een nieuwe database of open een bestaand DBC-bestand om te bewerken.";
+    private string _statusText = "Maak een nieuwe database of open een bestaand DBC/DBF-bestand om te bewerken.";
 
     [ObservableProperty]
     private string? _currentFilePath;
@@ -184,7 +184,7 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             IsReadOnly = false;
             HasUnsavedChanges = false;
             StatusText = _requiresNormalizationWarning
-                ? $"Geladen voor bewerken: {path} — bij opslaan maakt CANalyser een genormaliseerde DBC; niet-ondersteunde opmerkingen en attributen worden niet meegenomen."
+                ? $"Geladen voor bewerken: {path} — bij opslaan maakt CANalyser een genormaliseerde database; niet-ondersteunde opmerkingen en attributen worden niet meegenomen."
                 : $"Geladen: {path}  ({Frames.Count} frames, {Frames.Sum(f => f.Signals.Count)} signalen)";
         }
         catch (Exception ex)
@@ -318,9 +318,9 @@ public sealed partial class DbcEditorViewModel : ObservableObject
 
         if (_requiresNormalizationWarning &&
             !_messageDialogService.Confirm(
-                "DBC genormaliseerd opslaan",
+                "CAN-database genormaliseerd opslaan",
                 "CANalyser slaat alle bewerkbare frames, signalen en multiplexdefinities op. " +
-                "Niet-ondersteunde DBC-metadata, zoals opmerkingen en attributen, wordt niet meegenomen.\n\n" +
+                "Niet-ondersteunde metadata, zoals opmerkingen, waardetabellen en attributen, wordt niet meegenomen.\n\n" +
                 "Het oorspronkelijke bestand blijft behouden zolang je in het opslagvenster een andere bestandsnaam kiest. Doorgaan?"))
         {
             return;
@@ -336,8 +336,8 @@ public sealed partial class DbcEditorViewModel : ObservableObject
             var signalCount = Frames.Sum(f => f.Signals.Count);
             StatusText = $"Opgeslagen: {path}  ({Frames.Count} frames, {signalCount} signalen)";
             _messageDialogService.ShowInfo(
-                "DBC opgeslagen",
-                $"Database opgeslagen als:\n{path}\n\nJe kunt dit bestand nu laden via 'Open DBC' op het hoofdscherm.");
+                "CAN-database opgeslagen",
+                $"Database opgeslagen als:\n{path}\n\nJe kunt dit bestand nu laden via 'Open database' op het hoofdscherm.");
         }
         catch (Exception ex)
         {

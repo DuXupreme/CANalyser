@@ -45,7 +45,7 @@ public sealed class OnlineLogRegressionTests
         Assert.Equal(3, calls);
         Assert.Equal(new[] { "late", "early" }, result.Files.Select(file => file.Key));
         Assert.False(result.Truncated);
-        Assert.Equal(200, result.MaximumSelection);
+        Assert.Equal(CanAnalyzer.Core.Domain.Mdf4ImportLimits.MaximumFiles, result.MaximumSelection);
     }
 
     [Fact]

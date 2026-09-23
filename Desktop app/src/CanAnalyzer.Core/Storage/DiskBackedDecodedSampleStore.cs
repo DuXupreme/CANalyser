@@ -174,6 +174,12 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         return _signalIndex.ReadSignalSeries(identity);
     }
 
+    public IEnumerable<SignalSeriesPoint> ReadSignalSeriesSampled(SignalIdentity identity, int maximumPoints)
+    {
+        Complete();
+        return _signalIndex.ReadSignalSeriesSampled(identity, maximumPoints);
+    }
+
     public IReadOnlyList<DecodedSignalSample> GetFrameSamples(long frameIndex)
     {
         if (!TryFindFrameRange(frameIndex, out var first, out var count)) return [];

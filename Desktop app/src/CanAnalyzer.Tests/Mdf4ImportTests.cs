@@ -84,6 +84,13 @@ public sealed class Mdf4ImportTests
             Assert.Equal(10_200_000_000L, result.Frames[1].TimestampNanoseconds);
             Assert.Equal(20_000_000_000L, result.Frames[2].TimestampNanoseconds);
             Assert.Equal([0L, 1L, 2L], result.Frames.Select(static frame => frame.FrameIndex));
+            Assert.Equal(["00000001-start.MF4", "00000002-next.MF4"], result.SourceFiles.Select(source => source.Name));
+            Assert.All(result.SourceFiles, source =>
+            {
+                Assert.Equal("48EDFD35", source.Logger);
+                Assert.Equal("session-a", source.Session);
+                Assert.StartsWith("48EDFD35/session-a/", source.SourcePath);
+            });
             Assert.Equal(new DateTimeOffset(2026, 9, 2, 18, 50, 0, TimeSpan.Zero), result.StartTimeUtc);
             Assert.True(result.Report.IsConsistent);
             (result.Frames as IDisposable)?.Dispose();
@@ -110,6 +117,7 @@ public sealed class Mdf4ImportTests
             var result = await parser.ParseAsync(zipPath, ImportMode.Strict, null, CancellationToken.None);
             Assert.NotNull(result);
             var gap = Assert.Single(result!.Report.Gaps);
+            Assert.Equal(["session-a", "session-b"], result.SourceFiles.Select(source => source.Session));
             Assert.Equal(9d, gap.EndSeconds - gap.StartSeconds, 6);
             Assert.Equal(9_000_000_000L, result.Frames[1].TimestampNanoseconds - result.Frames[0].TimestampNanoseconds);
             (result.Frames as IDisposable)?.Dispose();

@@ -65,8 +65,8 @@
                 Margin="0,0,0,6">
             <WrapPanel>
                 <Button Content="Nieuwe database" Command="{Binding NewDatabaseCommand}" Margin="0,0,6,0" />
-                <Button Content="Open DBC..." Command="{Binding OpenDbcCommand}" Margin="0,0,6,0" />
-                <Button Content="Opslaan als DBC..." Command="{Binding SaveDbcCommand}" Margin="0,0,12,0" />
+                <Button Content="Open DBC/DBF..." Command="{Binding OpenDbcCommand}" Margin="0,0,6,0" />
+                <Button Content="Opslaan/converteren..." Command="{Binding SaveDbcCommand}" Margin="0,0,12,0" />
                 <Separator Margin="0,0,12,0" />
                 <Button Content="+ Frame" Command="{Binding AddFrameCommand}" Margin="0,0,6,0" />
                 <Button Content="- Frame" Command="{Binding RemoveFrameCommand}" />

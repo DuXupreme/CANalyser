@@ -21,10 +21,10 @@ public static class OnlineLogSequencePolicy
             return new(false, "Selecteer minimaal één MF4-bestand.");
         if (files.Count == 1) return OnlineLogSequenceValidation.Valid;
 
-        if (files.Any(f => string.IsNullOrWhiteSpace(f.Logger) || string.IsNullOrWhiteSpace(f.Session)) ||
-            files.Select(f => f.Logger.Trim()).Distinct().Count() != 1)
+        if (files.Any(static file => string.IsNullOrWhiteSpace(file.Logger) || string.IsNullOrWhiteSpace(file.Session)) ||
+            files.Select(static file => file.Logger.Trim()).Distinct(StringComparer.Ordinal).Count() != 1)
             return new(false, "Selecteer herkenbare logger-sessies van dezelfde machine.");
-        foreach (var session in files.GroupBy(f => f.Session.Trim()))
+        foreach (var session in files.GroupBy(static file => file.Session.Trim(), StringComparer.Ordinal))
         {
             var validation = ValidateSession(session.ToArray());
             if (!validation.IsValid) return validation;

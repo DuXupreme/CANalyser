@@ -2,11 +2,15 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.2 (.NET 8 WPF)
+# CANalyser 2.4.2 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.2.1` voegt directe CANedge MF4/ZIP-import en de workflow **Online logs**
+> Versie `2.4.2` onthoudt de laatste vijf online-logselecties, maakt zware delay-/joystick-/actuatoranalyses geheugenveilig op logs met miljoenen meetpunten en herstelt de afzonderlijke actuator-slagbenutting. Afgebroken analyses worden bij de volgende start in telemetry gemeld.
+> Versie `2.4.1` herstelt het bewerken en onderling converteren van DBC en BUSMASTER DBF.
+> Versie `2.4.0` voegt **Actief gebruik en batterijduur** toe aan Analyse: detectie via motor-RPM, BMS-stroom, actuatorkracht of SOC-daling, met gebruiksaandeel, energie en batterijduur.
+> Versie `2.3.1` liet complete online sessies samen selecteren en toont echte meetonderbrekingen als duidelijke gaten in de grafiek.
+> De eerdere versie `2.2.1` voegde directe CANedge MF4/ZIP-import en de workflow **Online logs**
 > toe. Grote selecties worden rechtstreeks uit S3 gedownload en lokaal samengevoegd,
 > zodat de responslimiet van het dashboard geen logs meer blokkeert. De laatst gekozen
 > DBC wordt hergebruikt en de 10M-framebenchmark op de doelhardware blijft aanbevolen.
@@ -24,16 +28,18 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
   - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
-  - dashboard-ZIP met maximaal 200 opeenvolgende MF4-delen uit één logger-sessie; verschillende sessies worden nooit tot één meting samengevoegd
+  - dashboard-ZIP met maximaal 200 MF4-delen uit één logger; binnen iedere geselecteerde sessie moeten de deelnummers opeenvolgen
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
   - candump Classic/FD
-- DBC-decoding is fail-closed:
+- DBC- en BUSMASTER DBF-decoding is fail-closed:
   - exact ID match (standard + extended)
   - extended fallback on J1939 PGN
   - ambigue PGN-matches en lengtefouten leveren geen waarden
   - Intel/Motorola, signed/unsigned, IEEE float/double en multiplex-ranges
+- De Database-editor opent en bewerkt DBC en BUSMASTER DBF en converteert in
+  beide richtingen via **Opslaan/converteren**.
 - Decode diagnostics:
   - unmatched IDs
   - manual/permissive decode counts
@@ -44,11 +50,18 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export met relatieve én absolute meettijd
-- Actief gebruik en batterijduur in Analyse: instelbare detectie op motor-RPM,
+- Actief gebruik en batterijduur in CAN Analyse: instelbare detectie op motor-RPM,
   BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
   SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.
+- Actief gebruik en accuduur heeft een eigen subtab onder CAN Analyse en blijft
+  gescheiden van joystick- en actuator-slaganalyse.
+- De joystick-gebruiksanalyse rapporteert afzonderlijk de werkelijke
+  slagbenutting van Left/Right/Front, inclusief P01–P99, tijd nabij beide
+  uitersten en tijd buiten een instelbare referentieslag.
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
-- Eén los online bestand is altijd toegestaan; meerdere bestanden alleen als hun deelnummers opeenvolgen en logger plus sessie exact gelijk zijn. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
+- De laatste vijf online downloadselecties worden direct lokaal opgeslagen en kunnen na herstart of crash met één klik opnieuw worden geselecteerd.
+- Een complete sessie kan in één handeling worden toegevoegd of uitgevinkt. Meerdere sessies van dezelfde logger mogen samen worden geanalyseerd; de absolute tijd en meetonderbrekingen blijven behouden.
+- Binnen iedere geselecteerde sessie moeten de MF4-deelnummers opeenvolgen. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
 - Identieke online selecties worden maximaal zeven dagen lokaal hergebruikt; oude bestanden worden automatisch verwijderd en de cache wordt tot circa 2 GB begrensd.
 - Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
   alignment on the first STEP target transition, and ready-made overlays for
@@ -57,7 +70,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Debug/error details panel
 - Performance strategy:
   - dataset caching
-  - precomputed signal arrays
+  - schijfgebonden signaalindex met begrensde analyseweergaven voor multi-million-point logs
   - downsampling before plotting
 
 ## 2. Architecture

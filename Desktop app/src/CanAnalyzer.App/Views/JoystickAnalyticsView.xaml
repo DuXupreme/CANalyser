@@ -104,7 +104,7 @@
             </TabItem>
 
             <TabItem Header="Joystick gebruiksanalyse">
-                <views:JoystickUsageView/>
+                <views:JoystickUsageView />
             </TabItem>
 
             <TabItem Header="Actuatorvolging">
@@ -285,6 +285,12 @@
                         </GroupBox>
                     </Grid>
                 </Grid>
+            </TabItem>
+
+            <TabItem Header="Actief gebruik en accuduur">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="6">
+                    <views:ActiveUsageView DataContext="{Binding ActiveUsage}" />
+                </ScrollViewer>
             </TabItem>
         </TabControl>
 

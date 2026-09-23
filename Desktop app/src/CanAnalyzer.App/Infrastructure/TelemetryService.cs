@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace CanAnalyzer.App.Infrastructure;
 
 /// <inheritdoc />
-public sealed class TelemetryService : ITelemetryService
+public sealed class TelemetryService : ITelemetryService, IDisposable
 {
     private static readonly HttpClient HttpClient = new()
     {
@@ -25,9 +25,13 @@ public sealed class TelemetryService : ITelemetryService
 
     private readonly ILogger<TelemetryService> _logger;
     private readonly object _sync = new();
+    private readonly SemaphoreSlim _localLogGate = new(1, 1);
     private readonly string _sessionId = Guid.NewGuid().ToString("N");
+    private readonly string _activeOperationPath;
     private TelemetryOptions _options = new();
     private DateTime _lastRetentionCleanupUtc = DateTime.MinValue;
+    private readonly CrashTelemetryJournal _crashJournal;
+    private bool _sessionStarted;
 
     public TelemetryService(ILogger<TelemetryService> logger)
     {
@@ -36,6 +40,8 @@ public sealed class TelemetryService : ITelemetryService
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "CanAnalyzer");
         LocalLogPath = Path.Combine(root, "telemetry-events.jsonl");
+        _crashJournal = new CrashTelemetryJournal(Path.Combine(root, "pending-crashes"));
+        _activeOperationPath = Path.Combine(root, "telemetry-active-operation.json");
     }
 
     public string LocalLogPath { get; }
@@ -57,6 +63,64 @@ public sealed class TelemetryService : ITelemetryService
         {
             _options = CopyOptions(options);
         }
+        try
+        {
+            if (!options.Enabled)
+            {
+                _crashJournal.Dispose();
+                _sessionStarted = false;
+                return;
+            }
+            if (_sessionStarted) return;
+            _crashJournal.Start(Guid.NewGuid().ToString("N"), JsonSerializer.Serialize(
+                CreatePayload("app_unexpected_exit", _options, new Dictionary<string, object?>
+                {
+                    ["reason"] = "unclean_shutdown",
+                    ["timestamp_basis"] = "session_start"
+                }), SerializerOptions));
+            _sessionStarted = true;
+            _ = Task.Run(ReplayCrashesAsync);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Crash journal unavailable."); }
+    }
+
+    public void RecordCrash(Exception? exception, string source)
+    {
+        try
+        {
+            TelemetryOptions options;
+            lock (_sync) { options = CopyOptions(_options); }
+            if (!options.Enabled) return;
+            // Do not include messages, stack traces, paths, or CAN data.
+            _crashJournal.RecordCrash(JsonSerializer.Serialize(CreatePayload("app_crashed", options,
+                new Dictionary<string, object?>
+                {
+                    ["exception_type"] = exception?.GetType().Name ?? "unknown",
+                    ["source"] = source
+                }), SerializerOptions));
+        }
+        catch { /* Never replace the original fatal exception with telemetry failure. */ }
+    }
+
+    private async Task ReplayCrashesAsync()
+    {
+        try
+        {
+            await _crashJournal.ReplayAsync(async json =>
+            {
+                TelemetryOptions options;
+                lock (_sync) { options = CopyOptions(_options); }
+                if (!options.Enabled) return false;
+                return await PostRemoteAsync(json, options, CancellationToken.None).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Crash upload deferred until next start."); }
+    }
+
+    public void Dispose()
+    {
+        try { _crashJournal.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Could not close crash journal."); }
     }
 
     public async Task TrackEventAsync(
@@ -77,11 +141,18 @@ public sealed class TelemetryService : ITelemetryService
 
         try
         {
-            await PruneLocalLogAsync(options, cancellationToken).ConfigureAwait(false);
-
             var payload = CreatePayload(eventName, options, properties);
             var json = JsonSerializer.Serialize(payload, SerializerOptions);
-            await AppendLocalAsync(json, cancellationToken).ConfigureAwait(false);
+            await _localLogGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await PruneLocalLogAsync(options, cancellationToken).ConfigureAwait(false);
+                await AppendLocalAsync(json, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _localLogGate.Release();
+            }
             await PostRemoteAsync(json, options, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -93,6 +164,118 @@ public sealed class TelemetryService : ITelemetryService
             _logger.LogDebug(ex, "Telemetry event '{EventName}' could not be recorded.", eventName);
         }
     }
+
+    public string BeginCriticalOperation(
+        string operationName,
+        IReadOnlyDictionary<string, object?>? properties = null)
+    {
+        TelemetryOptions options;
+        lock (_sync) options = CopyOptions(_options);
+        if (!options.Enabled || string.IsNullOrWhiteSpace(operationName)) return string.Empty;
+
+        try
+        {
+            var operationId = Guid.NewGuid().ToString("N");
+            var marker = new Dictionary<string, object?>
+            {
+                ["operation_id"] = operationId,
+                ["operation_name"] = operationName.Trim(),
+                ["started_utc"] = DateTimeOffset.UtcNow.ToString("O"),
+                ["session_id"] = _sessionId,
+                ["working_set_bytes"] = Environment.WorkingSet,
+                ["properties"] = SanitizeProperties(properties)
+            };
+            var directory = Path.GetDirectoryName(_activeOperationPath)!;
+            Directory.CreateDirectory(directory);
+            var temporaryPath = _activeOperationPath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(marker, SerializerOptions));
+            File.Move(temporaryPath, _activeOperationPath, true);
+            return operationId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Critical-operation marker could not be written.");
+            return string.Empty;
+        }
+    }
+
+    public void CompleteCriticalOperation(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId)) return;
+        try
+        {
+            if (!File.Exists(_activeOperationPath)) return;
+            using var document = JsonDocument.Parse(File.ReadAllText(_activeOperationPath));
+            if (document.RootElement.TryGetProperty("operation_id", out var id) &&
+                string.Equals(id.GetString(), operationId, StringComparison.Ordinal))
+            {
+                File.Delete(_activeOperationPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Critical-operation marker could not be cleared.");
+        }
+    }
+
+    public async Task ReportInterruptedOperationAsync(CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(_activeOperationPath)) return;
+        string? operationId = null;
+        try
+        {
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(_activeOperationPath, cancellationToken).ConfigureAwait(false));
+            var root = document.RootElement;
+            operationId = ReadString(root, "operation_id");
+            var properties = new Dictionary<string, object?>
+            {
+                ["operation_name"] = ReadString(root, "operation_name"),
+                ["operation_started_utc"] = ReadString(root, "started_utc"),
+                ["previous_session_id"] = ReadString(root, "session_id"),
+                ["working_set_bytes_at_start"] = ReadLong(root, "working_set_bytes")
+            };
+            if (root.TryGetProperty("properties", out var nested) && nested.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in nested.EnumerateObject())
+                    properties["operation_" + property.Name] = property.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => property.Value.GetString(),
+                        JsonValueKind.Number when property.Value.TryGetInt64(out var integer) => integer,
+                        JsonValueKind.Number when property.Value.TryGetDouble(out var number) => number,
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        _ => null
+                    };
+            }
+
+            await TrackEventAsync("previous_operation_interrupted", properties, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogDebug(ex, "Interrupted-operation marker could not be reported.");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(operationId))
+            {
+                CompleteCriticalOperation(operationId);
+            }
+            else
+            {
+                try { File.Delete(_activeOperationPath); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(ex, "Interrupted-operation marker could not be removed.");
+                }
+            }
+        }
+    }
+
+    private static string? ReadString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static long? ReadLong(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.TryGetInt64(out var result) ? result : null;
 
     private Dictionary<string, object?> CreatePayload(
         string eventName,
@@ -174,17 +357,17 @@ public sealed class TelemetryService : ITelemetryService
         await File.AppendAllTextAsync(LocalLogPath, json + Environment.NewLine, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task PostRemoteAsync(string json, TelemetryOptions options, CancellationToken cancellationToken)
+    private async Task<bool> PostRemoteAsync(string json, TelemetryOptions options, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(options.EndpointUrl))
         {
-            return;
+            return false;
         }
 
         if (!Uri.TryCreate(options.EndpointUrl.Trim(), UriKind.Absolute, out var endpoint) ||
             (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
         {
-            return;
+            return false;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
@@ -202,6 +385,7 @@ public sealed class TelemetryService : ITelemetryService
         {
             _logger.LogDebug("Telemetry endpoint returned HTTP {StatusCode}.", response.StatusCode);
         }
+        return response.IsSuccessStatusCode;
     }
 
     private async Task PruneLocalLogAsync(TelemetryOptions options, CancellationToken cancellationToken)

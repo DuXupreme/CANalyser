@@ -45,7 +45,10 @@ public sealed record CanLogParseResult(
     IReadOnlyList<RawCanFrame> Frames,
     ImportReport Report,
     DatasetCompleteness Completeness,
-    DateTimeOffset? StartTimeUtc = null);
+    DateTimeOffset? StartTimeUtc = null)
+{
+    public IReadOnlyList<SourceLogFile> SourceFiles { get; init; } = [];
+}
 
 public sealed class ImportIntegrityException : Exception
 {

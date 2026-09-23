@@ -17,6 +17,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
     internal const string DashboardBaseUrl = "https://main.d2qydggp5q6c4q.amplifyapp.com/";
     private const long MaximumCacheBytes = 2L * 1024 * 1024 * 1024;
     private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
+    private readonly string? _cacheDirectoryOverride;
     private readonly HttpClient _httpClient = new() { BaseAddress = new Uri(DashboardBaseUrl), Timeout = TimeSpan.FromMinutes(15) };
 
     public OnlineLogService()
@@ -52,7 +53,11 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
             Math.Max(earlier.UnknownRecordingTimes, later.UnknownRecordingTimes));
     }
 
-    internal OnlineLogService(HttpClient httpClient) => _httpClient = httpClient;
+    internal OnlineLogService(HttpClient httpClient, string? cacheDirectory = null)
+    {
+        _httpClient = httpClient;
+        _cacheDirectoryOverride = cacheDirectory;
+    }
 
     private async Task<OnlineLogQueryResult> GetLogPageAsync(
         string loggerId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
@@ -78,7 +83,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                 file.UploadedAt ?? file.CreatedAt,
                 file.SizeBytes)).ToArray(),
             payload.Truncated,
-            payload.MaximumSelection,
+            Mdf4ImportLimits.MaximumFiles,
             payload.UnknownRecordingTimes);
     }
 
@@ -88,6 +93,10 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         CancellationToken cancellationToken)
     {
         if (files.Count == 0) throw new ArgumentException("Selecteer minimaal één logbestand.", nameof(files));
+        if (files.Count > Mdf4ImportLimits.MaximumFiles ||
+            files.Any(static file => file.SizeBytes < 0 || file.SizeBytes > Mdf4ImportLimits.MaximumFileBytes) ||
+            files.Sum(static file => file.SizeBytes) > Mdf4ImportLimits.MaximumBytes)
+            throw new InvalidDataException("De selectie overschrijdt de importgrens van 4 GB, 512 MB per bestand of 10.000 bestanden. Kies een kleinere periode.");
         var selectionValidation = OnlineLogSequencePolicy.Validate(files
             .Select(static file => new OnlineLogPartIdentity(file.Logger, file.Session, file.Name))
             .ToArray());
@@ -107,17 +116,6 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         }
 
         TryDelete(finalPath);
-        using var planResponse = await _httpClient.PostAsJsonAsync("api/download-plan", new { keys }, cancellationToken)
-            .ConfigureAwait(false);
-        await EnsureSuccessAsync(planResponse, cancellationToken).ConfigureAwait(false);
-        var plan = await planResponse.Content.ReadFromJsonAsync<DownloadPlanResponse>(cancellationToken: cancellationToken)
-                       .ConfigureAwait(false)
-                   ?? throw new InvalidDataException("Het online-downloadplan is leeg of ongeldig.");
-        var plannedFiles = plan.Files
-                           ?? throw new InvalidDataException("Het online-downloadplan bevat geen bestanden.");
-        if (plannedFiles.Length != files.Count)
-            throw new InvalidDataException("Het online-downloadplan bevat niet alle geselecteerde bestanden.");
-
         var partialPath = finalPath + ".partial";
         TryDelete(partialPath);
         try
@@ -129,29 +127,40 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
             {
                 using (var archive = new ZipArchive(target, ZipArchiveMode.Create, leaveOpen: true))
                 {
-                    for (var index = 0; index < plannedFiles.Length; index++)
+                    // Request at most 200 signed URLs at a time, but put every
+                    // batch into the same archive for one complete analysis.
+                    foreach (var batch in keys.Chunk(200))
                     {
-                        var plannedFile = plannedFiles[index];
-                        var downloadUri = ValidateDownloadUri(plannedFile.Url);
-                        var archiveName = ValidateArchiveName(plannedFile.ArchiveName);
-                        using var response = await _httpClient.GetAsync(
-                                downloadUri,
-                                HttpCompletionOption.ResponseHeadersRead,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-                        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken)
-                            .ConfigureAwait(false);
-                        var entry = archive.CreateEntry(archiveName, CompressionLevel.Optimal);
-                        await using var destination = entry.Open();
-                        var buffer = new byte[128 * 1024];
-                        while (true)
+                        using var planResponse = await _httpClient.PostAsJsonAsync("api/download-plan", new { keys = batch }, cancellationToken).ConfigureAwait(false);
+                        await EnsureSuccessAsync(planResponse, cancellationToken).ConfigureAwait(false);
+                        var plan = await planResponse.Content.ReadFromJsonAsync<DownloadPlanResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
+                        if (plan?.Files is not { } plannedFiles || plannedFiles.Length != batch.Length)
+                            throw new InvalidDataException("Het online-downloadplan bevat niet alle geselecteerde bestanden.");
+                        foreach (var plannedFile in plannedFiles)
                         {
-                            var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                            if (read == 0) break;
-                            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                            received += read;
-                            progress?.Report(new OnlineDownloadProgress(received, total > 0 ? total : null));
+                            var downloadUri = ValidateDownloadUri(plannedFile.Url);
+                            var archiveName = ValidateArchiveName(plannedFile.ArchiveName);
+                            using var response = await _httpClient.GetAsync(
+                                    downloadUri,
+                                    HttpCompletionOption.ResponseHeadersRead,
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken)
+                                .ConfigureAwait(false);
+                            var entry = archive.CreateEntry(archiveName, CompressionLevel.Optimal);
+                            await using var destination = entry.Open();
+                            var buffer = new byte[128 * 1024];
+                            while (true)
+                            {
+                                var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                                if (read == 0) break;
+                                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                                received += read;
+                                if (received > Mdf4ImportLimits.MaximumBytes)
+                                    throw new InvalidDataException("De download overschrijdt de importgrens van 4 GB.");
+                                progress?.Report(new OnlineDownloadProgress(received, total > 0 ? total : null));
+                            }
                         }
                     }
                 }
@@ -218,7 +227,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         return Path.Combine(directory, $"online-logs-{hash}.zip");
     }
 
-    private static string GetCacheDirectory() => CanAnalyzer.Core.Storage.OnlineDownloadCache.DefaultDirectory;
+    private string GetCacheDirectory() => _cacheDirectoryOverride ?? CanAnalyzer.Core.Storage.OnlineDownloadCache.DefaultDirectory;
 
     private static bool IsUsableCachedArchive(string path, IReadOnlyList<OnlineLogSelection> files)
     {

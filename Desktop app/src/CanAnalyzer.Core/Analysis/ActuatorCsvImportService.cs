@@ -160,6 +160,7 @@ public sealed class ActuatorCsvImportService : IActuatorCsvImportService
         progress?.Report(new LoadProgress("Actuator-runs geladen.", 100));
         return new CanDataset
         {
+            SourceFiles = filePaths.Select(SourceLogFile.FromLocalFile).ToArray(),
             RawFrames = Array.Empty<RawCanFrame>(),
             DecodedSamples = Array.Empty<DecodedSignalSample>(),
             MessageSummaries = Array.Empty<MessageSummary>(),

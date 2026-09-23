@@ -8,9 +8,9 @@ namespace CanAnalyzer.Core.Parsing;
 /// <summary>Imports CANedge MDF4 files and ZIP downloads as one chronological CAN timeline.</summary>
 public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser peakParser) : ICanLogParser
 {
-    private const int MaximumArchiveFiles = 200;
-    private const long MaximumArchiveFileBytes = 512L * 1024 * 1024;
-    private const long MaximumArchiveBytes = 4L * 1024 * 1024 * 1024;
+    private const int MaximumArchiveFiles = Mdf4ImportLimits.MaximumFiles;
+    private const long MaximumArchiveFileBytes = Mdf4ImportLimits.MaximumFileBytes;
+    private const long MaximumArchiveBytes = Mdf4ImportLimits.MaximumBytes;
 
     public string Name => "CANedge MDF4";
 
@@ -35,9 +35,11 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
         Directory.CreateDirectory(inputDirectory);
         try
         {
+            var sourceFiles = new List<SourceLogFile>();
             var inputPaths = Path.GetExtension(filePath).Equals(".zip", StringComparison.OrdinalIgnoreCase)
-                ? await ExtractArchiveAsync(filePath, inputDirectory, progress, cancellationToken).ConfigureAwait(false)
+                ? await ExtractArchiveAsync(filePath, inputDirectory, sourceFiles, progress, cancellationToken).ConfigureAwait(false)
                 : new[] { Path.GetFullPath(filePath) };
+            if (sourceFiles.Count == 0) sourceFiles.Add(SourceLogFile.FromLocalFile(filePath));
             var trcPaths = await converter.ConvertToPeakTrcAsync(inputPaths, outputDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -52,7 +54,10 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
                     parsedFiles.Add((trcPath, parsed));
                 }
 
-                return MergeChronologically(parsedFiles, mode, progress, cancellationToken);
+                return MergeChronologically(parsedFiles, mode, progress, cancellationToken) with
+                {
+                    SourceFiles = sourceFiles.ToArray()
+                };
             }
             finally
             {
@@ -68,6 +73,7 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
     private static async Task<IReadOnlyList<string>> ExtractArchiveAsync(
         string archivePath,
         string inputDirectory,
+        List<SourceLogFile> sourceFiles,
         IProgress<LoadProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -100,6 +106,7 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
             await source.CopyToAsync(target, 128 * 1024, cancellationToken).ConfigureAwait(false);
             if (target.Length != entry.Length) throw new InvalidDataException($"MF4-bestand '{entry.Name}' is onvolledig uitgepakt.");
             extracted.Add(destination);
+            sourceFiles.Add(SourceLogFile.FromArchiveEntry(entry.FullName));
             progress?.Report(new LoadProgress($"ZIP uitpakken ({index + 1}/{entries.Length})...",
                 1 + (int)Math.Round((index + 1) * 2d / entries.Length)));
         }
@@ -195,12 +202,19 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
             var nonDataLines = parsedFiles.Sum(static file => file.Result.Report.NonDataLines);
             var acceptedLines = parsedFiles.Sum(static file => file.Result.Report.AcceptedLines);
             var rejectedLines = parsedFiles.Sum(static file => file.Result.Report.RejectedLines);
-            var ranges = ordered.Where(file => file.Result.Frames.Count > 0).Select(file =>
-            {
-                var offset = file.Result.StartTimeUtc is null ? 0L : checked((file.Result.StartTimeUtc.Value - earliest).Ticks * 100L);
-                return (Start: checked(offset + file.Result.Frames.Min(frame => frame.TimestampNanoseconds)),
-                        End: checked(offset + file.Result.Frames.Max(frame => frame.TimestampNanoseconds)));
-            }).OrderBy(range => range.Start).ToArray();
+            var ranges = ordered
+                .Where(static file => file.Result.Frames.Count > 0)
+                .Select(file =>
+                {
+                    var offset = file.Result.StartTimeUtc is null
+                        ? 0L
+                        : checked((file.Result.StartTimeUtc.Value - earliest).Ticks * 100L);
+                    return (
+                        Start: checked(offset + file.Result.Frames[0].TimestampNanoseconds),
+                        End: checked(offset + file.Result.Frames[^1].TimestampNanoseconds));
+                })
+                .OrderBy(static range => range.Start)
+                .ToArray();
             var gaps = new List<MeasurementGap>();
             if (ranges.Length > 0)
             {

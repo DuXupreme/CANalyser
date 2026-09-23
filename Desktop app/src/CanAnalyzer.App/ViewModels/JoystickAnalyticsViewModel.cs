@@ -18,6 +18,7 @@ namespace CanAnalyzer.App.ViewModels;
 
 public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 {
+    private readonly ITelemetryService _telemetryService;
     private readonly IJoystickAnalyticsService _analyticsService;
     private readonly DispatcherTimer _joystickPlaybackTimer;
     private CanDataset? _dataset;
@@ -100,8 +101,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     [ObservableProperty] private PlotModel _canTopIdPlotModel = EmptyPlot("Top CAN-IDs");
     [ObservableProperty] private IPlotController _delayOverlayController = CreateInteractiveController();
 
-    public JoystickAnalyticsViewModel(IJoystickAnalyticsService analyticsService)
+    public JoystickAnalyticsViewModel(IJoystickAnalyticsService analyticsService, ITelemetryService telemetryService, ActiveUsageViewModel activeUsage)
     {
+        _telemetryService = telemetryService;
+        ActiveUsage = activeUsage;
         _analyticsService = analyticsService;
         foreach (var range in ActuatorRanges) range.PropertyChanged += (_, _) => { InvalidateUsage(); InvalidateTracking(); };
         RecomputeCommand = new AsyncRelayCommand(RecomputeAsync, () => !IsBusy);
@@ -118,6 +121,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         };
         _joystickPlaybackTimer.Tick += JoystickPlaybackTimerOnTick;
     }
+
+    public ActiveUsageViewModel ActiveUsage { get; }
 
     public object CaptureExport() => new
     {
@@ -299,6 +304,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
         finally { _suppressTimeWindowAutoRecompute = false; }
         _dataset = dataset;
+        ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
         OptionalSignals.Clear(); OptionalSignals.Add(string.Empty);
         foreach (var range in ActuatorRanges)
@@ -330,8 +336,16 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         IsBusy = true;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var operationProperties = new Dictionary<string, object?>
+        {
+            ["decoded_sample_bucket"] = TelemetryBuckets.Count(_dataset.DecodedSamples.Count),
+            ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount)
+        };
+        var operationId = _telemetryService.BeginCriticalOperation("analytics_recompute", operationProperties);
         try
         {
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_started", operationProperties);
             BusyLabel = "Joystickanalyse herberekenen...";
             await Dispatcher.Yield(DispatcherPriority.Background);
             RunAnalysisSafely(BuildJoystickUsageAnalytics, "Gebruik");
@@ -350,9 +364,25 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         StatusText = _dataset.Completeness == DatasetCompleteness.Partial
             ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
             : "COMPLETE — analyses bijgewerkt.";
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_completed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount)
+            });
+        }
+        catch (Exception ex)
+        {
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_failed", new Dictionary<string, object?>
+            {
+                ["duration_ms"] = stopwatch.ElapsedMilliseconds,
+                ["exception_type"] = ex.GetType().Name
+            });
+            throw;
         }
         finally
         {
+            stopwatch.Stop();
+            _telemetryService.CompleteCriticalOperation(operationId);
             IsBusy = false;
         }
     }

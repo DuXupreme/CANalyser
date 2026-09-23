@@ -192,6 +192,12 @@ public sealed partial class RawFramesViewModel : ObservableObject
             return;
         }
 
+        if ((!string.IsNullOrWhiteSpace(ByteIndex) || !string.IsNullOrWhiteSpace(ByteValueHex)) &&
+            (ParseByteIndex(ByteIndex) is not >= 0 or > 63 || ParseByteValue(ByteValueHex) is null))
+        {
+            FrameStatistics = "Bytefilter ongeldig: vul index 0–63 en een hexwaarde 00–FF in. Het vorige resultaat blijft staan.";
+            return;
+        }
         var options = CaptureFilterOptions();
         var rows = _filterService.Apply(_dataset.RawFrames, options);
 

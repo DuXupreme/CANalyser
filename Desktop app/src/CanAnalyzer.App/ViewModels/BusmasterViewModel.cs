@@ -98,6 +98,10 @@ public sealed partial class BusmasterViewModel : ObservableObject
     {
         var timer = Stopwatch.StartNew();
         var search = SearchText?.Trim();
+        var operationId = _telemetryService?.BeginCriticalOperation("busmaster_filter", new Dictionary<string, object?>
+        {
+            ["search_kind"] = TryParseId(search ?? string.Empty, out _) ? "can_id" : "text_or_empty"
+        });
         _ = _telemetryService?.TrackEventAsync("busmaster_filter_started", new Dictionary<string, object?>
         {
             ["has_search"] = !string.IsNullOrWhiteSpace(search),
@@ -127,6 +131,10 @@ public sealed partial class BusmasterViewModel : ObservableObject
             });
             throw;
         }
+        finally
+        {
+            if (operationId is not null) _telemetryService?.CompleteCriticalOperation(operationId);
+        }
     }
 
     private void ApplyFiltersCore(bool resetPage, string? search)
@@ -145,7 +153,11 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
         var maxRows = Math.Clamp(MaxRows, 1, 2_000_000);
         var offset = checked((Math.Max(1, PageNumber) - 1) * maxRows);
-        var rows = _dataset.RawFrames
+        // Reject other IDs before resolving decoded metadata for millions of unrelated frames.
+        IEnumerable<RawCanFrame> source = _dataset.RawFrames;
+        if (!string.IsNullOrWhiteSpace(search) && TryParseId(search, out var selectedId))
+            source = source.Where(frame => frame.Id == selectedId);
+        var rows = source
             .Select(CreateRow)
             .Where(row => !ShowOnlyDecoded || row.IsDecoded);
 

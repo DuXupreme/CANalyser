@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Input;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.Core.Analysis;
+using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Utilities;
 using CanAnalyzer.App.Services;
 using OxyPlot;
@@ -853,7 +854,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
             for (var i = 0; i < x.Length; i++)
             {
-                if (i > 0 && series.Gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) stair.Points.Add(DataPoint.Undefined);
+                if (CrossesGap(x, i, series.Gaps)) stair.Points.Add(DataPoint.Undefined);
                 stair.Points.Add(new DataPoint(x[i], y[i]));
             }
 
@@ -873,12 +874,15 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
         for (var i = 0; i < x.Length; i++)
         {
-            if (i > 0 && series.Gaps.Any(gap => x[i - 1] <= gap.StartSeconds && x[i] >= gap.EndSeconds)) line.Points.Add(DataPoint.Undefined);
-                line.Points.Add(new DataPoint(x[i], y[i]));
+            if (CrossesGap(x, i, series.Gaps)) line.Points.Add(DataPoint.Undefined);
+            line.Points.Add(new DataPoint(x[i], y[i]));
         }
 
         return line;
     }
+
+    private static bool CrossesGap(double[] time, int index, IReadOnlyList<MeasurementGap> gaps) =>
+        index > 0 && gaps.Any(gap => time[index - 1] <= gap.StartSeconds && time[index] >= gap.EndSeconds);
 
     private static int CountVisible(double[] values, double? minimum, double? maximum) =>
         Math.Max(0, FindFirstAfter(values, maximum) - FindFirstAtOrAfter(values, minimum));

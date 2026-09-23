@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using CanAnalyzer.App.Models;
+using CanAnalyzer.App.Services;
 using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Domain;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -14,8 +15,11 @@ namespace CanAnalyzer.App.ViewModels;
 
 public sealed partial class ActiveUsageViewModel : ObservableObject
 {
-    private const string NoSignal = "(geen — gebruik meetdekking als schatting)";
     public ActiveUsageResult? ExportResult { get; private set; }
+    private const int MaximumAnalysisPointsPerSignal = 250_000;
+    private const string NoSignal = "(geen — gebruik meetdekking als schatting)";
+    private readonly ITelemetryService _telemetryService;
+    private readonly Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
     private CanDataset? _dataset;
     private CancellationTokenSource? _calculation;
     private int _revision;
@@ -44,8 +48,9 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     [ObservableProperty] private string _notes = string.Empty;
     [ObservableProperty] private PlotModel _timeline = new();
 
-    public ActiveUsageViewModel()
+    public ActiveUsageViewModel(ITelemetryService telemetryService)
     {
+        _telemetryService = telemetryService;
         CalculateCommand = new AsyncRelayCommand(CalculateAsync, () => _dataset is not null && !IsBusy);
     }
 
@@ -79,6 +84,7 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     {
         Invalidate();
         _dataset = dataset;
+        _analysisSeriesCache.Clear();
         _loading = true;
         try
         {
@@ -136,7 +142,12 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         IsBusy = true;
         HasResult = false;
         ExportResult = null;
-        Status = "Actief gebruik berekenen uit de oorspronkelijke meetpunten…";
+        Status = "Actief gebruik geheugenveilig berekenen over de volledige meetperiode…";
+        var operationId = _telemetryService.BeginCriticalOperation("active_usage_analysis", new Dictionary<string, object?>
+        {
+            ["decoded_sample_bucket"] = TelemetryBuckets.Count(dataset.DecodedSamples.Count),
+            ["maximum_points_per_signal"] = MaximumAnalysisPointsPerSignal
+        });
         try
         {
             var activity = Resolve(dataset, ActivitySignal);
@@ -166,6 +177,7 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         }
         finally
         {
+            _telemetryService.CompleteCriticalOperation(operationId);
             if (ReferenceEquals(_calculation, cancellation)) _calculation = null;
             IsBusy = false;
         }
@@ -254,8 +266,14 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         return model;
     }
 
-    private static SignalSeries? Resolve(CanDataset dataset, string? label) => label is not null &&
-        dataset.SignalSeriesByLabel.TryGetValue(label, out var series) ? series : null;
+    private SignalSeries? Resolve(CanDataset dataset, string? label)
+    {
+        if (label is null || !dataset.SignalSeriesByLabel.TryGetValue(label, out var series)) return null;
+        if (_analysisSeriesCache.TryGetValue(label, out var cached)) return cached;
+        cached = series.ForAnalysis(MaximumAnalysisPointsPerSignal);
+        _analysisSeriesCache[label] = cached;
+        return cached;
+    }
     private static bool Contains(string text, string part) => text.Contains(part, StringComparison.OrdinalIgnoreCase);
     private static bool IsBmsCurrent(string label) => (Contains(label, "BMS") || Contains(label, "Battery") || Contains(label, "Pack")) &&
         Contains(label, "Current") && !Contains(label, "Limit") && !Contains(label, "Max") && !Contains(label, "Allowed") && !Contains(label, "Request");

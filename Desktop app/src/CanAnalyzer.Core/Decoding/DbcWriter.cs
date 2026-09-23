@@ -27,8 +27,10 @@ public sealed class DbcWriter : IDbcWriter
             throw new InvalidOperationException("Deze geïmporteerde DBC bevat metadata die de editor niet lossless kan terugschrijven en is daarom read-only. Maak een nieuwe DBC om veilig op te slaan.");
         }
 
-        var content = Serialize(database);
-        await File.WriteAllTextAsync(filePath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken)
+        var isDbf = Path.GetExtension(filePath).Equals(".dbf", StringComparison.OrdinalIgnoreCase);
+        var content = isDbf ? BusmasterDbfSerializer.Serialize(database) : Serialize(database);
+        var encoding = isDbf ? Encoding.Latin1 : new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        await File.WriteAllTextAsync(filePath, content, encoding, cancellationToken)
             .ConfigureAwait(false);
     }
 
