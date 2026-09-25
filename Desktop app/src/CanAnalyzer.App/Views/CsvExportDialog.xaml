@@ -1,0 +1,118 @@
+<Window x:Class="CanAnalyzer.App.Views.CsvExportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CSV exporteren" Width="1040" Height="800" MinWidth="780" MinHeight="580"
+        WindowStartupLocation="CenterOwner" Background="#F7F8FA">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+        <DataTemplate x:Key="ChoiceTemplate">
+            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      ToolTip="{Binding Label}" Margin="3,4">
+                <TextBlock Text="{Binding Label}"/>
+            </CheckBox>
+        </DataTemplate>
+    </Window.Resources>
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="100"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,10">
+            <TextBlock Text="Kies wat je wilt delen" FontSize="21" FontWeight="SemiBold"/>
+            <TextBlock Text="Eén rij per meetpunt, met de volledige meetprecisie. De export bevat de hele log voor de gekozen signalen; grafiekfilters en downsampling worden niet toegepast."
+                       TextWrapping="Wrap" Margin="0,5,0,0"/>
+            <TextBlock x:Name="DatasetNotice" Foreground="#8A4800" TextWrapping="Wrap" Margin="0,4,0,0"/>
+        </StackPanel>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <GroupBox Header="1 · Signalen">
+                <DockPanel>
+                    <TextBox x:Name="SignalSearch" DockPanel.Dock="Top" TextChanged="SearchChanged"
+                             ToolTip="Zoek op signaal, bericht, kanaal of CAN-ID" Margin="0,0,0,6"
+                             AutomationProperties.Name="Signalen zoeken"/>
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,7">
+                        <Button Content="Alle" Click="SelectAllSignals" ToolTip="Selecteer alle signalen, ook buiten de zoekresultaten"/>
+                        <Button Content="Geen" Click="SelectNoSignals"/>
+                        <Button Content="Uit analyse" Click="SelectAnalysisSignals" ToolTip="Neem de aangevinkte signalen uit de analysetab over"/>
+                        <Button Content="Zoekresultaten" Click="SelectVisibleSignals" ToolTip="Selecteer uitsluitend de gevonden signalen"/>
+                    </WrapPanel>
+                    <ListBox ItemsSource="{Binding VisibleSignals}" ItemTemplate="{StaticResource ChoiceTemplate}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"/>
+                </DockPanel>
+            </GroupBox>
+            <GroupBox Grid.Column="2" Header="2 · Kolommen">
+                <DockPanel>
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,7">
+                        <Button Content="Compact delen" Click="SelectCompactColumns"/>
+                        <Button Content="Alle kolommen" Click="SelectAllColumns"/>
+                        <Button Content="Geen" Click="SelectNoColumns"/>
+                    </WrapPanel>
+                    <ListBox ItemsSource="{Binding Columns}" ItemTemplate="{StaticResource ChoiceTemplate}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                </DockPanel>
+            </GroupBox>
+        </Grid>
+        <GroupBox Grid.Row="2" Header="3 · Tijd en opmaak" Margin="0,10,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Nulpunt voor time_s en time_ns" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="TimeMode" SelectedIndex="0" SelectionChanged="SettingsChanged">
+                        <ComboBoxItem Content="Oorspronkelijke logtijd"/>
+                        <ComboBoxItem Content="Relatief vanaf eerste logrecord (0 s)"/>
+                        <ComboBoxItem Content="Relatief vanaf eerste geëxporteerde meetpunt (0 s)"/>
+                    </ComboBox>
+                    <TextBlock Text="Alle signalen delen hetzelfde nulpunt. timestamp_utc en unix_time_ns blijven altijd absoluut."
+                               TextWrapping="Wrap" Margin="0,6,0,0" Foreground="#555555"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <WrapPanel Margin="0,0,0,6">
+                        <Button Content="Software / internationaal" Click="UseSoftwareFormat"/>
+                        <Button Content="Excel (NL)" Click="UseExcelFormat"/>
+                    </WrapPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Scheidingsteken" Margin="0,0,0,3"/>
+                            <ComboBox x:Name="Delimiter" SelectedIndex="0" SelectionChanged="SettingsChanged">
+                                <ComboBoxItem Content="Komma (,)"/><ComboBoxItem Content="Puntkomma (;)"/><ComboBoxItem Content="Tab"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Decimalen" Margin="0,0,0,3"/>
+                            <ComboBox x:Name="Decimals" SelectedIndex="0" SelectionChanged="SettingsChanged">
+                                <ComboBoxItem Content="Punt · 12.345"/><ComboBoxItem Content="Komma · 12,345"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                    <CheckBox x:Name="Utf8Bom" Content="UTF-8 met BOM (tekenherkenning in Excel)"
+                              Margin="0,7,0,0" Checked="SettingsChanged" Unchecked="SettingsChanged"/>
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+        <GroupBox Grid.Row="3" Header="Voorbeeld · eerste 5 gekozen meetpunten" Margin="0,10,0,0">
+            <DockPanel>
+                <Button x:Name="PreviewButton" DockPanel.Dock="Top" Content="Voorbeeld vernieuwen" Click="RefreshPreview"
+                        HorizontalAlignment="Left" Margin="0,0,0,5"/>
+                <TextBox x:Name="PreviewText" IsReadOnly="True" Height="86" FontFamily="Consolas" FontSize="11"
+                         Text="Klik op Voorbeeld vernieuwen om de gekozen opmaak te bekijken."
+                         HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+            </DockPanel>
+        </GroupBox>
+        <DockPanel Grid.Row="4" Margin="0,12,0,0" LastChildFill="False">
+            <TextBlock x:Name="SelectionSummary" VerticalAlignment="Center" DockPanel.Dock="Left"/>
+            <Button x:Name="ExportButton" Content="Opslaan als…" Click="Accept" IsDefault="True" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+            <Button Content="Annuleren" IsCancel="True" DockPanel.Dock="Right" Margin="0"/>
+        </DockPanel>
+    </Grid>
+</Window>

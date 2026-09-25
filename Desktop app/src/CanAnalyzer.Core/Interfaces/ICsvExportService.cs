@@ -1,4 +1,5 @@
 using CanAnalyzer.Core.Domain;
+using CanAnalyzer.Core.Export;
 
 namespace CanAnalyzer.Core.Interfaces;
 
@@ -10,5 +11,8 @@ public interface ICsvExportService
     Task ExportDecodedSignalsAsync(
         string filePath,
         CanDataset dataset,
+        CancellationToken cancellationToken);
+
+    Task ExportDecodedSignalsAsync(string filePath, CanDataset dataset, CsvExportOptions options,
         CancellationToken cancellationToken);
 }

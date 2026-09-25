@@ -867,11 +867,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task ExportDecodedCsvAsync()
     {
-        if (_dataset is null)
+        if (_dataset is null || IsAnyBusy)
         {
             return;
         }
 
+        var dataset = _dataset;
+        var dialog = new CanAnalyzer.App.Views.CsvExportDialog(dataset,
+            Analysis.AvailableSignals.Where(s => s.IsSelected).Select(s => s.Label));
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner) dialog.Owner = owner;
+        if (dialog.ShowDialog() != true || dialog.Options is not { } options) return;
         var filePath = _fileDialogService.SaveCsvFile(LogFilePath);
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -880,19 +885,30 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            await _csvExportService.ExportDecodedSignalsAsync(filePath, _dataset, CancellationToken.None);
+            IsBusy = true;
+            ProgressLabel = "CSV exporteren…";
+            _loadCts = new CancellationTokenSource();
+            var token = _loadCts.Token;
+            using var reader = dataset.AcquireReadLease();
+            await Task.Run(() => _csvExportService.ExportDecodedSignalsAsync(filePath, dataset, options, token));
             _messageDialogService.ShowInfo("CSV export", $"Gedecodeerde data opgeslagen:\n{filePath}");
             _ = _telemetryService.TrackEventAsync("export_decoded_csv", new Dictionary<string, object?>
             {
-                ["decoded_sample_bucket"] = TelemetryBuckets.Count(_dataset.DecodedSamples.Count),
-                ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount),
-                ["dataset_completeness"] = _dataset.Completeness.ToString()
+                ["decoded_sample_bucket"] = TelemetryBuckets.Count(dataset.DecodedSamples.Count),
+                ["signal_bucket"] = TelemetryBuckets.Count(options.Signals?.Count ?? dataset.SignalCount),
+                ["dataset_completeness"] = dataset.Completeness.ToString()
             });
         }
+        catch (OperationCanceledException) { StatusText = "CSV-export geannuleerd."; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "CSV export failed");
             _messageDialogService.ShowError("CSV export mislukt", ex.Message);
+        }
+        finally
+        {
+            _loadCts?.Dispose(); _loadCts = null;
+            IsBusy = false; ProgressLabel = "Klaar.";
         }
     }
 

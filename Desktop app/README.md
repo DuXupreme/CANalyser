@@ -49,7 +49,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Per-signal offsets
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
-- Decoded CSV export met relatieve én absolute meettijd
+- Decoded CSV export met signaal- en kolomkeuze, relatieve/absolute meettijd en instelbare CSV-opmaak
 - Actief gebruik en batterijduur in CAN Analyse: instelbare detectie op motor-RPM,
   BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
   SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.
@@ -140,6 +140,16 @@ Why OxyPlot (instead of ScottPlot): this migration prioritizes MVVM-first bindin
    - `dotnet build CanAnalyzer.sln -c Release`
 3. Run:
    - `dotnet run --project src/CanAnalyzer.App/CanAnalyzer.App.csproj`
+
+CSV delen (bijvoorbeeld met Parker):
+
+1. Kies **Export CSV**. Selecteer signalen met de vinkjes, de zoekfunctie of **Uit analyse** (de aangevinkte signalen in de analysetab).
+2. Kies kolommen afzonderlijk of gebruik **Compact delen** voor tijd, CAN-ID, bericht, signaal, waarde, kanaal, eenheid en datasetstatus. **Alle kolommen** bewaart ook alle bronmetadata.
+3. Kies oorspronkelijke logtijd, relatief vanaf het eerste logrecord, of relatief vanaf het eerste geëxporteerde meetpunt. Alle signalen gebruiken hetzelfde nulpunt; `timestamp_utc` en `unix_time_ns` blijven absoluut. Zonder absolute logstart blijven die twee kolommen leeg.
+4. Kies **Software / internationaal** (komma, decimale punt, UTF-8) of **Excel (NL)** (puntkomma, decimale komma, UTF-8 met BOM). Scheidingsteken, decimalen en BOM zijn ook los instelbaar. Tab is eveneens beschikbaar.
+5. Controleer **Voorbeeld vernieuwen** en kies **Opslaan als…**. Eén rij per meetpunt, vaste kolomkoppen, CRLF-regels, volledige numerieke precisie en CSV-aanhalingstekens waar nodig. De hele log wordt geëxporteerd voor de gekozen signalen, zonder grafiekfilters, downsampling of interpolatie.
+
+Een lopende export is annuleerbaar via de bestaande annuleerknop. Bij annulering of een fout wordt een bestaand doelbestand niet vervangen.
 
 Actuator Testbench runs vergelijken:
 
