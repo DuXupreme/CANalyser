@@ -70,16 +70,29 @@ internal sealed class DiskBackedSignalIndex(string path) : ISignalSampleLookup, 
         }
 
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, PointBytes * BlockPoints, FileOptions.RandomAccess);
-        using var reader = new BinaryReader(stream);
+        var buffer = new byte[PointBytes * BlockPoints];
+        var loadedBlock = -1;
         for (var outputIndex = 0; outputIndex < maximumPoints; outputIndex++)
         {
             var sourceIndex = (long)outputIndex * (signal.Count - 1L) / (maximumPoints - 1L);
             var blockIndex = (int)(sourceIndex / BlockPoints);
             var pointIndex = (int)(sourceIndex % BlockPoints);
             var block = signal.Blocks[blockIndex];
-            stream.Position = block.Offset + (pointIndex * PointBytes);
-            yield return new SignalSeriesPoint(reader.ReadInt64(), reader.ReadInt64(), reader.ReadDouble());
+            if (loadedBlock != blockIndex)
+            {
+                stream.Position = block.Offset;
+                stream.ReadExactly(buffer, 0, block.Count * PointBytes);
+                loadedBlock = blockIndex;
+            }
+            yield return ReadPoint(buffer, pointIndex);
         }
+    }
+
+    private static SignalSeriesPoint ReadPoint(byte[] buffer, int index)
+    {
+        var point = buffer.AsSpan(index * PointBytes, PointBytes);
+        return new SignalSeriesPoint(BinaryPrimitives.ReadInt64LittleEndian(point),
+            BinaryPrimitives.ReadInt64LittleEndian(point[8..]), BinaryPrimitives.ReadDoubleLittleEndian(point[16..]));
     }
 
     private void Flush(SignalBuffer signal)

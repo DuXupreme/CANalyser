@@ -15,6 +15,8 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     private readonly string _frameIndexPath;
     private readonly DiskBackedSignalIndex _signalIndex;
     private readonly object _readLock = new();
+    private readonly Dictionary<(SignalIdentity Identity, string Unit), int> _metadataIds = [];
+    private readonly List<(SignalIdentity Identity, string Unit)> _metadata = [];
     private FileStream? _dataWriteStream;
     private FileStream? _indexWriteStream;
     private BinaryWriter? _dataWriter;
@@ -50,7 +52,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         _indexWriter = new BinaryWriter(_indexWriteStream, Encoding.UTF8, true);
         _frameIndexWriter = new BinaryWriter(_frameIndexWriteStream, Encoding.UTF8, true);
         _dataWriter.Write(Magic);
-        _dataWriter.Write(1);
+        _dataWriter.Write(2);
     }
 
     public int Count { get; private set; }
@@ -252,50 +254,57 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
 
     private static void Validate(BinaryReader reader)
     {
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) || reader.ReadInt32() != 1)
+        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) || reader.ReadInt32() != 2)
             throw new InvalidDataException("Unsupported or corrupt CANalyser sample-store format.");
     }
 
-    private static void Write(BinaryWriter writer, DecodedSignalSample sample)
+    private void Write(BinaryWriter writer, DecodedSignalSample sample)
     {
+        // This process-owned temporary store is never reopened by another instance. Keep
+        // invariant metadata once per signal/unit; timestamps, raw bits and quality stay exact.
+        var metadata = (sample.Identity, sample.Unit);
+        if (!_metadataIds.TryGetValue(metadata, out var metadataId))
+        {
+            metadataId = _metadata.Count;
+            _metadata.Add(metadata);
+            _metadataIds.Add(metadata, metadataId);
+        }
         writer.Write(sample.TimestampNanoseconds);
         writer.Write(sample.FrameIndex);
         writer.Write(sample.SourceLineNumber);
-        writer.Write(sample.Identity.Channel);
-        writer.Write((byte)sample.Identity.FrameFormat);
-        writer.Write(sample.Identity.IsExtended);
-        writer.Write(sample.Identity.FrameId);
-        writer.Write(sample.Identity.MessageName);
-        writer.Write(sample.Identity.SignalName);
+        writer.Write(metadataId);
         writer.Write(sample.Value);
-        var raw = sample.RawValue.ToByteArray();
-        writer.Write(raw.Length);
-        writer.Write(raw);
-        writer.Write(sample.Unit);
+        Span<byte> raw = stackalloc byte[128];
+        if (sample.RawValue.TryWriteBytes(raw, out var length))
+        {
+            writer.Write(length);
+            writer.Write(raw[..length]);
+        }
+        else
+        {
+            var largeRaw = sample.RawValue.ToByteArray();
+            writer.Write(largeRaw.Length);
+            writer.Write(largeRaw);
+        }
         writer.Write((byte)sample.Quality);
     }
 
-    private static DecodedSignalSample Read(BinaryReader reader)
+    private DecodedSignalSample Read(BinaryReader reader)
     {
         var timestamp = reader.ReadInt64();
         var frameIndex = reader.ReadInt64();
         var sourceLine = reader.ReadInt64();
-        var channel = reader.ReadString();
-        var format = (CanFrameFormat)reader.ReadByte();
-        var extended = reader.ReadBoolean();
-        var frameId = reader.ReadUInt32();
-        var message = reader.ReadString();
-        var signal = reader.ReadString();
+        var metadataId = reader.ReadInt32();
+        if ((uint)metadataId >= (uint)_metadata.Count) throw new InvalidDataException("Invalid sample metadata identifier.");
+        var metadata = _metadata[metadataId];
         var value = reader.ReadDouble();
         var rawLength = reader.ReadInt32();
         if (rawLength is < 0 or > 1024) throw new InvalidDataException("Invalid raw-value length in sample store.");
         var rawBytes = reader.ReadBytes(rawLength);
         if (rawBytes.Length != rawLength) throw new EndOfStreamException("Truncated CANalyser sample store.");
-        var unit = reader.ReadString();
         var quality = (DecodeQuality)reader.ReadByte();
         return new DecodedSignalSample(timestamp, frameIndex, sourceLine,
-            new SignalIdentity(channel, format, extended, frameId, message, signal),
-            value, new BigInteger(rawBytes), unit, quality);
+            metadata.Identity, value, new BigInteger(rawBytes), metadata.Unit, quality);
     }
 
     private static void TryDelete(string path)

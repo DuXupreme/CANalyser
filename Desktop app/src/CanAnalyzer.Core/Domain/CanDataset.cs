@@ -7,6 +7,10 @@ namespace CanAnalyzer.Core.Domain;
 /// </summary>
 public sealed class CanDataset : IDisposable
 {
+    private readonly object _lifetime = new();
+    private int _readers;
+    private bool _disposeRequested;
+    private bool _storesDisposed;
     public required IReadOnlyList<RawCanFrame> RawFrames { get; init; }
 
     public required IReadOnlyList<DecodedSignalSample> DecodedSamples { get; init; }
@@ -59,7 +63,46 @@ public sealed class CanDataset : IDisposable
 
     public void Dispose()
     {
+        lock (_lifetime)
+        {
+            _disposeRequested = true;
+            if (_readers != 0 || _storesDisposed) return;
+            _storesDisposed = true;
+        }
+        DisposeStores();
+    }
+
+    /// <summary>Keep disk stores alive until an already-started background reader finishes.</summary>
+    public IDisposable AcquireReadLease()
+    {
+        lock (_lifetime)
+        {
+            ObjectDisposedException.ThrowIf(_disposeRequested, this);
+            _readers++;
+            return new ReadLease(this);
+        }
+    }
+
+    private void ReleaseReader()
+    {
+        lock (_lifetime)
+        {
+            _readers--;
+            if (_readers != 0 || !_disposeRequested || _storesDisposed) return;
+            _storesDisposed = true;
+        }
+        DisposeStores();
+    }
+
+    private void DisposeStores()
+    {
         if (OwnsRawFrames) (RawFrames as IDisposable)?.Dispose();
         (DecodedSamples as IDisposable)?.Dispose();
+    }
+
+    private sealed class ReadLease(CanDataset owner) : IDisposable
+    {
+        private CanDataset? _owner = owner;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ReleaseReader();
     }
 }

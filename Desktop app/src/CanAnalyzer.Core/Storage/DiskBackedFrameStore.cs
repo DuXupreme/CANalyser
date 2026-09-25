@@ -27,9 +27,9 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
     private bool _completed;
     private bool _disposed;
 
-    public DiskBackedFrameStore()
+    public DiskBackedFrameStore(string? cacheDirectory = null)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "CANalyser", "frame-cache");
+        var directory = cacheDirectory ?? Path.Combine(Path.GetTempPath(), "CANalyser", "frame-cache");
         Directory.CreateDirectory(directory);
         var id = Guid.NewGuid().ToString("N");
         _dataPath = Path.Combine(directory, $"{id}.frames");

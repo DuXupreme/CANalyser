@@ -24,6 +24,8 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet restore CanAnalyzer.sln
       - run: dotnet build CanAnalyzer.sln -c Release --no-restore --nologo
+      - name: WPF responsiveness and plotting regressions
+        run: dotnet test src/CanAnalyzer.App.Tests/CanAnalyzer.App.Tests.csproj -c Release --no-build --nologo
       - name: Tests and Core line-coverage gate (85%)
         run: >-
           dotnet test src/CanAnalyzer.Tests/CanAnalyzer.Tests.csproj -c Release --no-build --nologo

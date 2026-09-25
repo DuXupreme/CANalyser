@@ -19,7 +19,7 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     private const int MaximumAnalysisPointsPerSignal = 250_000;
     private const string NoSignal = "(geen — gebruik meetdekking als schatting)";
     private readonly ITelemetryService _telemetryService;
-    private readonly Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
+    private Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
     private CanDataset? _dataset;
     private CancellationTokenSource? _calculation;
     private int _revision;
@@ -84,7 +84,8 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     {
         Invalidate();
         _dataset = dataset;
-        _analysisSeriesCache.Clear();
+        // A running calculation owns its old cache until its dataset lease is released.
+        _analysisSeriesCache = new(StringComparer.Ordinal);
         _loading = true;
         try
         {
@@ -150,9 +151,10 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         });
         try
         {
-            var activity = Resolve(dataset, ActivitySignal);
-            var soc = Resolve(dataset, SocSignal);
-            var on = Resolve(dataset, OnSignal);
+            var activityLabel = ActivitySignal;
+            var socLabel = SocSignal;
+            var onLabel = OnSignal;
+            var cache = _analysisSeriesCache;
             var options = new ActiveUsageOptions
             {
                 Method = UseSocSlope ? ActivityDetectionMethod.SocSlope : ActivityDetectionMethod.SignalThreshold,
@@ -165,8 +167,19 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
                 StartSeconds = _start ?? (dataset.RawCount > 0 ? dataset.RawFrames[0].TimeSeconds : null),
                 EndSeconds = _end ?? (dataset.RawCount > 0 ? dataset.RawFrames[^1].TimeSeconds : null)
             };
-            var result = await Task.Run(() => new ActiveUsageAnalyzer().Analyze(activity, soc, on, options,
-                dataset.ImportReport?.Gaps, cancellation.Token), cancellation.Token);
+            var reader = dataset.AcquireReadLease();
+            var result = await Task.Run(() =>
+            {
+                using (reader)
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    var activity = Resolve(dataset, activityLabel, cache);
+                    var soc = Resolve(dataset, socLabel, cache);
+                    var on = Resolve(dataset, onLabel, cache);
+                    return new ActiveUsageAnalyzer().Analyze(activity, soc, on, options,
+                        dataset.ImportReport?.Gaps, cancellation.Token);
+                }
+            });
             if (revision != _revision) return;
             ShowResult(result, dataset.Completeness);
         }
@@ -266,12 +279,12 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         return model;
     }
 
-    private SignalSeries? Resolve(CanDataset dataset, string? label)
+    private static SignalSeries? Resolve(CanDataset dataset, string? label, Dictionary<string, SignalSeries> cache)
     {
         if (label is null || !dataset.SignalSeriesByLabel.TryGetValue(label, out var series)) return null;
-        if (_analysisSeriesCache.TryGetValue(label, out var cached)) return cached;
+        if (cache.TryGetValue(label, out var cached)) return cached;
         cached = series.ForAnalysis(MaximumAnalysisPointsPerSignal);
-        _analysisSeriesCache[label] = cached;
+        cache[label] = cached;
         return cached;
     }
     private static bool Contains(string text, string part) => text.Contains(part, StringComparison.OrdinalIgnoreCase);

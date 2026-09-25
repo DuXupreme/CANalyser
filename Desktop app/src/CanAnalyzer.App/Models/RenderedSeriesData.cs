@@ -13,4 +13,10 @@ public sealed record RenderedSeriesData(
     OxyColor Color)
 {
     public IReadOnlyList<CanAnalyzer.Core.Domain.MeasurementGap> Gaps { get; init; } = [];
+    private CanAnalyzer.Core.Analysis.SignalRangeIndex? _rangeIndex;
+    public CanAnalyzer.Core.Analysis.SignalRangeIndex RangeIndex
+    {
+        get => _rangeIndex ??= new(Time, Value);
+        init => _rangeIndex = value;
+    }
 }

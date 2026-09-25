@@ -29,6 +29,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private object? _exportCan;
     private bool _suppressTimeWindowAutoRecompute;
     private bool _suppressPlaybackAutoRefresh;
+    private bool _loadingDataset;
+    private int _analysisRevision;
+    private bool _recomputeRequested;
+    private readonly List<string> _failedAnalyses = [];
     private DateTime _lastPlaybackTickUtc;
     private IReadOnlyList<JoystickUsagePoint> _currentJoystickFilteredPath = [];
     private double _currentJoystickDeadzone;
@@ -166,7 +170,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private void InvalidateUsage()
     {
-        if (IsBusy) return;
+        _analysisRevision++;
         StopJoystickPlayback();
         _currentJoystickFilteredPath = [];
         StrokeCards.Clear();
@@ -180,6 +184,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     }
     private void InvalidateDelay()
     {
+        _analysisRevision++;
         _lastDelayResult = null; _exportFirstResponse = null; DelayMetrics.Clear();
         DelayHistogramModel = EmptyPlot("Herbereken latency"); DelayOverlayModel = EmptyPlot("Herbereken latency");
     }
@@ -244,7 +249,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
         if (_dataset is not null)
         {
-            RunAnalysisSafely(BuildDelayAnalytics, "Latency");
+            InvalidateDelay();
+            _ = RecomputeAsync();
         }
     }
 
@@ -295,29 +301,35 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     public void LoadDataset(CanDataset dataset)
     {
-        StopJoystickPlayback();
-        _suppressTimeWindowAutoRecompute = true;
+        _loadingDataset = true;
+        _analysisRevision++;
         try
         {
-            UseJoystickTimeWindow = false;
-            JoystickTimeStartSeconds = JoystickTimeEndSeconds = 0;
+            StopJoystickPlayback();
+            _suppressTimeWindowAutoRecompute = true;
+            try
+            {
+                UseJoystickTimeWindow = false;
+                JoystickTimeStartSeconds = JoystickTimeEndSeconds = 0;
+            }
+            finally { _suppressTimeWindowAutoRecompute = false; }
+            _dataset = dataset;
+            ActiveUsage.LoadDataset(dataset);
+            AvailableSignals.Clear();
+            OptionalSignals.Clear(); OptionalSignals.Add(string.Empty);
+            foreach (var range in ActuatorRanges)
+            {
+                range.CenterSignal = range.SetpointSignal = range.HalfRangeSignal = range.RunSignal = null;
+                range.ManualCenter = null; range.HalfRange = null;
+            }
+            foreach (var label in dataset.SignalLabels) { AvailableSignals.Add(label); OptionalSignals.Add(label); }
+            AvailableCanChannels.Clear();
+            foreach (var channel in dataset.Channels) AvailableCanChannels.Add(channel);
+            SelectedCanChannel = AvailableCanChannels.FirstOrDefault();
+            AutoDetectButterflySignals();
+            AutoDetectDelaySignals();
         }
-        finally { _suppressTimeWindowAutoRecompute = false; }
-        _dataset = dataset;
-        ActiveUsage.LoadDataset(dataset);
-        AvailableSignals.Clear();
-        OptionalSignals.Clear(); OptionalSignals.Add(string.Empty);
-        foreach (var range in ActuatorRanges)
-        {
-            range.CenterSignal = range.SetpointSignal = range.HalfRangeSignal = range.RunSignal = null;
-            range.ManualCenter = null; range.HalfRange = null;
-        }
-        foreach (var label in dataset.SignalLabels) { AvailableSignals.Add(label); OptionalSignals.Add(label); }
-        AvailableCanChannels.Clear();
-        foreach (var channel in dataset.Channels) AvailableCanChannels.Add(channel);
-        SelectedCanChannel = AvailableCanChannels.FirstOrDefault();
-        AutoDetectButterflySignals();
-        AutoDetectDelaySignals();
+        finally { _loadingDataset = false; }
         _ = RecomputeAsync();
     }
 
@@ -325,6 +337,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     {
         if (IsBusy)
         {
+            _recomputeRequested = true;
             return;
         }
 
@@ -336,6 +349,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         IsBusy = true;
+        _failedAnalyses.Clear();
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var operationProperties = new Dictionary<string, object?>
         {
@@ -347,28 +361,31 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         {
             _ = _telemetryService.TrackEventAsync("analytics_recompute_started", operationProperties);
             BusyLabel = "Joystickanalyse herberekenen...";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            RunAnalysisSafely(BuildJoystickUsageAnalytics, "Gebruik");
+            await RunAnalysisSafelyAsync(BuildJoystickUsageAnalyticsAsync, "Gebruik");
 
             BusyLabel = "Actuatoranalyse herberekenen...";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            RunAnalysisSafely(BuildActuatorTrackingAnalytics, "Actuatorvolging");
+            await RunAnalysisSafelyAsync(BuildActuatorTrackingAnalyticsAsync, "Actuatorvolging");
 
             BusyLabel = "Vertragingsanalyse herberekenen...";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            RunAnalysisSafely(BuildDelayAnalytics, "Latency");
+            await RunAnalysisSafelyAsync(BuildDelayAnalyticsAsync, "Latency");
 
             BusyLabel = "CAN-overzichten herberekenen...";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            RunAnalysisSafely(BuildProfessionalCanAnalytics, "CAN");
-        StatusText = _dataset.Completeness == DatasetCompleteness.Partial
-            ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
-            : "COMPLETE — analyses bijgewerkt.";
-            _ = _telemetryService.TrackEventAsync("analytics_recompute_completed", new Dictionary<string, object?>
+            await RunAnalysisSafelyAsync(BuildProfessionalCanAnalyticsAsync, "CAN");
+            StatusText = _failedAnalyses.Count > 0
+                ? $"Niet alle analyses berekend: {string.Join(", ", _failedAnalyses.Distinct())}. Bekijk de melding bij het onderdeel."
+                : _dataset.Completeness == DatasetCompleteness.Partial
+                ? "PARTIAL — analyses zijn gebaseerd op bewust onvolledig geaccepteerde data."
+                : "COMPLETE — analyses bijgewerkt.";
+            if (_failedAnalyses.Count == 0) _ = _telemetryService.TrackEventAsync("analytics_recompute_completed", new Dictionary<string, object?>
             {
                 ["duration_ms"] = stopwatch.ElapsedMilliseconds,
                 ["signal_bucket"] = TelemetryBuckets.Count(_dataset.SignalCount)
             });
+        }
+        catch (OperationCanceledException)
+        {
+            ClearOutputs();
+            StatusText = "Instellingen gewijzigd tijdens de berekening. Bereken de analyses opnieuw.";
         }
         catch (Exception ex)
         {
@@ -384,14 +401,25 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             stopwatch.Stop();
             _telemetryService.CompleteCriticalOperation(operationId);
             IsBusy = false;
+            if (_recomputeRequested)
+            {
+                _recomputeRequested = false;
+                _ = RecomputeAsync();
+            }
         }
     }
 
-    private void RunAnalysisSafely(Action calculate, string name)
+    private async Task RunAnalysisSafelyAsync(Func<Task> calculate, string name)
     {
-        try { calculate(); }
+        try { await calculate(); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException)
         {
+            _failedAnalyses.Add(name);
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_failed", new Dictionary<string, object?>
+            {
+                ["exception_type"] = ex.GetType().Name,
+                ["analysis_stage"] = name
+            });
             if (name == "Latency")
             {
                 _lastDelayResult = null; _exportFirstResponse = null; DelayMetrics.Clear();
@@ -416,6 +444,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private void InvalidateTracking()
     {
+        _analysisRevision++;
         ActuatorMatrix.Clear();
         _exportTracking.Clear();
         ActuatorSummary = "Instellingen gewijzigd; herbereken actuatorvolging.";
@@ -427,12 +456,27 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private void RefreshProfessionalCanAnalyticsFromSettings()
     {
-        if (_dataset is null)
+        if (_dataset is null || _loadingDataset)
         {
             return;
         }
 
-        RunAnalysisSafely(BuildProfessionalCanAnalytics, "CAN");
+        _analysisRevision++;
+        _ = RecomputeAsync();
+    }
+
+    private async Task<T> ComputeAsync<T>(Func<T> calculate)
+    {
+        var dataset = _dataset;
+        var revision = _analysisRevision;
+        var reader = dataset?.AcquireReadLease();
+        T result;
+        try { result = await Task.Run(() => { using (reader) return calculate(); }); }
+        catch (Exception) when (revision != _analysisRevision || !ReferenceEquals(dataset, _dataset))
+        { throw new OperationCanceledException("Analysis settings changed."); }
+        if (revision != _analysisRevision || !ReferenceEquals(dataset, _dataset))
+            throw new OperationCanceledException("Analysis settings changed.");
+        return result;
     }
 
     private void RecomputeJoystickWindowIfNeeded()
@@ -610,6 +654,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     {
         StopJoystickPlayback();
         _lastDelayResult = null;
+        _exportJoystick = null;
+        _exportCan = null;
         StrokeCards.Clear();
         StrokeDistributionModel = EmptyPlot("Geen actuatorposities geselecteerd");
         JoystickDeadzoneText = JoystickSaturationText = JoystickCoverageText = "—";
@@ -640,18 +686,23 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private async Task RecomputeUsageAsync()
     {
-        if (IsBusy) return;
+        if (IsBusy) { _recomputeRequested = true; return; }
         IsBusy = true;
+        _failedAnalyses.Clear();
         try
         {
             JoystickUsageStatus = "Analyse wordt berekend…";
-            await Dispatcher.Yield(DispatcherPriority.Background);
-            RunAnalysisSafely(BuildJoystickUsageAnalytics, "Gebruik");
+            await RunAnalysisSafelyAsync(BuildJoystickUsageAnalyticsAsync, "Gebruik");
         }
-        finally { IsBusy = false; }
+        catch (OperationCanceledException) { ClearUsageResults(); JoystickUsageStatus = "Instellingen gewijzigd. Bereken opnieuw."; }
+        finally
+        {
+            IsBusy = false;
+            if (_recomputeRequested) { _recomputeRequested = false; _ = RecomputeAsync(); }
+        }
     }
 
-    private void BuildJoystickUsageAnalytics()
+    private async Task BuildJoystickUsageAnalyticsAsync()
     {
         _exportJoystick = null;
         StopJoystickPlayback();
@@ -663,12 +714,18 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         RadiusHistogramModel = EmptyPlot("Geen uitslagverdeling beschikbaar");
         var selectedSeries = new[] { SelectedJoystickXSignal, SelectedJoystickYSignal, SelectedActuatorLeftSignal, SelectedActuatorRightSignal, SelectedActuatorFrontSignal }
             .Select(label => TryGetSeries(label, out var series) ? series : null)
-            .Where(series => series is not null && series.Time.Length > 0).ToArray();
+            .Where(series => series is not null).ToArray();
+        var bounds = await ComputeAsync(() =>
+        {
+            var populated = selectedSeries.Where(s => s!.Time.Length > 0).ToArray();
+            return (Start: populated.Length > 0 ? populated.Min(s => s!.Time[0]) : 0,
+                End: populated.Length > 0 ? populated.Max(s => s!.Time[^1]) : 0);
+        });
         _suppressTimeWindowAutoRecompute = true;
         try
         {
-            JoystickAvailableStartSeconds = selectedSeries.Length > 0 ? selectedSeries.Min(s => s!.Time[0]) : 0;
-            JoystickAvailableEndSeconds = selectedSeries.Length > 0 ? selectedSeries.Max(s => s!.Time[^1]) : 0;
+            JoystickAvailableStartSeconds = bounds.Start;
+            JoystickAvailableEndSeconds = bounds.End;
             if (!UseJoystickTimeWindow)
             {
                 JoystickTimeStartSeconds = JoystickAvailableStartSeconds;
@@ -676,7 +733,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             }
         }
         finally { _suppressTimeWindowAutoRecompute = false; }
-        BuildStrokeUsage();
+        await BuildStrokeUsageAsync();
         if (!double.IsFinite(DeadzoneThreshold) || !double.IsFinite(SaturationThreshold)
             || DeadzoneThreshold < 0 || SaturationThreshold > 1 || DeadzoneThreshold >= SaturationThreshold
             || !double.IsFinite(StrokeEdgePercent) || StrokeEdgePercent <= 0 || StrokeEdgePercent >= 50
@@ -703,18 +760,19 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return;
         }
         JoystickUsageResult result;
-        try { result = UsageAnalytics.AnalyzeJoystick(sx, sy,
-            UseJoystickTimeWindow ? JoystickTimeStartSeconds : null,
-            UseJoystickTimeWindow ? JoystickTimeEndSeconds : null,
-            DeadzoneThreshold, SaturationThreshold, HistogramBins,
-            UseJoystickCalibration ? JoystickMinimum : null, UseJoystickCalibration ? JoystickMaximum : null,
-            UsageMaximumGapSeconds, _dataset?.ImportReport?.Gaps); }
+        var window = AnalysisWindow;
+        var deadzone = DeadzoneThreshold; var saturation = SaturationThreshold; var bins = HistogramBins;
+        double? minimum = UseJoystickCalibration ? JoystickMinimum : null, maximum = UseJoystickCalibration ? JoystickMaximum : null;
+        var maximumGap = UsageMaximumGapSeconds; var gaps = _dataset?.ImportReport?.Gaps;
+        try { result = await ComputeAsync(() => UsageAnalytics.AnalyzeJoystick(sx, sy,
+            window.Start, window.End, deadzone, saturation, bins, minimum, maximum, maximumGap, gaps)); }
         catch (ArgumentException ex) { JoystickUsageStatus = ex.Message; return; }
         if (result.CoveredSeconds <= 0)
         {
             JoystickUsageStatus = "Geen gezamenlijke meetdekking in dit tijdvenster. Kies een ander venster of controleer de signalen.";
             return;
         }
+        var densityModel = await ComputeAsync(() => BuildPointCloud(result.Points, deadzone, saturation));
         _exportJoystick = result;
         JoystickDeadzoneText = UseJoystickCalibration ? UsagePercent(result.DeadzonePercent) : "Kalibratie nodig";
         JoystickSaturationText = UseJoystickCalibration ? UsagePercent(result.SaturationPercent) : "Kalibratie nodig";
@@ -738,7 +796,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             JoystickPlaybackPositionSeconds = JoystickPlaybackEndSeconds;
         }
         finally { _suppressPlaybackAutoRefresh = false; }
-        JoystickDensityModel = BuildPointCloud(_currentJoystickFilteredPath, DeadzoneThreshold, SaturationThreshold);
+        JoystickDensityModel = densityModel;
         RadiusHistogramModel = BuildUsageHistogram(result.RadiusDistribution, result.CoveredSeconds, "Joystickuitslag (genormaliseerd)");
         AddRadiusGuides(RadiusHistogramModel, DeadzoneThreshold, SaturationThreshold);
         UpdateJoystickPlaybackPlots();
@@ -758,7 +816,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     private (double? Start, double? End) AnalysisWindow => UseJoystickTimeWindow
         ? (JoystickTimeStartSeconds, JoystickTimeEndSeconds) : (null, null);
 
-    private void BuildStrokeUsage()
+    private async Task BuildStrokeUsageAsync()
     {
         StrokeCards.Clear();
         var model = new PlotModel { Title = "Tijd binnen beschikbaar regelbereik", TitleFontSize = 14, IsLegendVisible = true };
@@ -777,8 +835,10 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 if (TryGetSeries(labels[i], out var series))
                 {
                     var reference = ReferenceFor(settings);
-                    result = CalibratedStrokeAnalytics.Analyze(series, reference, AnalysisWindow.Start, AnalysisWindow.End,
-                        StrokeEdgePercent, HistogramBins, _dataset?.ImportReport?.Gaps);
+                    var window = AnalysisWindow; var edge = StrokeEdgePercent; var bins = HistogramBins;
+                    var gaps = _dataset?.ImportReport?.Gaps;
+                    result = await ComputeAsync(() => CalibratedStrokeAnalytics.Analyze(series, reference, window.Start, window.End,
+                        edge, bins, gaps));
                     note = $"Nulpunt: {(string.IsNullOrWhiteSpace(settings.CenterSignal) ? settings.ManualCenter?.ToString("G", CultureInfo.CurrentCulture) : settings.CenterSignal)}. " +
                         (string.IsNullOrWhiteSpace(settings.HalfRangeSignal) ? $"Halfbereik: {settings.HalfRange:G} signaaleenheden. " : "Halfbereik volgt gekozen signaal. ") +
                         (reference.RunSignal is null ? "Geen bedrijfsfilter: sluit kalibratie en parkeren zelf uit met het tijdvenster." : "Alleen gekozen bedrijfsstatus; nulpuntwisselingen uitgesloten.");
@@ -808,16 +868,16 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         return model;
     }
 
-    private SignalSeries Windowed(SignalSeries source)
+    private static SignalSeries Windowed(SignalSeries source, (double? Start, double? End) window)
     {
-        if (!UseJoystickTimeWindow) return source;
-        if (!double.IsFinite(JoystickTimeStartSeconds) || !double.IsFinite(JoystickTimeEndSeconds) || JoystickTimeEndSeconds <= JoystickTimeStartSeconds)
+        if (window.Start is not { } start || window.End is not { } end) return source;
+        if (!double.IsFinite(start) || !double.IsFinite(end) || end <= start)
             throw new ArgumentException("Kies een geldig tijdvenster op Joystick gebruiksanalyse.");
-        var indices = Enumerable.Range(0, source.Time.Length).Where(i => source.Time[i] >= JoystickTimeStartSeconds && source.Time[i] <= JoystickTimeEndSeconds).ToArray();
+        var indices = Enumerable.Range(0, source.Time.Length).Where(i => source.Time[i] >= start && source.Time[i] <= end).ToArray();
         return new SignalSeries(source.Label, indices.Select(i => source.Time[i]).ToArray(), indices.Select(i => source.Value[i]).ToArray());
     }
 
-    private void BuildActuatorTrackingAnalytics()
+    private async Task BuildActuatorTrackingAnalyticsAsync()
     {
         ActuatorMatrix.Clear();
         _exportTracking.Clear();
@@ -835,8 +895,16 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 var reference = new StrokeReference(0, 50, Setpoint: command, RunSignal: ResolveOptional(settings.RunSignal),
                     RunValue: settings.RunValue, MaximumGapSeconds: UsageMaximumGapSeconds);
                 // Half-range 50 makes percentage-point error equal the error in decoded position units.
-                var result = CalibratedStrokeAnalytics.Analyze(feedback, reference, AnalysisWindow.Start, AnalysisWindow.End,
-                    gaps: _dataset?.ImportReport?.Gaps);
+                var window = AnalysisWindow; var gaps = _dataset?.ImportReport?.Gaps;
+                var calculated = await ComputeAsync(() =>
+                {
+                    var result = CalibratedStrokeAnalytics.Analyze(feedback, reference, window.Start, window.End, gaps: gaps);
+                    var c = Windowed(command, window); var f = Windowed(feedback, window);
+                    return (Result: result,
+                        Command: BuildStairSeries("Setpoint", c.Time.Zip(c.Value, (t, v) => new TimeValuePoint(t, v)).ToArray(), OxyColors.SteelBlue, 1.5),
+                        Feedback: BuildStairSeries("Feedback", f.Time.Zip(f.Value, (t, v) => new TimeValuePoint(t, v)).ToArray(), OxyColors.DarkOrange, 1.5));
+                });
+                var result = calculated.Result;
                 _exportTracking.Add(new { settings.Name, Feedback = feedback.Label, Setpoint = command.Label,
                     result.SetpointCoveredSeconds, MeanAbsoluteError = result.MeanAbsoluteErrorPercent, Unit = "decoded position unit" });
                 errors[i] = result.MeanAbsoluteErrorPercent?.ToString("0.###", CultureInfo.CurrentCulture) ?? "—";
@@ -845,9 +913,8 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
                 model.Legends.Add(new OxyPlot.Legends.Legend());
                 model.Axes.Add(Axis(AxisPosition.Bottom, "Tijd [s]"));
                 model.Axes.Add(Axis(AxisPosition.Left, "Positie [gedecodeerde eenheid]"));
-                var c = Windowed(command); var f = Windowed(feedback);
-                model.Series.Add(BuildStairSeries("Setpoint", c.Time.Zip(c.Value, (t, v) => new TimeValuePoint(t, v)).ToArray(), OxyColors.SteelBlue, 1.5));
-                model.Series.Add(BuildStairSeries("Feedback", f.Time.Zip(f.Value, (t, v) => new TimeValuePoint(t, v)).ToArray(), OxyColors.DarkOrange, 1.5));
+                model.Series.Add(calculated.Command);
+                model.Series.Add(calculated.Feedback);
                 plots[i] = model;
             }
             catch (ArgumentException ex) { notes.Add(settings.Name + ": " + ex.Message); }
@@ -873,7 +940,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
 
     private static string DelayNumber(double? value) => value?.ToString("0.######", CultureInfo.CurrentCulture) ?? "—";
 
-    private void BuildDelayAnalytics()
+    private async Task BuildDelayAnalyticsAsync()
     {
         DelayMetrics.Clear();
         _exportFirstResponse = null;
@@ -885,18 +952,27 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return;
         }
 
-        cmd = Windowed(cmd); rsp = Windowed(rsp);
-        if (cmd.Time.Length > 0 && rsp.Time.Length > 0 && (_dataset?.ImportReport?.Gaps ?? []).Any(g =>
-            g.StartSeconds < Math.Min(cmd.Time[^1], rsp.Time[^1]) && g.EndSeconds > Math.Max(cmd.Time[0], rsp.Time[0])))
-            throw new ArgumentException("Datagat in delayselectie; kies één aaneengesloten meetperiode met het tijdvenster.");
+        var window = AnalysisWindow; var gaps = _dataset?.ImportReport?.Gaps;
         var searchRange = Math.Max(0.05, DelaySearchRangeSeconds);
-        _lastDelayResult = null;
-        string? correlationNote = null;
-        try { _lastDelayResult = _analyticsService.AnalyzeDelay(cmd, rsp, searchRange, 0.5, 200_000); }
-        catch (InvalidOperationException ex) { correlationNote = ex.Message; }
-
         var thresholdFraction = Math.Clamp(ResponseThresholdPercent, 0.1, 50.0) / 100.0;
-        var fr = _analyticsService.AnalyzeFirstResponseDelay(cmd, rsp, searchRange, thresholdFraction, 30);
+        _lastDelayResult = null;
+        var calculated = await ComputeAsync(() =>
+        {
+            var command = Windowed(cmd, window); var response = Windowed(rsp, window);
+            if (command.Time.Length > 0 && response.Time.Length > 0 && (gaps ?? []).Any(g =>
+                g.StartSeconds < Math.Min(command.Time[^1], response.Time[^1]) && g.EndSeconds > Math.Max(command.Time[0], response.Time[0])))
+                throw new ArgumentException("Datagat in delayselectie; kies één aaneengesloten meetperiode met het tijdvenster.");
+            DelayAnalysisResult? correlation = null;
+            string? note = null;
+            try { correlation = _analyticsService.AnalyzeDelay(command, response, searchRange, 0.5, 200_000); }
+            catch (InvalidOperationException ex) { note = ex.Message; }
+            return (Correlation: correlation, Note: note,
+                FirstResponse: _analyticsService.AnalyzeFirstResponseDelay(command, response, searchRange, thresholdFraction, 30),
+                CommandGap: UsageAnalyticsGap(command), ResponseGap: UsageAnalyticsGap(response));
+        });
+        _lastDelayResult = calculated.Correlation;
+        var correlationNote = calculated.Note;
+        var fr = calculated.FirstResponse;
 
         _exportFirstResponse = fr;
         Add(DelayMetrics, "Command", fr.CommandSignalLabel);
@@ -916,14 +992,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         Add(DelayMetrics, "Lag (correlatie) [s]", DelayNumber(_lastDelayResult?.BestLagSeconds));
         Add(DelayMetrics, "Correlatie kwaliteit (-1..1)", DelayNumber(_lastDelayResult?.BestCorrelation));
         if (correlationNote is not null) Add(DelayMetrics, "Correlatie niet berekend", correlationNote);
-        Add(DelayMetrics, "Sampleafstand commando / feedback [s]", $"{UsageAnalyticsGap(cmd):G4} / {UsageAnalyticsGap(rsp):G4}");
+        Add(DelayMetrics, "Sampleafstand commando / feedback [s]", $"{calculated.CommandGap:G4} / {calculated.ResponseGap:G4}");
         var deadModel = BuildHistogram("Dode tijd histogram (commando → eerste reactie)", fr.DeadTimeHistogram, "Dode tijd [s]", OxyColor.Parse("#59A14F"));
         AddCumulativeOverlay(deadModel, fr.DeadTimeHistogram);
         DelayHistogramModel = deadModel;
         RefreshDelayOverlayFromCache();
     }
 
-    private void BuildProfessionalCanAnalytics()
+    private async Task BuildProfessionalCanAnalyticsAsync()
     {
         _exportCan = null;
         ProfessionalCanMetrics.Clear();
@@ -938,14 +1014,19 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             return;
         }
 
-        var frames = _dataset.RawFrames.Where(f => f.Channel == SelectedCanChannel);
-        var start = double.PositiveInfinity; var end = double.NegativeInfinity;
-        var frameCount = 0; var extendedCount = 0;
-        foreach (var frame in frames)
+        var channel = SelectedCanChannel;
+        var frames = _dataset.RawFrames.Where(f => f.Channel == channel);
+        var (start, end, frameCount, extendedCount) = await ComputeAsync(() =>
         {
-            frameCount++; if (frame.IsExtended) extendedCount++;
-            start = Math.Min(start, frame.TimeSeconds); end = Math.Max(end, frame.TimeSeconds);
-        }
+            var start = double.PositiveInfinity; var end = double.NegativeInfinity;
+            var count = 0; var extended = 0;
+            foreach (var frame in frames)
+            {
+                count++; if (frame.IsExtended) extended++;
+                start = Math.Min(start, frame.TimeSeconds); end = Math.Max(end, frame.TimeSeconds);
+            }
+            return (start, end, count, extended);
+        });
         if (frameCount == 0)
         {
             CanFrameRateModel = EmptyPlot("Geen frames op dit kanaal");
@@ -971,42 +1052,46 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         }
 
         var binCount = (int)Math.Min(200_000L, requiredBinCount);
-        var frameRateBins = new double[binCount];
-        var busTimeBins = new double[binCount];
-        var perId = new Dictionary<CanStreamKey, CanIdAccumulator>(256);
-        var errorFrames = 0;
-        var remoteFrames = 0;
-        var totalTransmissionSeconds = 0.0;
-        foreach (var frame in orderedFrames)
+        var (frameRateBins, busTimeBins, perId, errorFrames, remoteFrames, totalTransmissionSeconds) = await ComputeAsync(() =>
         {
-            var bin = Math.Clamp((int)((frame.TimeSeconds - start) / binWidthSeconds), 0, binCount - 1);
-            frameRateBins[bin] += 1;
-
-            var estimatedTransmissionSeconds = EstimateFrameDurationSeconds(frame, arbitrationBitrate, dataBitrate);
-            busTimeBins[bin] += estimatedTransmissionSeconds;
-            totalTransmissionSeconds += estimatedTransmissionSeconds;
-
-            if (frame.Type.Contains("err", StringComparison.OrdinalIgnoreCase) ||
-                frame.Type.Contains("error", StringComparison.OrdinalIgnoreCase))
+            var frameRateBins = new double[binCount];
+            var busTimeBins = new double[binCount];
+            var perId = new Dictionary<CanStreamKey, CanIdAccumulator>(256);
+            var errorFrames = 0;
+            var remoteFrames = 0;
+            var totalTransmissionSeconds = 0.0;
+            foreach (var frame in orderedFrames)
             {
-                errorFrames++;
-            }
+                var bin = Math.Clamp((int)((frame.TimeSeconds - start) / binWidthSeconds), 0, binCount - 1);
+                frameRateBins[bin] += 1;
 
-            if (frame.Type.Contains("rtr", StringComparison.OrdinalIgnoreCase) ||
-                frame.Type.Contains("remote", StringComparison.OrdinalIgnoreCase))
-            {
-                remoteFrames++;
-            }
+                var estimatedTransmissionSeconds = EstimateFrameDurationSeconds(frame, arbitrationBitrate, dataBitrate);
+                busTimeBins[bin] += estimatedTransmissionSeconds;
+                totalTransmissionSeconds += estimatedTransmissionSeconds;
 
-            var key = new CanStreamKey(frame.Channel, frame.Direction, frame.FrameFormat, frame.IsExtended, frame.Id);
-            if (!perId.TryGetValue(key, out var idStats))
-            {
-                idStats = new CanIdAccumulator(key);
-                perId.Add(key, idStats);
-            }
+                if (frame.Type.Contains("err", StringComparison.OrdinalIgnoreCase) ||
+                    frame.Type.Contains("error", StringComparison.OrdinalIgnoreCase))
+                {
+                    errorFrames++;
+                }
 
-            idStats.Observe(frame);
-        }
+                if (frame.Type.Contains("rtr", StringComparison.OrdinalIgnoreCase) ||
+                    frame.Type.Contains("remote", StringComparison.OrdinalIgnoreCase))
+                {
+                    remoteFrames++;
+                }
+
+                var key = new CanStreamKey(frame.Channel, frame.Direction, frame.FrameFormat, frame.IsExtended, frame.Id);
+                if (!perId.TryGetValue(key, out var idStats))
+                {
+                    idStats = new CanIdAccumulator(key);
+                    perId.Add(key, idStats);
+                }
+
+                idStats.Observe(frame);
+            }
+            return (frameRateBins, busTimeBins, perId, errorFrames, remoteFrames, totalTransmissionSeconds);
+        });
 
         var avgFrameRate = frameCount / duration;
         var peakFrameRate = frameRateBins.Max() / binWidthSeconds;

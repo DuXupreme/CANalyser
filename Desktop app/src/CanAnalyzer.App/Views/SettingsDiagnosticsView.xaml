@@ -62,11 +62,22 @@
         <StackPanel>
 
 
-            <GroupBox Header="Opslag online logs" Margin="0,0,0,8">
+            <GroupBox Header="Opslag CANalyser" Margin="0,0,0,8">
                 <StackPanel Margin="8">
+                    <TextBlock Text="{Binding TotalCacheStatus}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6" />
                     <TextBlock Text="{Binding OnlineCacheStatus}" TextWrapping="Wrap" />
-                    <TextBlock Text="Gedownloade ZIP-bestanden worden tijdelijk bewaard om herhaald downloaden te voorkomen. Na wissen worden ze zo nodig opnieuw gedownload. De logs op AWS blijven behouden. Tijdelijke analysebestanden worden bij het sluiten van de dataset opgeruimd."
+                    <TextBlock Text="{Binding AnalysisCacheStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock Text="Gedownloade ZIP-bestanden worden tijdelijk bewaard om herhaald downloaden te voorkomen. Na wissen worden ze zo nodig opnieuw gedownload. De logs op AWS blijven behouden. De analyseopslag hierboven telt ook actieve en achtergebleven tijdelijke bestanden mee. Deze worden normaal bij het sluiten van de dataset opgeruimd, maar kunnen na een crash achterblijven. Downloadcache wissen verwijdert deze analysebestanden niet."
                                TextWrapping="Wrap" Margin="0,6,0,8" />
+                    <TextBlock Text="Opslaglocaties" FontWeight="SemiBold" Margin="0,6,0,4" />
+                    <TextBlock Text="Downloadcache" />
+                    <TextBox Text="{Binding DownloadCacheDirectory, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,6" />
+                    <TextBlock Text="Frame-cache" />
+                    <TextBox Text="{Binding FrameCacheDirectory, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,6" />
+                    <TextBlock Text="Gedecodeerde data (sample-cache)" />
+                    <TextBox Text="{Binding SampleCacheDirectory, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
+                    <TextBlock Text="Tijdelijke MF4-conversie" Margin="0,6,0,0" />
+                    <TextBox Text="{Binding ConversionCacheDirectory, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
                     <Button Content="Downloadcache wissen" Command="{Binding ClearOnlineCacheCommand}" />
                     <Button Content="Opslag vernieuwen" Command="{Binding RefreshOnlineCacheCommand}" Margin="0,6,0,0" />
                 </StackPanel>

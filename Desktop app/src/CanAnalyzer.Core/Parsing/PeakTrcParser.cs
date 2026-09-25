@@ -9,6 +9,9 @@ namespace CanAnalyzer.Core.Parsing;
 
 public sealed class PeakTrcParser : ICanLogParser
 {
+    private readonly Func<DiskBackedFrameStore> _createStore;
+    public PeakTrcParser(Func<DiskBackedFrameStore>? createStore = null) =>
+        _createStore = createStore ?? (() => new DiskBackedFrameStore());
     public string Name => "PEAK .trc";
 
     public int Probe(string filePath, IReadOnlyList<string> sampleLines)
@@ -22,72 +25,80 @@ public sealed class PeakTrcParser : ICanLogParser
     public async Task<CanLogParseResult?> ParseAsync(
         string filePath, ImportMode mode, IProgress<LoadProgress>? progress, CancellationToken cancellationToken)
     {
-        var rows = new DiskBackedFrameStore();
-        var report = new ParseReportBuilder(Name);
-        DateTimeOffset? startTimeUtc = null;
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream);
-        var length = stream.Length;
-        while (true)
+        var rows = _createStore();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line is null) break;
-            var lineNumber = report.NextLine();
-            if (lineNumber % 2000 == 0)
-                ParserUtilities.ReportFileProgress(stream, length, progress, "Parser: PEAK .trc...", 5, 10);
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase))
+            var report = new ParseReportBuilder(Name);
+            DateTimeOffset? startTimeUtc = null;
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            var length = stream.Length;
+            while (true)
             {
-                report.NonData();
-                var rawStartTime = trimmed[(trimmed.IndexOf('=') + 1)..].Trim();
-                if (double.TryParse(rawStartTime, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
+                cancellationToken.ThrowIfCancellationRequested();
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null) break;
+                var lineNumber = report.NextLine();
+                if (lineNumber % 2000 == 0)
+                    ParserUtilities.ReportFileProgress(stream, length, progress, "Parser: PEAK .trc...", 5, 10);
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase))
                 {
-                    try
+                    report.NonData();
+                    var rawStartTime = trimmed[(trimmed.IndexOf('=') + 1)..].Trim();
+                    if (double.TryParse(rawStartTime, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
                     {
-                        startTimeUtc = new DateTimeOffset(DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Utc));
+                        try
+                        {
+                            startTimeUtc = new DateTimeOffset(DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Utc));
+                        }
+                        catch (ArgumentException)
+                        {
+                            report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd valt buiten het geldige bereik.", line);
+                        }
                     }
-                    catch (ArgumentException)
+                    else
                     {
-                        report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd valt buiten het geldige bereik.", line);
+                        report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd is ongeldig.", line);
                     }
+                    continue;
                 }
-                else
+                if (trimmed.Length == 0 || ParserUtilities.IsCommonHeaderOrComment(trimmed) || trimmed.StartsWith("@ ", StringComparison.Ordinal))
                 {
-                    report.Warn(lineNumber, "PEAK_STARTTIME", "De absolute PEAK-starttijd is ongeldig.", line);
+                    report.NonData();
+                    continue;
                 }
-                continue;
-            }
-            if (trimmed.Length == 0 || ParserUtilities.IsCommonHeaderOrComment(trimmed) || trimmed.StartsWith("@ ", StringComparison.Ordinal))
-            {
-                report.NonData();
-                continue;
+
+                var match = ParserRegex.PeakTrcTsv().Match(trimmed);
+                var tsv = match.Success;
+                if (!tsv) match = ParserRegex.PeakTrcClassic().Match(trimmed);
+                if (!match.Success)
+                {
+                    report.Reject(lineNumber, "PEAK_SYNTAX", "Regel voldoet niet aan een ondersteunde PEAK TRC-layout.", line);
+                    continue;
+                }
+
+                try
+                {
+                    rows.Append(ParseMatch(match, tsv, rows.Count, lineNumber));
+                    report.Accepted();
+                }
+                catch (Exception ex) when (ex is FormatException or OverflowException)
+                {
+                    report.Reject(lineNumber, "PEAK_VALUE", ex.Message, line);
+                }
             }
 
-            var match = ParserRegex.PeakTrcTsv().Match(trimmed);
-            var tsv = match.Success;
-            if (!tsv) match = ParserRegex.PeakTrcClassic().Match(trimmed);
-            if (!match.Success)
-            {
-                report.Reject(lineNumber, "PEAK_SYNTAX", "Regel voldoet niet aan een ondersteunde PEAK TRC-layout.", line);
-                continue;
-            }
-
-            try
-            {
-                rows.Append(ParseMatch(match, tsv, rows.Count, lineNumber));
-                report.Accepted();
-            }
-            catch (Exception ex) when (ex is FormatException or OverflowException)
-            {
-                report.Reject(lineNumber, "PEAK_VALUE", ex.Message, line);
-            }
+            if (rows.Count == 0) { rows.Dispose(); return null; }
+            rows.Complete();
+            var built = report.Build(mode);
+            return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete, startTimeUtc);
         }
-
-        if (rows.Count == 0) { rows.Dispose(); return null; }
-        rows.Complete();
-        var built = report.Build(mode);
-        return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete, startTimeUtc);
+        catch
+        {
+            rows.Dispose();
+            throw;
+        }
     }
 
     private static RawCanFrame ParseMatch(Match match, bool tsv, long frameIndex, long lineNumber)

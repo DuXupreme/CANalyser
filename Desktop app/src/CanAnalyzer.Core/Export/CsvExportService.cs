@@ -11,6 +11,7 @@ public sealed class CsvExportService : ICsvExportService
 {
     public async Task ExportDecodedSignalsAsync(string filePath, CanDataset dataset, CancellationToken cancellationToken)
     {
+        using var reader = dataset.AcquireReadLease();
         await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read);
         await using var writer = new StreamWriter(stream);
         await using var csv = new CsvWriter(writer, CultureInfo.InvariantCulture);

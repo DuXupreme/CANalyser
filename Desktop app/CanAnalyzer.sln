@@ -9,12 +9,18 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CanAnalyzer.App", "src\CanA
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CanAnalyzer.Tests", "src\CanAnalyzer.Tests\CanAnalyzer.Tests.csproj", "{D8E583A1-0CD8-421A-B6CD-0E11C5D3F6F1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CanAnalyzer.App.Tests", "src\CanAnalyzer.App.Tests\CanAnalyzer.App.Tests.csproj", "{B17B0697-F54D-4DA1-B946-055121631261}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B17B0697-F54D-4DA1-B946-055121631261}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B17B0697-F54D-4DA1-B946-055121631261}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B17B0697-F54D-4DA1-B946-055121631261}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B17B0697-F54D-4DA1-B946-055121631261}.Release|Any CPU.Build.0 = Release|Any CPU
 		{F4099C53-3EDB-4E9D-97A4-9DA8AB9A4F6F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F4099C53-3EDB-4E9D-97A4-9DA8AB9A4F6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F4099C53-3EDB-4E9D-97A4-9DA8AB9A4F6F}.Release|Any CPU.ActiveCfg = Release|Any CPU

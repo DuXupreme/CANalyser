@@ -19,7 +19,7 @@ namespace CanAnalyzer.App.ViewModels;
 /// <summary>
 /// Main shell view model: file operations, load/decode, export, global status/progress.
 /// </summary>
-public sealed partial class MainWindowViewModel : ObservableObject
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly ICanAnalysisPipeline _analysisPipeline;
     private readonly ICsvExportService _csvExportService;
@@ -34,6 +34,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ILogger<MainWindowViewModel> _logger;
     private CancellationTokenSource? _loadCts;
     private CanDataset? _dataset;
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _loadCts?.Cancel();
+        // In-flight readers release their own leases on their worker thread.
+        _dataset?.Dispose();
+    }
 
     [ObservableProperty]
     private string? _logFilePath;
@@ -99,8 +109,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         Analysis.PropertyChanged += OnBackgroundOperationPropertyChanged;
         JoystickAnalytics.PropertyChanged += OnBackgroundOperationPropertyChanged;
-        Analysis.ActiveUsage.PropertyChanged += (_, e) =>
-        { if (e.PropertyName == nameof(ActiveUsageViewModel.IsBusy)) ExportAnalysesCommand?.NotifyCanExecuteChanged(); };
+        Analysis.ActiveUsage.PropertyChanged += OnBackgroundOperationPropertyChanged;
 
         LoadedSettings = _settingsStore.Load();
         _telemetryService.Configure(LoadedSettings.Telemetry);
@@ -149,7 +158,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public bool IsBusyIndicatorVisible => (IsBusy && !IsRepairWizardOpen) || IsBackgroundAnalysisBusy;
 
-    public bool IsBackgroundAnalysisBusy => Analysis.IsBusy || JoystickAnalytics.IsBusy;
+    public bool IsBackgroundAnalysisBusy => Analysis.IsBusy || JoystickAnalytics.IsBusy || Analysis.ActiveUsage.IsBusy;
 
     public string ActiveProgressLabel => IsBusy
         ? ProgressLabel
@@ -157,6 +166,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ? Analysis.BusyLabel
             : JoystickAnalytics.IsBusy
                 ? JoystickAnalytics.BusyLabel
+                : Analysis.ActiveUsage.IsBusy
+                    ? "Actief gebruik berekenen..."
                 : ProgressLabel;
 
     public IRelayCommand BrowseLogFileCommand { get; }
@@ -346,6 +357,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 return;
             }
 
+            if (_disposed) { loadResult.Dataset.Dispose(); return; }
             _dataset = loadResult.Dataset;
             var confirmationMs = loadResult.ReviewMilliseconds;
             importMode = loadResult.Mode;
@@ -519,6 +531,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 ProgressValue = Math.Clamp(item.Percent, 0, 100);
             });
             _dataset = await _actuatorCsvImportService.ImportAsync(files, progress, _loadCts.Token);
+            if (_disposed) { _dataset.Dispose(); return; }
 
             Analysis.LoadDataset(_dataset);
             LoadDefaultActuatorComparisonGroups(_dataset);
@@ -831,7 +844,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
                     Result = active.ExportResult, TimeMetrics = active.TimeMetrics.ToArray(),
                     EnergyMetrics = active.EnergyMetrics.ToArray(), BatteryMetrics = active.BatteryMetrics.ToArray() }
             }, AnalysisBundleExporter.JsonOptions);
-            await Task.Run(() => AnalysisBundleExporter.Export(save.FileName, dataset, options, snapshot, sourceEntries, token), token);
+            var reader = dataset.AcquireReadLease();
+            await Task.Run(() =>
+            {
+                using (reader) AnalysisBundleExporter.Export(save.FileName, dataset, options, snapshot, sourceEntries, token);
+            });
             _messageDialogService.ShowInfo("Analyse-export", "Analysepakket opgeslagen:\n" + save.FileName +
                 "\nCSV-tabellen, JSON-resultaten en instellingen. Onbeschikbare analyses blijven als onbekend gemarkeerd.");
         }

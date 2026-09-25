@@ -134,7 +134,11 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         {
             if (SetField(ref _showLegend, value))
             {
-                ApplyVisualOptionsPreservingView();
+                foreach (var panel in Panels)
+                {
+                    panel.PlotModel.IsLegendVisible = value;
+                    panel.PlotModel.InvalidatePlot(false);
+                }
             }
         }
     }
@@ -794,6 +798,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                 var rendered = BuildSeries(series, visibleMinimum, visibleMaximum);
                 model.Series.Add(rendered);
             }
+            ViewportSampling.Attach(model, panel.SeriesData, UseDownsampling, MaxPointsPerTrace);
         }
 
         RestorePanelSnapshots(snapshots);
@@ -809,13 +814,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series, double? visibleMinimum, double? visibleMaximum)
     {
-        var start = FindFirstAtOrAfter(series.Time, visibleMinimum);
-        var end = FindFirstAfter(series.Time, visibleMaximum);
-        if (end <= start) { start = 0; end = series.Time.Length; }
-        var visibleTime = start == 0 && end == series.Time.Length ? series.Time : series.Time[start..end];
-        var visibleValue = start == 0 && end == series.Value.Length ? series.Value : series.Value[start..end];
+        // A style change must not permanently discard points outside the current view.
+        var visibleTime = series.Time;
+        var visibleValue = series.Value;
         (double[] x, double[] y) = UseDownsampling
-            ? Downsampling.MinMax(visibleTime, visibleValue, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
+            ? series.RangeIndex.SupportsRangeQueries
+                ? series.RangeIndex.Select(null, null, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
+                : Downsampling.MinMax(visibleTime, visibleValue, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
             : (visibleTime, visibleValue);
         if (MarkersOnly)
         {

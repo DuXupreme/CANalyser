@@ -35,6 +35,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         PlotViewOptions viewOptions)
     {
         var panels = new List<PlotPanelModel>();
+        var indices = new Dictionary<(double[] Time, double[] Value), SignalRangeIndex>();
         var controller = CreateInteractionController();
         uint? frameIdFilter = null;
         if (!string.IsNullOrWhiteSpace(viewOptions.FrameIdFilter))
@@ -157,16 +158,26 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 }
 
                 var seriesColor = ColorCycle[colorIndex % ColorCycle.Length];
-                renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor) { Gaps = dataset.ImportReport?.Gaps ?? [] });
+                SignalRangeIndex? rangeIndex = null;
+                if (viewOptions.UseDownsampling && !indices.TryGetValue((filtered.X, filtered.Y), out rangeIndex))
+                {
+                    rangeIndex = new(filtered.X, filtered.Y);
+                    indices.Add((filtered.X, filtered.Y), rangeIndex);
+                }
+                renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor)
+                { Gaps = dataset.ImportReport?.Gaps ?? [], RangeIndex = rangeIndex! });
 
                 (double[] x, double[] y) = viewOptions.UseDownsampling
-                    ? Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
+                    ? rangeIndex!.SupportsRangeQueries
+                        ? rangeIndex.Select(null, null, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
+                        : Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
                     : (filtered.X, filtered.Y);
 
                 AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions, dataset.ImportReport?.Gaps ?? []);
                 colorIndex++;
             }
 
+            ViewportSampling.Attach(model, renderedSeries, viewOptions.UseDownsampling, viewOptions.MaxPointsPerTrace);
             panels.Add(new PlotPanelModel
             {
                 Title = title,
@@ -185,10 +196,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         string label,
         PlotViewOptions options)
     {
+        var hasOffset = group.Offsets.TryGetValue(label, out var offset);
+        // SignalSeries exposes immutable source buffers. Styling does not require a data copy.
+        if (!options.TimeStart.HasValue && !options.TimeEnd.HasValue &&
+            (!hasOffset || offset == 0) && !options.NormalizeSignals)
+            return (source.Time, source.Value);
+
         var xOut = new List<double>(source.Time.Length);
         var yOut = new List<double>(source.Value.Length);
-
-        var hasOffset = group.Offsets.TryGetValue(label, out var offset);
 
         for (var i = 0; i < source.Time.Length; i++)
         {

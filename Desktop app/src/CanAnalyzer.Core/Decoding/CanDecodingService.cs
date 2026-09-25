@@ -361,16 +361,32 @@ public sealed class CanDecodingService : ICanDecodingService
 
         if (signal.IsLittleEndian)
         {
-            // BigInteger reads little-endian two's complement; add a zero byte to force unsigned interpretation.
-            var unsignedBytes = new byte[data.Length + 1];
-            Buffer.BlockCopy(data, 0, unsignedBytes, 0, data.Length);
-            var payload = new BigInteger(unsignedBytes);
-
-            if (signal.StartBit < 0 || signal.StartBit + signal.Length > data.Length * 8)
+            if (signal.StartBit < 0 || (long)signal.StartBit + signal.Length > data.Length * 8L)
             {
                 return false;
             }
 
+            // Extract only the occupied bytes, including unaligned 64-bit CAN-FD signals.
+            // Keep raw bits unsigned; signedness and IEEE scaling are applied below as before.
+            if (signal.Length <= 64)
+            {
+                ulong bits = 0;
+                var remaining = signal.Length;
+                var position = signal.StartBit;
+                var shift = 0;
+                while (remaining > 0)
+                {
+                    var take = Math.Min(8 - position % 8, remaining);
+                    bits |= (ulong)((data[position / 8] >> (position % 8)) & ((1 << take) - 1)) << shift;
+                    position += take;
+                    shift += take;
+                    remaining -= take;
+                }
+                rawValue = bits;
+                return true;
+            }
+
+            var payload = new BigInteger(data, isUnsigned: true, isBigEndian: false);
             var mask = (BigInteger.One << signal.Length) - BigInteger.One;
             rawValue = (payload >> signal.StartBit) & mask;
             return true;

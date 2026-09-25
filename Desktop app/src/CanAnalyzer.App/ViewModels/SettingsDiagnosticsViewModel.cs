@@ -27,6 +27,17 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private bool _isCacheBusy;
 
+    [ObservableProperty]
+    private string _analysisCacheStatus = "Opslag wordt berekend...";
+
+    [ObservableProperty]
+    private string _totalCacheStatus = "Totale cacheopslag wordt berekend...";
+
+    public string DownloadCacheDirectory => OnlineDownloadCache.DefaultDirectory;
+    public string FrameCacheDirectory => System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "frame-cache");
+    public string SampleCacheDirectory => System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "sample-cache");
+    public string ConversionCacheDirectory => System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "mf4-import");
+
     public IAsyncRelayCommand RefreshOnlineCacheCommand { get; }
     public IAsyncRelayCommand ClearOnlineCacheCommand { get; }
 
@@ -128,13 +139,25 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         try
         {
             OnlineCacheStatus = clear ? "Downloadcache opruimen..." : "Opslag berekenen...";
-            var usage = await Task.Run(() => clear ? _downloadCache.Clear(preserve) : _downloadCache.Inspect());
-            OnlineCacheStatus = $"{usage.Bytes / 1024d / 1024d:N1} MB in {usage.Files:N0} cachebestand(en).";
+            AnalysisCacheStatus = "Analyseopslag berekenen...";
+            TotalCacheStatus = "Totale cacheopslag wordt berekend...";
+            var (usage, frames, samples, conversion) = await Task.Run(() => (
+                clear ? _downloadCache.Clear(preserve) : _downloadCache.Inspect(),
+                AnalysisCacheStorage.Inspect(System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "frame-cache")),
+                AnalysisCacheStorage.Inspect(SampleCacheDirectory),
+                AnalysisCacheStorage.Inspect(ConversionCacheDirectory, recursive: true)));
+            AnalysisCacheStatus = $"Frame-cache: {FormatCacheSize(frames.Bytes)} ({frames.Files:N0} bestanden)\n" +
+                                  $"Gedecodeerde data: {FormatCacheSize(samples.Bytes)} ({samples.Files:N0} bestanden)\n" +
+                                  $"Tijdelijke conversie: {FormatCacheSize(conversion.Bytes)} ({conversion.Files:N0} bestanden)";
+            TotalCacheStatus = $"Getoonde cacheopslag: {FormatCacheSize(usage.Bytes + frames.Bytes + samples.Bytes + conversion.Bytes)}";
+            OnlineCacheStatus = $"Downloads: {FormatCacheSize(usage.Bytes)} ({usage.Files:N0} bestanden).";
             if (clear) OnlineCacheStatus += $" {usage.DeletedBytes / 1024d / 1024d:N1} MB vrijgemaakt. Actieve of vergrendelde bestanden blijven bewaard.";
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
         {
             OnlineCacheStatus = $"Cache kon niet volledig worden verwerkt: {ex.Message}";
+            AnalysisCacheStatus = "Analyseopslag kon niet volledig worden bepaald.";
+            TotalCacheStatus = "Totale cacheopslag onbekend; vernieuw om opnieuw te proberen.";
         }
         finally
         {
@@ -143,6 +166,10 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
             ClearOnlineCacheCommand.NotifyCanExecuteChanged();
         }
     }
+
+    private static string FormatCacheSize(long bytes) => bytes >= 1024L * 1024 * 1024
+        ? $"{bytes / (1024d * 1024 * 1024):N2} GB"
+        : $"{bytes / (1024d * 1024):N1} MB";
 
     /// <summary>Versie van de draaiende app, voor weergave.</summary>
     public string AppVersion => _updateService.CurrentVersion;

@@ -18,7 +18,7 @@ public static class Downsampling
             return (x, y);
         }
 
-        var bucketCount = maxPoints / 2;
+        var bucketCount = (maxPoints - 2) / 2;
         if (bucketCount < 2)
         {
             var step = Math.Max(1, n / maxPoints);
@@ -27,10 +27,12 @@ public static class Downsampling
 
         var xs = new List<double>(maxPoints + 8);
         var ys = new List<double>(maxPoints + 8);
+        xs.Add(x[0]);
+        ys.Add(y[0]);
         for (var i = 0; i < bucketCount; i++)
         {
-            var start = (int)Math.Floor(i * (n / (double)bucketCount));
-            var end = (int)Math.Floor((i + 1) * (n / (double)bucketCount));
+            var start = 1 + (int)((long)i * (n - 2) / bucketCount);
+            var end = 1 + (int)((long)(i + 1) * (n - 2) / bucketCount);
             if (end <= start)
             {
                 continue;
@@ -55,8 +57,11 @@ public static class Downsampling
             {
                 xs.Add(x[minIdx]);
                 ys.Add(y[minIdx]);
-                xs.Add(x[maxIdx]);
-                ys.Add(y[maxIdx]);
+                if (maxIdx != minIdx)
+                {
+                    xs.Add(x[maxIdx]);
+                    ys.Add(y[maxIdx]);
+                }
             }
             else
             {
@@ -73,6 +78,8 @@ public static class Downsampling
             return (SliceWithStep(x, step), SliceWithStep(y, step));
         }
 
+        xs.Add(x[^1]);
+        ys.Add(y[^1]);
         return (xs.ToArray(), ys.ToArray());
     }
 
