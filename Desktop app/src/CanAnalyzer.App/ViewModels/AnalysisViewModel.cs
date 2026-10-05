@@ -49,11 +49,19 @@ public sealed partial class AnalysisViewModel : ObservableObject
     [ObservableProperty]
     private double? _timeEnd;
 
-    [ObservableProperty]
-    private int _maxPointsPerTrace = 5000;
+    public DisplayLimits DisplayLimits { get; }
 
-    [ObservableProperty]
-    private bool _useDownsampling;
+    public int MaxPointsPerTrace
+    {
+        get => DisplayLimits.MaxPointsPerTrace;
+        set => DisplayLimits.MaxPointsPerTrace = value;
+    }
+
+    public bool UseDownsampling
+    {
+        get => DisplayLimits.UseDownsampling;
+        set => DisplayLimits.UseDownsampling = value;
+    }
 
     [ObservableProperty]
     private int _subplotHeight = 280;
@@ -117,7 +125,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
         IXAxisSyncService xAxisSyncService,
         ITelemetryService telemetryService,
         ActiveUsageViewModel activeUsage,
-        ILogger<AnalysisViewModel> logger)
+        ILogger<AnalysisViewModel> logger,
+        DisplayLimits displayLimits)
     {
         _plotModelBuilder = plotModelBuilder;
         _fileDialogService = fileDialogService;
@@ -127,6 +136,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
         _telemetryService = telemetryService;
         ActiveUsage = activeUsage;
         _logger = logger;
+        DisplayLimits = displayLimits;
+        DisplayLimits.PropertyChanged += OnDisplayLimitsChanged;
         _plotBuilds = new(BuildPlotsInBackgroundAsync, PublishPlots, running => IsBusy = running || _openingDetached, ex =>
         {
             _logger.LogError(ex, "Plot rebuild failed.");
@@ -236,9 +247,15 @@ public sealed partial class AnalysisViewModel : ObservableObject
         ApplyAxisSyncConfiguration();
     }
 
-    partial void OnMaxPointsPerTraceChanged(int value) => TriggerLiveRebuild();
-
-    partial void OnUseDownsamplingChanged(bool value) => TriggerLiveRebuild();
+    private void OnDisplayLimitsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
+        {
+            OnPropertyChanged(e.PropertyName);
+            if (UseDownsampling || e.PropertyName == nameof(DisplayLimits.UseDownsampling))
+                TriggerLiveRebuild();
+        }
+    }
 
     partial void OnTimeStartChanged(double? value) => ActiveUsage.SetTimeWindow(value, TimeEnd);
 
@@ -844,9 +861,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
             if (!ReferenceEquals(dataset, _dataset)) return;
             _plotWindowService.ShowPlots(
                 detachedPanels,
-                options.SubplotHeight,
-                options.MaxPointsPerTrace,
-                options.UseDownsampling,
+                options,
+                DisplayLimits,
                 LinkXAxisAcrossPanels,
                 LinkYAxisAcrossPanels,
                 dataset.StartTimeUtc);

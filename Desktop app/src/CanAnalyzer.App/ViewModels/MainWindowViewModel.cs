@@ -42,7 +42,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _disposed = true;
         _loadCts?.Cancel();
         // In-flight readers release their own leases on their worker thread.
-        _dataset?.Dispose();
+        ReleaseCurrentDataset();
+    }
+
+    private void ReleaseCurrentDataset()
+    {
+        // Shared display limits can change after a cancelled or failed replacement.
+        // Detach the tables before their backing stores are retired.
+        RawFrames.ClearDataset();
+        Busmaster.ClearDataset();
+        var previous = _dataset;
+        _dataset = null;
+        previous?.Dispose();
+        SettingsDiagnostics.ClearCurrentDataset();
     }
 
     [ObservableProperty]
@@ -329,9 +341,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         IsBusy = true;
-        _dataset?.Dispose();
-        _dataset = null;
-        SettingsDiagnostics.ClearCurrentDataset();
+        ReleaseCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
         ProgressLabel = "Start verwerking...";
@@ -384,8 +394,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 confirmationMs += confirmationTimer.ElapsedMilliseconds;
                 if (!confirmed)
                 {
-                    _dataset.Dispose();
-                    _dataset = null;
+                    ReleaseCurrentDataset();
                     HasRepairablePartialImport = false;
                     StatusText = "Analyse geblokkeerd: DBC-toewijzing per kanaal niet bevestigd.";
                     ProgressLabel = "DBC-toewijzing afgebroken.";
@@ -513,9 +522,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (files.Count == 0) return;
 
         IsBusy = true;
-        _dataset?.Dispose();
-        _dataset = null;
-        SettingsDiagnostics.ClearCurrentDataset();
+        ReleaseCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
         ProgressLabel = "Actuator CSV-runs voorbereiden...";
@@ -874,7 +881,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var dataset = _dataset;
         var dialog = new CanAnalyzer.App.Views.CsvExportDialog(dataset,
-            Analysis.AvailableSignals.Where(s => s.IsSelected).Select(s => s.Label));
+            Analysis.AvailableSignals.Where(s => s.IsSelected).Select(s => s.Label),
+            LoadedSettings.CsvExportPresets, SaveCsvExportPresetsAsync);
         if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner) dialog.Owner = owner;
         if (dialog.ShowDialog() != true || dialog.Options is not { } options) return;
         var filePath = _fileDialogService.SaveCsvFile(LogFilePath);
@@ -909,6 +917,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _loadCts?.Dispose(); _loadCts = null;
             IsBusy = false; ProgressLabel = "Klaar.";
+        }
+    }
+
+    private async Task SaveCsvExportPresetsAsync(IReadOnlyList<CsvExportPreset> presets)
+    {
+        var previous = LoadedSettings.CsvExportPresets;
+        LoadedSettings.CsvExportPresets = presets.ToList();
+        try { await SaveSettingsAsync(CancellationToken.None); }
+        catch
+        {
+            LoadedSettings.CsvExportPresets = previous;
+            throw;
         }
     }
 
@@ -952,6 +972,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
+            // Preserve current filters and plot choices when applying the settings form.
+            LoadedSettings.LastPlotViewOptions = Analysis.CaptureViewOptions();
+            LoadedSettings.LastRawFrameFilter = RawFrames.CaptureFilterOptions();
             SettingsDiagnostics.WriteBackToSettings(LoadedSettings);
             _telemetryService.Configure(LoadedSettings.Telemetry);
             Analysis.ApplyViewOptions(LoadedSettings.LastPlotViewOptions);

@@ -2,10 +2,12 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.4.2 (.NET 8 WPF)
+# CANalyser 2.4.11 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
+> Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.
+> Versie `2.4.10` voegde CSV-export met signaal-, kolom-, tijd- en opmaakkeuze toe. Versie `2.4.9` verbeterde grafiekrespons en tijdelijke opslag; versie `2.4.8` voegde gekalibreerde slagbenutting en analyse-export toe.
 > Versie `2.4.2` onthoudt de laatste vijf online-logselecties, maakt zware delay-/joystick-/actuatoranalyses geheugenveilig op logs met miljoenen meetpunten en herstelt de afzonderlijke actuator-slagbenutting. Afgebroken analyses worden bij de volgende start in telemetry gemeld.
 > Versie `2.4.1` herstelt het bewerken en onderling converteren van DBC en BUSMASTER DBF.
 > Versie `2.4.0` voegt **Actief gebruik en batterijduur** toe aan Analyse: detectie via motor-RPM, BMS-stroom, actuatorkracht of SOC-daling, met gebruiksaandeel, energie en batterijduur.
@@ -28,7 +30,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
   - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
-  - dashboard-ZIP met maximaal 200 MF4-delen uit één logger; binnen iedere geselecteerde sessie moeten de deelnummers opeenvolgen
+  - dashboard-ZIP met maximaal 10.000 MF4-delen uit één logger (maximaal 512 MB per bestand en 4 GB uitgepakt totaal); binnen iedere geselecteerde sessie moeten de deelnummers opeenvolgen
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
@@ -50,6 +52,8 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export met signaal- en kolomkeuze, relatieve/absolute meettijd en instelbare CSV-opmaak
+- Eigen CSV-exportpresets bewaren signalen, kolommen, kolomvolgorde en opmaak lokaal; ontbrekende signalen worden gemeld en blijven bij het bijwerken in de preset bewaard.
+- Puntlimiet en downsampling worden gedeeld door Analyse, Instellingen en losse plotvensters. Rijen per pagina wordt gedeeld door Instellingen, Raw Frames en Busmaster. Beide beperken alleen de weergave.
 - Actief gebruik en batterijduur in CAN Analyse: instelbare detectie op motor-RPM,
   BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
   SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.

@@ -42,8 +42,13 @@ public sealed partial class RawFramesViewModel : ObservableObject
     [ObservableProperty]
     private double? _timeEnd;
 
-    [ObservableProperty]
-    private int _maxRows = 50_000;
+    private readonly DisplayLimits _displayLimits;
+
+    public int MaxRows
+    {
+        get => _displayLimits.RawRowsPerPage;
+        set => _displayLimits.RawRowsPerPage = value;
+    }
 
     [ObservableProperty]
     private string _extendedFilterMode = "All";
@@ -57,9 +62,16 @@ public sealed partial class RawFramesViewModel : ObservableObject
     [ObservableProperty]
     private int _pageNumber = 1;
 
-    public RawFramesViewModel(IRawFrameFilterService filterService)
+    public RawFramesViewModel(IRawFrameFilterService filterService, DisplayLimits displayLimits)
     {
         _filterService = filterService;
+        _displayLimits = displayLimits;
+        _displayLimits.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(DisplayLimits.RawRowsPerPage)) return;
+            OnPropertyChanged(nameof(MaxRows));
+            ApplyFilters(resetPage: true);
+        };
         ApplyFiltersCommand = new RelayCommand(() => ApplyFilters(resetPage: true));
         ResetFiltersCommand = new RelayCommand(ResetFilters);
         PreviousPageCommand = new RelayCommand(PreviousPage, () => PageNumber > 1);
@@ -83,6 +95,13 @@ public sealed partial class RawFramesViewModel : ObservableObject
         ApplyFilters(resetPage: true);
     }
 
+    public void ClearDataset()
+    {
+        _dataset = null;
+        _sampleLookup = null;
+        ApplyFilters(resetPage: true);
+    }
+
     public void ApplyFilterOptions(RawFrameFilterOptions options)
     {
         IdFilter = options.IdFilter;
@@ -93,13 +112,13 @@ public sealed partial class RawFramesViewModel : ObservableObject
         ChannelContains = options.ChannelContains;
         TimeStart = options.TimeStart;
         TimeEnd = options.TimeEnd;
-        MaxRows = options.MaxRows <= 0 ? 50_000 : options.MaxRows;
         ExtendedFilterMode = options.IsExtended switch
         {
             true => "Extended only",
             false => "Standard only",
             null => "All"
         };
+        MaxRows = options.MaxRows <= 0 ? 50_000 : options.MaxRows;
     }
 
     public RawFrameFilterOptions CaptureFilterOptions()
@@ -189,6 +208,8 @@ public sealed partial class RawFramesViewModel : ObservableObject
         {
             FilteredFrames = Array.Empty<RawFrameRow>();
             FrameStatistics = "Geen dataset geladen.";
+            PreviousPageCommand.NotifyCanExecuteChanged();
+            NextPageCommand.NotifyCanExecuteChanged();
             return;
         }
 
@@ -223,7 +244,6 @@ public sealed partial class RawFramesViewModel : ObservableObject
         ChannelContains = null;
         TimeStart = null;
         TimeEnd = null;
-        MaxRows = 50_000;
         ExtendedFilterMode = "All";
         ApplyFilters(resetPage: true);
     }

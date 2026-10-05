@@ -51,8 +51,9 @@
                         <TextBox Width="90" Text="{Binding TimeEnd, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
-                        <TextBlock Text="Max rijen" />
-                        <TextBox Width="100" Text="{Binding MaxRows, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="Rijen per pagina" />
+                        <TextBox Width="100" Text="{Binding MaxRows, UpdateSourceTrigger=LostFocus}"
+                                 ToolTip="1–2.000.000 rijen per pagina in Raw Frames. Gedeeld met Instellingen; beperkt de analyse en CSV-export niet." />
                     </StackPanel>
                     <StackPanel Margin="0,0,8,6">
                         <TextBlock Text="Frame type" />
@@ -76,6 +77,8 @@
                         </StackPanel>
                     </StackPanel>
                 </WrapPanel>
+                <TextBlock Text="Rijen per pagina beperkt alleen deze tabel. Gebruik Vorige/Volgende pagina voor de overige frames. Analyse en CSV-export gebruiken de brondata."
+                           TextWrapping="Wrap" Margin="0,4,0,0" />
                 <TextBlock Text="{Binding FrameStatistics}" FontWeight="SemiBold" Margin="0,4,0,0" />
             </StackPanel>
         </Border>

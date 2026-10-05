@@ -43,9 +43,10 @@
                                  Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,12,0">
-                        <TextBlock Text="Max rijen" />
+                        <TextBlock Text="Rijen per pagina" />
                         <TextBox Width="100"
-                                 Text="{Binding MaxRows, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding MaxRows, UpdateSourceTrigger=LostFocus}"
+                                 ToolTip="1–2.000.000 rijen per pagina. Gedeeld met Instellingen en Raw Frames; beperkt de analyse en CSV-export niet." />
                     </StackPanel>
                     <CheckBox Content="Alleen DBC-berichten"
                               IsChecked="{Binding ShowOnlyDecoded}"

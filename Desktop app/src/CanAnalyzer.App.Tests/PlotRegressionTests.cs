@@ -18,8 +18,8 @@ public sealed class PlotRegressionTests
     {
         public IReadOnlyList<PlotPanelModel>? Panels;
         public int Thread;
-        public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, int subplotHeight, int maxPointsPerTrace,
-            bool useDownsampling, bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc)
+        public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, PlotViewOptions renderedOptions, DisplayLimits displayLimits,
+            bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc)
         { Panels = panels; Thread = Environment.CurrentManagedThreadId; }
     }
 
@@ -28,7 +28,7 @@ public sealed class PlotRegressionTests
     {
         using var data = Dataset(); var window = new PlotWindow(); var telemetry = new AnalyticsRegressionTests.Telemetry();
         var vm = new AnalysisViewModel(new SlowBuilder(), null!, window, null!, new XAxisSyncService(), telemetry,
-            new ActiveUsageViewModel(telemetry), NullLogger<AnalysisViewModel>.Instance);
+            new ActiveUsageViewModel(telemetry), NullLogger<AnalysisViewModel>.Instance, new DisplayLimits());
         vm.LoadDataset(data); vm.LoadPlotGroups([new PlotGroup { Signals = ["test"] }]);
         await Build(vm);
         var pending = vm.OpenPlotsInWindowCommand.ExecuteAsync(null);
@@ -99,7 +99,7 @@ public sealed class PlotRegressionTests
     }
 
     internal static AnalysisViewModel ViewModel(IPlotModelBuilder? builder = null) => new(builder ?? new PlotModelBuilder(),
-        null!, null!, null!, new XAxisSyncService(), null!, new ActiveUsageViewModel(null!), NullLogger<AnalysisViewModel>.Instance);
+        null!, null!, null!, new XAxisSyncService(), null!, new ActiveUsageViewModel(null!), NullLogger<AnalysisViewModel>.Instance, new DisplayLimits());
 
     internal static Task Build(AnalysisViewModel vm) => (Task)typeof(AnalysisViewModel)
         .GetMethod("RebuildPlotsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(vm, [false])!;
@@ -132,8 +132,8 @@ public sealed class PlotRegressionTests
         var panel = Assert.Single(new PlotModelBuilder().Build(data,
             [new PlotGroup { Signals = data.SignalLabels.ToList() }], new PlotViewOptions { UseDownsampling = true }));
         var window = (PlotPanelsWindow)RuntimeHelpers.GetUninitializedObject(typeof(PlotPanelsWindow));
-        typeof(PlotPanelsWindow).GetField("_useDownsampling", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
-        typeof(PlotPanelsWindow).GetField("_maxPointsPerTrace", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, 5000);
+        typeof(PlotPanelsWindow).GetField("_displayLimits", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(window, new DisplayLimits { UseDownsampling = true });
         var method = typeof(PlotPanelsWindow).GetMethod("BuildSeries", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var line = (LineSeries)method.Invoke(window, [panel.SeriesData[0], 10d, 11d])!;
         Assert.Equal(0, line.Points[0].X); Assert.Equal(99.999, line.Points[^1].X, 6);

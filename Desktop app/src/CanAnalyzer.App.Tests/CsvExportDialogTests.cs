@@ -59,9 +59,15 @@ public sealed class CsvExportDialogTests
             var root = (FrameworkElement)window.Content;
             foreach (var control in new FrameworkElement[] { Button("Opslaan als…"), preview, (ComboBox)window.FindName("TimeMode") })
             {
+                control.BringIntoView();
+                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                window.UpdateLayout();
                 var bounds = control.TransformToAncestor(root).TransformBounds(new Rect(control.RenderSize));
                 Assert.True(bounds.Top >= 0 && bounds.Bottom <= root.ActualHeight + 1, $"Clipped control at height {height}: {bounds}");
             }
+            Descendants(window).OfType<ScrollViewer>().First().ScrollToTop();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
             var screenshot = Environment.GetEnvironmentVariable("CANALYSER_CSV_PREVIEW_PATH");
             if (height == 800 && !string.IsNullOrEmpty(screenshot))
             {

@@ -191,13 +191,15 @@
                             <TextBox Width="80" Text="{Binding TimeEnd, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
                         </StackPanel>
                         <StackPanel Margin="0,0,8,0">
-                            <TextBlock Text="Max punten" />
-                            <TextBox Width="95" Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=PropertyChanged}" />
-                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Snelheidsmodus (downsampling)"
+                            <TextBlock Text="Max punten per signaal (weergave)" />
+                            <TextBox Width="95" HorizontalAlignment="Left"
+                                     IsEnabled="{Binding UseDownsampling}"
+                                     ToolTip="200–200.000 punten per signaal. Dezelfde limiet geldt in alle plotvensters. Alleen actief bij downsampling."
+                                     Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=LostFocus}" />
+                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
                                       IsChecked="{Binding UseDownsampling}"
                                       Margin="0,4,0,0" />
-                            <TextBlock Text="Alleen plotweergave: brondata, analyse, cursors/flags en export blijven volledig. Visuele details kunnen minder exact lijken; zoom in of zet dit uit voor detailinspectie."
-                                       Visibility="{Binding UseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
+                            <TextBlock Text="Gedeeld met Instellingen en alle losse plotvensters. De puntlimiet geldt alleen bij downsampling; analyse en CSV-export gebruiken de brondata."
                                        Width="260"
                                        Margin="0,3,0,0"
                                        Foreground="#7A4A00"

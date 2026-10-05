@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Export;
+using CanAnalyzer.App.State;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CanAnalyzer.App.Views;
@@ -14,19 +16,27 @@ public partial class CsvExportDialog : Window
     private readonly HashSet<string> _analysisSelection;
     private CancellationTokenSource? _previewCts;
     private bool _ready;
+    private bool _savingPreset;
+    private readonly Func<IReadOnlyList<CsvExportPreset>, Task>? _savePresets;
+    private SignalIdentity[] _missingPresetSignals = [];
+    public ObservableCollection<CsvExportPreset> Presets { get; }
     public IReadOnlyList<CsvExportChoice<SignalIdentity>> Signals { get; }
-    public IReadOnlyList<CsvExportChoice<string>> Columns { get; }
+    public ObservableCollection<CsvExportChoice<string>> Columns { get; }
     public ICollectionView VisibleSignals { get; }
     public CsvExportOptions? Options { get; private set; }
 
-    public CsvExportDialog(CanDataset dataset, IEnumerable<string> selectedLabels)
+    public CsvExportDialog(CanDataset dataset, IEnumerable<string> selectedLabels,
+        IEnumerable<CsvExportPreset>? presets = null,
+        Func<IReadOnlyList<CsvExportPreset>, Task>? savePresets = null)
     {
         _dataset = dataset;
+        _savePresets = savePresets;
+        Presets = new(presets ?? []);
         _analysisSelection = selectedLabels.ToHashSet(StringComparer.Ordinal);
         Signals = dataset.SignalSeriesByIdentity.Keys.OrderBy(s => s.DisplayLabel, StringComparer.OrdinalIgnoreCase)
             .Select(s => new CsvExportChoice<SignalIdentity>(s, s.DisplayLabel)).ToArray();
-        Columns = CsvExportOptions.AvailableColumns
-            .Select(c => new CsvExportChoice<string>(c.Name, $"{c.Name} — {c.Description}")).ToArray();
+        Columns = new(CsvExportOptions.AvailableColumns
+            .Select(c => new CsvExportChoice<string>(c.Name, $"{c.Name} — {c.Description}")));
         VisibleSignals = CollectionViewSource.GetDefaultView(Signals);
         InitializeComponent();
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
@@ -35,9 +45,140 @@ public partial class CsvExportDialog : Window
             (dataset.StartTimeUtc is null ? "Absolute meettijd ontbreekt: timestamp_utc en unix_time_ns blijven leeg." : "Absolute meettijd is beschikbaar als UTC.");
         foreach (var choice in Signals) choice.PropertyChanged += ChoiceChanged;
         foreach (var choice in Columns) choice.PropertyChanged += ChoiceChanged;
+        Columns.CollectionChanged += (_, _) => InvalidatePreview();
         Closed += (_, _) => _previewCts?.Cancel();
+        Closing += (_, e) => { if (_savingPreset) e.Cancel = true; };
         _ready = true;
         InvalidatePreview();
+    }
+
+    private void PresetSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || PresetList.SelectedItem is not CsvExportPreset preset) return;
+        ApplyPreset(preset);
+    }
+
+    public void ApplyPreset(CsvExportPreset preset)
+    {
+        _ready = false;
+        try
+        {
+            PresetName.Text = preset.Name;
+            SignalSearch.Text = string.Empty;
+            VisibleSignals.Filter = null;
+            var options = preset.Options;
+            var selected = options.Signals?.ToHashSet();
+            foreach (var signal in Signals) signal.IsSelected = selected is null || selected.Contains(signal.Value);
+            _missingPresetSignals = selected?.Except(Signals.Select(s => s.Value)).ToArray() ?? [];
+            var ordered = options.Columns.Distinct(StringComparer.Ordinal).ToArray();
+            var known = Columns.ToDictionary(c => c.Value, StringComparer.Ordinal);
+            var reordered = ordered.Where(known.ContainsKey).Select(c => known[c])
+                .Concat(Columns.Where(c => !ordered.Contains(c.Value, StringComparer.Ordinal))).ToArray();
+            Columns.Clear();
+            foreach (var column in reordered)
+            {
+                column.IsSelected = ordered.Contains(column.Value, StringComparer.Ordinal);
+                Columns.Add(column);
+            }
+            TimeMode.SelectedIndex = Enum.IsDefined(options.TimeOrigin) ? (int)options.TimeOrigin : 0;
+            Delimiter.SelectedIndex = options.Delimiter switch { ";" => 1, "\t" => 2, _ => 0 };
+            Decimals.SelectedIndex = options.DecimalSeparator == "," ? 1 : 0;
+            Utf8Bom.IsChecked = options.IncludeUtf8Bom;
+            var unknownColumns = ordered.Where(c => !known.ContainsKey(c)).ToArray();
+            PresetStatus.Text = _missingPresetSignals.Length == 0 ? "Preset geladen." :
+                $"{_missingPresetSignals.Length} presetsignaal/signalen ontbreken in deze log en worden niet geëxporteerd. Ze blijven bij bijwerken in de preset bewaard.";
+            if (unknownColumns.Length > 0) PresetStatus.Text += " Onbekende kolommen overgeslagen: " + string.Join(", ", unknownColumns);
+            PresetStatus.ToolTip = string.Join("\n", _missingPresetSignals.Select(s => s.DisplayLabel));
+        }
+        finally { _ready = true; InvalidatePreview(); }
+    }
+
+    private void MoveColumnUp(object sender, RoutedEventArgs e) => MoveColumn(sender, -1);
+    private void MoveColumnDown(object sender, RoutedEventArgs e) => MoveColumn(sender, 1);
+    private void MoveColumn(object sender, int direction)
+    {
+        if (sender is not Button { Tag: CsvExportChoice<string> column }) return;
+        var from = Columns.IndexOf(column);
+        var to = from + direction;
+        if (from < 0 || to < 0 || to >= Columns.Count) return;
+        Columns.Move(from, to);
+        ColumnList.ScrollIntoView(column);
+        InvalidatePreview();
+    }
+
+    private void PresetNameChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_ready) UpdatePresetButtons();
+    }
+
+    private void UpdatePresetButtons()
+    {
+        var valid = !_savingPreset && _savePresets is not null &&
+                    !string.IsNullOrWhiteSpace(PresetName.Text) &&
+                    Signals.Any(s => s.IsSelected) && Columns.Any(c => c.IsSelected);
+        SaveNewPresetButton.IsEnabled = valid;
+        UpdatePresetButton.IsEnabled = valid && PresetList.SelectedItem is CsvExportPreset;
+        DeletePresetButton.IsEnabled = !_savingPreset && _savePresets is not null && PresetList.SelectedItem is CsvExportPreset;
+    }
+
+    private async void SaveNewPreset(object sender, RoutedEventArgs e) => await SavePresetAsync(false);
+    private async void UpdatePreset(object sender, RoutedEventArgs e) => await SavePresetAsync(true);
+
+    public async Task<bool> SavePresetAsync(bool update)
+    {
+        if (_savingPreset || _savePresets is null) return false;
+        var existing = update ? PresetList.SelectedItem as CsvExportPreset : null;
+        var name = PresetName.Text.Trim();
+        if (name.Length == 0 || !Signals.Any(s => s.IsSelected) || !Columns.Any(c => c.IsSelected) || (update && existing is null)) return false;
+        if (Presets.Any(p => p.Id != existing?.Id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            PresetStatus.Text = "Deze naam bestaat al. Kies die preset en gebruik Bijwerken, of voer een andere naam in.";
+            return false;
+        }
+        var options = CaptureOptions();
+        if (update) options = options with { Signals = options.Signals!.Concat(_missingPresetSignals).Distinct().ToArray() };
+        var preset = new CsvExportPreset { Id = existing?.Id ?? Guid.NewGuid(), Name = name, Options = options };
+        var next = Presets.ToList();
+        if (existing is null) next.Add(preset); else next[next.FindIndex(p => p.Id == existing.Id)] = preset;
+        if (!await PersistPresetsAsync(next)) return false;
+        Presets.Clear();
+        foreach (var item in next) Presets.Add(item);
+        PresetList.SelectedItem = preset;
+        PresetStatus.Text = _missingPresetSignals.Length == 0 ? "Preset opgeslagen op deze computer." :
+            $"Preset opgeslagen, inclusief {_missingPresetSignals.Length} signaal/signalen die in deze log ontbreken.";
+        return true;
+    }
+
+    private async void DeletePreset(object sender, RoutedEventArgs e)
+    {
+        if (PresetList.SelectedItem is not CsvExportPreset preset || _savingPreset) return;
+        if (MessageBox.Show(this, $"Preset ‘{preset.Name}’ verwijderen?", "CSV-preset verwijderen",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        if (!await DeletePresetAsync(preset.Id)) return;
+        PresetStatus.Text = "Preset verwijderd. De huidige exportselectie blijft staan.";
+    }
+
+    public async Task<bool> DeletePresetAsync(Guid id)
+    {
+        if (_savingPreset || _savePresets is null || !Presets.Any(p => p.Id == id)) return false;
+        var next = Presets.Where(p => p.Id != id).ToList();
+        if (!await PersistPresetsAsync(next)) return false;
+        Presets.Clear();
+        foreach (var item in next) Presets.Add(item);
+        PresetName.Text = string.Empty;
+        _missingPresetSignals = [];
+        UpdatePresetButtons();
+        return true;
+    }
+
+    private async Task<bool> PersistPresetsAsync(IReadOnlyList<CsvExportPreset> next)
+    {
+        _savingPreset = true;
+        PresetControls.IsEnabled = false;
+        UpdatePresetButtons();
+        try { await _savePresets!(next); return true; }
+        catch (Exception ex) { PresetStatus.Text = "Preset opslaan mislukt: " + ex.Message; return false; }
+        finally { _savingPreset = false; PresetControls.IsEnabled = true; UpdatePresetButtons(); }
     }
 
     private void ChoiceChanged(object? sender, PropertyChangedEventArgs e) => InvalidatePreview();
@@ -51,6 +192,7 @@ public partial class CsvExportDialog : Window
         SelectionSummary.Text = $"{count} / {Signals.Count} signalen · {columnCount} kolommen";
         ExportButton.IsEnabled = PreviewButton.IsEnabled = count > 0 && columnCount > 0;
         PreviewText.Text = "Instellingen gewijzigd. Klik op Voorbeeld vernieuwen.";
+        UpdatePresetButtons();
     }
 
     private void SearchChanged(object sender, TextChangedEventArgs e)

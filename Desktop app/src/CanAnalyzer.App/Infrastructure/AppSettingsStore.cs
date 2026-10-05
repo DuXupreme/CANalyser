@@ -19,12 +19,12 @@ public sealed class AppSettingsStore : IAppSettingsStore
     public string SettingsPath { get; }
 
     public AppSettingsStore()
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "CanAnalyzer", "settings.json"))
     {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "CanAnalyzer");
-        SettingsPath = Path.Combine(root, "settings.json");
     }
+
+    public AppSettingsStore(string settingsPath) => SettingsPath = Path.GetFullPath(settingsPath);
 
     public AppSettings Load()
     {
@@ -38,6 +38,7 @@ public sealed class AppSettingsStore : IAppSettingsStore
             var json = File.ReadAllText(SettingsPath);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions) ?? new AppSettings();
             settings.RecentDbcFiles ??= [];
+            settings.CsvExportPresets ??= [];
             settings.RecentLogFiles ??= [];
             settings.LastPlotViewOptions ??= new CanAnalyzer.Core.Domain.PlotViewOptions();
             settings.LastRawFrameFilter ??= new CanAnalyzer.Core.Domain.RawFrameFilterOptions();
@@ -81,7 +82,24 @@ public sealed class AppSettingsStore : IAppSettingsStore
         Directory.CreateDirectory(directory);
 
         var json = JsonSerializer.Serialize(settings, SerializerOptions);
-        await File.WriteAllTextAsync(SettingsPath, json, cancellationToken);
+        var temporaryPath = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            // Complete the new file beside the current one before replacing it.
+            // A failed write or cancellation must preserve saved presets and settings.
+            await File.WriteAllTextAsync(temporaryPath, json, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(SettingsPath))
+                File.Replace(temporaryPath, SettingsPath, destinationBackupFileName: null);
+            else
+                File.Move(temporaryPath, SettingsPath);
+        }
+        finally
+        {
+            try { File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static AppSettings CreateCurrentSettings() => new()

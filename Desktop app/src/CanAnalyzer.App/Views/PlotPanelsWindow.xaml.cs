@@ -28,8 +28,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private double? _flagATime;
     private double? _flagBTime;
     private int _subplotHeight;
-    private int _maxPointsPerTrace = 5000;
-    private bool _useDownsampling;
+    private readonly DisplayLimits _displayLimits;
     private bool _stepPlot;
     private bool _markersOnly;
     private bool _showLegend = true;
@@ -41,9 +40,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     public PlotPanelsWindow(
         IReadOnlyList<PlotPanelModel> panels,
-        int subplotHeight,
-        int maxPointsPerTrace,
-        bool useDownsampling,
+        PlotViewOptions renderedOptions,
+        DisplayLimits displayLimits,
         bool linkXAxisAcrossPanels,
         bool linkYAxisAcrossPanels,
         DateTimeOffset? startTimeUtc)
@@ -51,9 +49,9 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         var history = new PlotInteractionHistory(this, () => Panels.Select(p => p.PlotModel));
         Panels.CollectionChanged += (_, _) => history.Clear();
-        _subplotHeight = Math.Clamp(subplotHeight, 160, 1300);
-        _maxPointsPerTrace = Math.Clamp(maxPointsPerTrace, 200, 200_000);
-        _useDownsampling = useDownsampling;
+        _subplotHeight = Math.Clamp(renderedOptions.SubplotHeight, 160, 1300);
+        _displayLimits = displayLimits;
+        _displayLimits.PropertyChanged += OnDisplayLimitsChanged;
         _linkXAxisAcrossPanels = linkXAxisAcrossPanels;
         _linkYAxisAcrossPanels = linkYAxisAcrossPanels;
         _startTimeUtc = startTimeUtc;
@@ -67,6 +65,10 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         DataContext = this;
         Loaded += OnLoaded;
         Closed += OnClosed;
+        // The user can change shared limits while the panels are being built in the background.
+        if (renderedOptions.UseDownsampling != UseDownsampling ||
+            (UseDownsampling && renderedOptions.MaxPointsPerTrace != MaxPointsPerTrace))
+            ApplyVisualOptionsPreservingView();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -81,25 +83,23 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     public int MaxPointsPerTrace
     {
-        get => _maxPointsPerTrace;
-        set
-        {
-            if (SetField(ref _maxPointsPerTrace, Math.Clamp(value, 200, 200_000)))
-            {
-                ApplyVisualOptionsPreservingView();
-            }
-        }
+        get => _displayLimits.MaxPointsPerTrace;
+        set => _displayLimits.MaxPointsPerTrace = value;
     }
 
     public bool UseDownsampling
     {
-        get => _useDownsampling;
-        set
+        get => _displayLimits.UseDownsampling;
+        set => _displayLimits.UseDownsampling = value;
+    }
+
+    private void OnDisplayLimitsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
-            if (SetField(ref _useDownsampling, value))
-            {
+            OnPropertyChanged(e.PropertyName);
+            if (UseDownsampling || e.PropertyName == nameof(DisplayLimits.UseDownsampling))
                 ApplyVisualOptionsPreservingView();
-            }
         }
     }
 
@@ -189,6 +189,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _displayLimits.PropertyChanged -= OnDisplayLimitsChanged;
         _xAxisSyncService.Bind([]);
     }
 

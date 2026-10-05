@@ -1,6 +1,7 @@
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.Views;
+using CanAnalyzer.Core.Domain;
 
 namespace CanAnalyzer.App.Infrastructure;
 
@@ -9,9 +10,8 @@ public sealed class PlotWindowService : IPlotWindowService
 {
     public void ShowPlots(
         IReadOnlyList<PlotPanelModel> panels,
-        int subplotHeight,
-        int maxPointsPerTrace,
-        bool useDownsampling,
+        PlotViewOptions renderedOptions,
+        DisplayLimits displayLimits,
         bool linkXAxisAcrossPanels,
         bool linkYAxisAcrossPanels,
         DateTimeOffset? startTimeUtc)
@@ -23,9 +23,8 @@ public sealed class PlotWindowService : IPlotWindowService
 
         var window = new PlotPanelsWindow(
             panels,
-            subplotHeight,
-            maxPointsPerTrace,
-            useDownsampling,
+            renderedOptions,
+            displayLimits,
             linkXAxisAcrossPanels,
             linkYAxisAcrossPanels,
             startTimeUtc);

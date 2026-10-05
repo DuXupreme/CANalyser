@@ -81,7 +81,7 @@ public static class DownsamplingConfirmation
         else { box.PreviewMouseLeftButtonDown -= OnMouse; box.PreviewKeyDown -= OnKey; }
     }
     private static bool Cancel(CheckBox box) => box.IsChecked == true && MessageBox.Show(Window.GetWindow(box),
-        "Downsampling uitschakelen? Alle meetpunten worden dan getekend. Bij grote logs kan dit lang duren en kan de grafiek tijdelijk niet reageren.",
+        "Downsampling uitschakelen voor Analyse en alle losse plotvensters? Alle meetpunten worden dan getekend. Bij grote logs kan dit lang duren en kunnen de grafieken tijdelijk niet reageren.",
         "Downsampling uitschakelen", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes;
     private static void OnMouse(object sender, MouseButtonEventArgs e)
     {

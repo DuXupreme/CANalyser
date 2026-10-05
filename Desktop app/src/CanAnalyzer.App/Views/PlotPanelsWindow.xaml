@@ -7,7 +7,7 @@
         xmlns:oxy="http://oxyplot.org/wpf"
         mc:Ignorable="d"
         Title="CANalyser — Analyseplots"
-        Icon="pack://application:,,,/Resources/Branding/canalyser-icon.ico"
+        Icon="pack://application:,,,/CanAnalyzer;component/Resources/Branding/canalyser-icon.ico"
         Width="1450"
         Height="950"
         MinWidth="980"
@@ -22,8 +22,7 @@
             <StackPanel>
                 <TextBlock Text="Aparte plotweergave: box-selectie zoom (linkermuisknop), pannen (rechtermuisknop), muiswiel zoom."
                            Foreground="#333333" />
-                <TextBlock Text="LOD/downsampling actief: alleen de getekende grafiek wordt vereenvoudigd. Brondata, analyse, CANalyser-cursors/flags en export blijven volledig; visuele details tussen representatieve punten kunnen minder exact lijken."
-                           Visibility="{Binding UseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
+                <TextBlock Text="Puntlimiet en downsampling zijn gedeeld met Analyse, Instellingen en alle losse plotvensters. De limiet geldt alleen bij downsampling; analyse en CSV-export gebruiken de brondata."
                            Foreground="#7A4A00"
                            TextWrapping="Wrap"
                            Margin="0,3,0,0" />
@@ -38,13 +37,11 @@
                                 Value="{Binding SubplotHeight, Mode=TwoWay}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,10,0">
-                        <TextBlock Text="Max punten/trace" />
-                        <Slider Width="170"
-                                Minimum="200"
-                                Maximum="200000"
-                                TickFrequency="200"
-                                IsSnapToTickEnabled="True"
-                                Value="{Binding MaxPointsPerTrace, Mode=TwoWay}" />
+                        <TextBlock Text="Max punten per signaal (weergave)" />
+                        <TextBox Width="95" HorizontalAlignment="Left"
+                                 IsEnabled="{Binding UseDownsampling}"
+                                 ToolTip="200–200.000 punten per signaal. Dezelfde limiet geldt in alle plotvensters. Alleen actief bij downsampling."
+                                 Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=LostFocus}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,10,0">
                         <TextBlock Text="Weergave" />
@@ -58,7 +55,7 @@
                             <CheckBox Content="Legenda"
                                       IsChecked="{Binding ShowLegend, Mode=TwoWay}"
                                       Margin="0,0,8,0" />
-                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Snelheidsmodus (downsampling)"
+                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
                                       IsChecked="{Binding UseDownsampling, Mode=TwoWay}"
                                       Margin="0,0,8,0" />
                             <CheckBox Content="Koppel X-assen"

@@ -73,14 +73,22 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private string _settingsFilePath = string.Empty;
 
-    [ObservableProperty]
-    private int _defaultMaxPointsPerTrace = 5000;
+    public DisplayLimits DisplayLimits { get; }
+
+    public int DefaultMaxPointsPerTrace
+    {
+        get => DisplayLimits.MaxPointsPerTrace;
+        set => DisplayLimits.MaxPointsPerTrace = value;
+    }
 
     [ObservableProperty]
     private int _defaultSubplotHeight = 280;
 
-    [ObservableProperty]
-    private bool _defaultUseDownsampling;
+    public bool DefaultUseDownsampling
+    {
+        get => DisplayLimits.UseDownsampling;
+        set => DisplayLimits.UseDownsampling = value;
+    }
 
     [ObservableProperty]
     private bool _defaultShowLegend = true;
@@ -88,8 +96,11 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private bool _defaultLinkXAxisAcrossPanels = true;
 
-    [ObservableProperty]
-    private int _defaultRawMaxRows = 50_000;
+    public int DefaultRawMaxRows
+    {
+        get => DisplayLimits.RawRowsPerPage;
+        set => DisplayLimits.RawRowsPerPage = value;
+    }
 
     [ObservableProperty]
     private string _settingsSaveStatus = string.Empty;
@@ -118,11 +129,22 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     public SettingsDiagnosticsViewModel(
         IUpdateService updateService,
         IMessageDialogService messageDialogService,
-        ITelemetryService telemetryService)
+        ITelemetryService telemetryService,
+        DisplayLimits displayLimits)
     {
         _updateService = updateService;
         _messageDialogService = messageDialogService;
         _telemetryService = telemetryService;
+        DisplayLimits = displayLimits;
+        DisplayLimits.PropertyChanged += (_, e) =>
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(DisplayLimits.MaxPointsPerTrace): OnPropertyChanged(nameof(DefaultMaxPointsPerTrace)); break;
+                case nameof(DisplayLimits.UseDownsampling): OnPropertyChanged(nameof(DefaultUseDownsampling)); break;
+                case nameof(DisplayLimits.RawRowsPerPage): OnPropertyChanged(nameof(DefaultRawMaxRows)); break;
+            }
+        };
         TelemetryLocalLogPath = _telemetryService.LocalLogPath;
         ApplyProgramSettingsCommand = new AsyncRelayCommand(ApplyProgramSettingsAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);

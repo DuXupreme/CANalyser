@@ -1,5 +1,6 @@
 using System.Windows;
 using CanAnalyzer.App.Infrastructure;
+using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.ViewModels;
 using CanAnalyzer.App.Views;
@@ -171,6 +172,7 @@ public partial class App : Application
         services.AddSingleton<IPlotModelBuilder, PlotModelBuilder>();
         services.AddSingleton<IXAxisSyncService, XAxisSyncService>();
         services.AddSingleton<IPlotWindowService, PlotWindowService>();
+        services.AddSingleton<DisplayLimits>();
 
         services.AddSingleton<CssSemicolonParser>();
         services.AddSingleton<BusmasterParser>();

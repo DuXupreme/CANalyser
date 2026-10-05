@@ -24,8 +24,13 @@ public sealed partial class BusmasterViewModel : ObservableObject
     [ObservableProperty]
     private bool _showOnlyDecoded;
 
-    [ObservableProperty]
-    private int _maxRows = 50_000;
+    private readonly DisplayLimits _displayLimits;
+
+    public int MaxRows
+    {
+        get => _displayLimits.RawRowsPerPage;
+        set => _displayLimits.RawRowsPerPage = value;
+    }
 
     [ObservableProperty]
     private string _messageStatistics = "Geen dataset geladen.";
@@ -53,9 +58,16 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
     private IReadOnlyList<BusmasterSignalWatchRow> _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
 
-    public BusmasterViewModel(ITelemetryService? telemetryService = null)
+    public BusmasterViewModel(DisplayLimits displayLimits, ITelemetryService? telemetryService = null)
     {
         _telemetryService = telemetryService;
+        _displayLimits = displayLimits;
+        _displayLimits.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(DisplayLimits.RawRowsPerPage)) return;
+            OnPropertyChanged(nameof(MaxRows));
+            ApplyFilters(resetPage: true);
+        };
         ApplyFiltersCommand = new RelayCommand(() => ApplyFilters(resetPage: true));
         ResetFiltersCommand = new RelayCommand(ResetFilters);
         PreviousPageCommand = new RelayCommand(PreviousPage, () => PageNumber > 1);
@@ -77,6 +89,13 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
         ApplyFilters(resetPage: true);
         BuildSignalWatchRows(dataset);
+    }
+
+    public void ClearDataset()
+    {
+        _dataset = null;
+        _sampleLookup = null;
+        ApplyFilters(resetPage: true);
     }
 
     partial void OnSelectedMessageChanged(BusmasterMessageRow? value)
@@ -148,6 +167,8 @@ public sealed partial class BusmasterViewModel : ObservableObject
             _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchStatistics = "Geen dataset geladen.";
+            PreviousPageCommand.NotifyCanExecuteChanged();
+            NextPageCommand.NotifyCanExecuteChanged();
             return;
         }
 
@@ -179,8 +200,10 @@ public sealed partial class BusmasterViewModel : ObservableObject
         Messages = rows.Skip(offset).Take(maxRows).ToList();
         SelectedMessage = Messages.FirstOrDefault();
         MessageStatistics =
-            $"Tonen: {Messages.Count:N0} / {_dataset.RawCount:N0} frames · " +
+            $"Pagina {PageNumber:N0}: {Messages.Count:N0} frames; dataset totaal {_dataset.RawCount:N0} · " +
             $"DBC geïnterpreteerd: {Messages.Count(row => row.IsDecoded):N0}";
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
     }
 
     private BusmasterMessageRow CreateRow(RawCanFrame frame)
@@ -207,7 +230,6 @@ public sealed partial class BusmasterViewModel : ObservableObject
     {
         SearchText = null;
         ShowOnlyDecoded = false;
-        MaxRows = 50_000;
         SignalWatchSearchText = null;
         ApplyFilters(resetPage: true);
     }

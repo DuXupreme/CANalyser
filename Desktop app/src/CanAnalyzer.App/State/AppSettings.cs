@@ -17,6 +17,8 @@ public sealed class AppSettings
 
     public List<string> RecentDbcFiles { get; set; } = [];
 
+    public List<CsvExportPreset> CsvExportPresets { get; set; } = [];
+
     public double WindowWidth { get; set; } = 1600;
 
     public double WindowHeight { get; set; } = 960;

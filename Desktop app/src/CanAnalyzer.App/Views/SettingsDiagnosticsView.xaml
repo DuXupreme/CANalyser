@@ -119,25 +119,31 @@
                 </StackPanel>
             </GroupBox>
 
-            <GroupBox Header="Programma-instellingen" Margin="0,8,0,0">
+            <GroupBox Header="Weergavelimieten" Margin="0,8,0,0">
                 <StackPanel Margin="8">
-                    <TextBlock Text="Max punten per trace (default)" />
-                    <TextBox Text="{Binding DefaultMaxPointsPerTrace, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" />
-
-                    <TextBlock Text="Subplot hoogte [px] (default)" />
-                    <TextBox Text="{Binding DefaultSubplotHeight, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" />
-
-                    <TextBlock Text="Max rijen Raw Frames (default)" />
-                    <TextBox Text="{Binding DefaultRawMaxRows, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" />
-
-                    <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Snelheidsmodus / downsampling standaard aan"
+                    <TextBlock Text="Deze waarden zijn gedeeld met Analyse, alle losse plotvensters, Raw Frames en Busmaster. Wijzigingen gelden direct na het verlaten van het invoerveld. Ze worden bewaard bij opslaan of normaal afsluiten."
+                               TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBlock Text="Max punten per signaal (weergave)" />
+                    <TextBox Text="{Binding DefaultMaxPointsPerTrace, UpdateSourceTrigger=LostFocus}"
+                             IsEnabled="{Binding DefaultUseDownsampling}"
+                             ToolTip="200–200.000 punten per signaal. Alleen actief bij downsampling."
+                             Margin="0,2,0,6" />
+                    <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
                               IsChecked="{Binding DefaultUseDownsampling}"
                               Margin="0,0,0,6" />
-                    <TextBlock Text="Downsampling geldt alleen voor de plotweergave. Analyse en export blijven brondata gebruiken; bij detailinspectie kun je inzoomen of LOD uitschakelen."
-                               Visibility="{Binding DefaultUseDownsampling, Converter={StaticResource BoolToVisibilityConverter}}"
-                               TextWrapping="Wrap"
-                               Foreground="#7A4A00"
-                               Margin="0,0,0,6" />
+                    <TextBlock Text="Rijen per pagina (Raw Frames en Busmaster)" />
+                    <TextBox Text="{Binding DefaultRawMaxRows, UpdateSourceTrigger=LostFocus}"
+                             ToolTip="1–2.000.000 rijen per pagina. De overige frames blijven via de paginaknoppen beschikbaar."
+                             Margin="0,2,0,6" />
+                    <TextBlock Text="Beide limieten gelden alleen voor de weergave. Ze beperken de analyse en CSV-export niet."
+                               TextWrapping="Wrap" Foreground="#7A4A00" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Programma-instellingen" Margin="0,8,0,0">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Subplot hoogte [px] (default)" />
+                    <TextBox Text="{Binding DefaultSubplotHeight, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,6" />
 
                     <CheckBox Content="Toon legenda standaard"
                               IsChecked="{Binding DefaultShowLegend}"
