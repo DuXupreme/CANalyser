@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,16 +12,59 @@ using CanAnalyzer.Core.Domain;
 
 namespace CanAnalyzer.App.Infrastructure;
 
-/// <summary>Reads the public dashboard API; AWS credentials remain exclusively on the server.</summary>
+/// <summary>Reads the dashboard API; AWS credentials remain exclusively on the server.</summary>
 public sealed class OnlineLogService : IOnlineLogService, IDisposable
 {
     internal const string DashboardBaseUrl = "https://main.d2qydggp5q6c4q.amplifyapp.com/";
     private const long MaximumCacheBytes = 2L * 1024 * 1024 * 1024;
     private static readonly TimeSpan CacheRetention = TimeSpan.FromDays(7);
     private readonly string? _cacheDirectoryOverride;
-    private readonly HttpClient _httpClient = new() { BaseAddress = new Uri(DashboardBaseUrl), Timeout = TimeSpan.FromMinutes(15) };
+    private readonly HttpClient _httpClient;
+    private readonly IOnlineLogCredentialStore? _credentialStore;
+    private readonly TimeProvider _timeProvider;
+    private DashboardCredentials? _credentials;
 
-    public OnlineLogService()
+    public string? AuthenticationUserName => GetCurrentCredentials()?.UserName;
+    public bool RememberCredentials => GetCurrentCredentials()?.Remembered is not null;
+
+    public void SetCredentials(string username, string password, bool rememberFor30Days = false)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            throw new ArgumentException("Vul een gebruikersnaam in.", nameof(username));
+        if (username.Contains(':'))
+            throw new ArgumentException("De gebruikersnaam mag geen dubbele punt bevatten.", nameof(username));
+        if (string.IsNullOrEmpty(password))
+            throw new ArgumentException("Vul een wachtwoord in.", nameof(password));
+        if (rememberFor30Days && _credentialStore is null)
+            throw new InvalidOperationException("Inloggegevens onthouden is hier niet beschikbaar.");
+        // Remove a previously remembered account even if this login is session-only or rejected.
+        _credentialStore?.Clear();
+        var parameter = Convert.ToBase64String(Encoding.UTF8.GetBytes(username + ":" + password));
+        var now = _timeProvider.GetUtcNow();
+        _credentials = new DashboardCredentials(username, new AuthenticationHeaderValue("Basic", parameter))
+        {
+            Remembered = rememberFor30Days ? new RememberedOnlineLogCredentials
+            {
+                DashboardUrl = _httpClient.BaseAddress!.AbsoluteUri,
+                UserName = username,
+                AuthorizationParameter = parameter,
+                SavedAtUtc = now,
+                ExpiresAtUtc = now.AddDays(RememberedOnlineLogCredentials.MaximumDays)
+            } : null,
+            NeedsSave = rememberFor30Days
+        };
+    }
+
+    public void ClearCredentials()
+    {
+        // A failed removal is reported to the user; do not claim sign-out succeeded.
+        _credentialStore?.Clear();
+        _credentials = null;
+    }
+
+    public OnlineLogService(IOnlineLogCredentialStore credentialStore)
+        : this(new HttpClient { BaseAddress = new Uri(DashboardBaseUrl), Timeout = TimeSpan.FromMinutes(15) },
+            credentialStore: credentialStore)
     {
         var cacheDirectory = GetCacheDirectory();
         try
@@ -53,10 +97,17 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
             Math.Max(earlier.UnknownRecordingTimes, later.UnknownRecordingTimes));
     }
 
-    internal OnlineLogService(HttpClient httpClient, string? cacheDirectory = null)
+    internal OnlineLogService(HttpClient httpClient, string? cacheDirectory = null,
+        IOnlineLogCredentialStore? credentialStore = null, TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient;
         _cacheDirectoryOverride = cacheDirectory;
+        _credentialStore = credentialStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        var saved = credentialStore?.Load();
+        if (saved?.IsValidAt(_timeProvider.GetUtcNow(), httpClient.BaseAddress!.AbsoluteUri) == true)
+            _credentials = new DashboardCredentials(saved.UserName, new AuthenticationHeaderValue("Basic", saved.AuthorizationParameter))
+            { Remembered = saved };
     }
 
     private async Task<OnlineLogQueryResult> GetLogPageAsync(
@@ -66,8 +117,9 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                   + "&from=" + Uri.EscapeDataString(fromUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&timeBasis=recording";
-        using var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var request = CreateDashboardRequest(HttpMethod.Get, url);
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await EnsureDashboardSuccessAsync(request, response, cancellationToken).ConfigureAwait(false);
         var payload = await response.Content.ReadFromJsonAsync<LogListResponse>(cancellationToken: cancellationToken).ConfigureAwait(false)
                       ?? throw new InvalidDataException("De online-loglijst is leeg of ongeldig.");
         if (!string.Equals(payload.TimeBasis, "recording", StringComparison.Ordinal))
@@ -131,8 +183,10 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                     // batch into the same archive for one complete analysis.
                     foreach (var batch in keys.Chunk(200))
                     {
-                        using var planResponse = await _httpClient.PostAsJsonAsync("api/download-plan", new { keys = batch }, cancellationToken).ConfigureAwait(false);
-                        await EnsureSuccessAsync(planResponse, cancellationToken).ConfigureAwait(false);
+                        using var planRequest = CreateDashboardRequest(HttpMethod.Post, "api/download-plan");
+                        planRequest.Content = JsonContent.Create(new { keys = batch });
+                        using var planResponse = await _httpClient.SendAsync(planRequest, cancellationToken).ConfigureAwait(false);
+                        await EnsureDashboardSuccessAsync(planRequest, planResponse, cancellationToken).ConfigureAwait(false);
                         var plan = await planResponse.Content.ReadFromJsonAsync<DownloadPlanResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
                         if (plan?.Files is not { } plannedFiles || plannedFiles.Length != batch.Length)
                             throw new InvalidDataException("Het online-downloadplan bevat niet alle geselecteerde bestanden.");
@@ -178,7 +232,76 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         }
     }
 
-    public void Dispose() => _httpClient.Dispose();
+    public void Dispose()
+    {
+        // Closing CANalyser ends session-only logins; remembered logins keep their original deadline.
+        _credentials = null;
+        _httpClient.Dispose();
+    }
+
+    private DashboardCredentials? GetCurrentCredentials()
+    {
+        var credentials = _credentials;
+        var now = _timeProvider.GetUtcNow();
+        if (credentials?.Remembered is { } saved &&
+            (saved.SavedAtUtc > now || saved.ExpiresAtUtc <= now))
+        {
+            _credentials = null;
+            try { _credentialStore?.Clear(); }
+            catch (OnlineLogCredentialStorageException) { }
+            return null;
+        }
+        return credentials;
+    }
+
+    private HttpRequestMessage CreateDashboardRequest(HttpMethod method, string relativePath)
+    {
+        var uri = new Uri(_httpClient.BaseAddress ?? throw new InvalidOperationException("Het dashboardadres ontbreekt."), relativePath);
+        var credentials = GetCurrentCredentials();
+        if (credentials is not null && uri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("Inloggen op het dashboard vereist een beveiligde HTTPS-verbinding.");
+        var request = new HttpRequestMessage(method, uri);
+        // Do not use default headers: this client also follows signed download URLs.
+        if (credentials is not null) request.Headers.Authorization = credentials.Authorization;
+        return request;
+    }
+
+    private async Task EnsureDashboardSuccessAsync(HttpRequestMessage request, HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var responseUri = response.RequestMessage?.RequestUri ?? request.RequestUri!;
+        var dashboardUri = _httpClient.BaseAddress!;
+        var sameOrigin = responseUri.Scheme == dashboardUri.Scheme && responseUri.Host == dashboardUri.Host &&
+                         responseUri.Port == dashboardUri.Port;
+        if (sameOrigin && response.StatusCode == System.Net.HttpStatusCode.Unauthorized &&
+            response.Headers.WwwAuthenticate.Any(static challenge =>
+                string.Equals(challenge.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (_credentials is { } rejected && request.Headers.Authorization?.Equals(rejected.Authorization) == true)
+            {
+                // Keep the user name for correction, but never retain a rejected saved login.
+                rejected.Remembered = null;
+                rejected.NeedsSave = false;
+                try { _credentialStore?.Clear(); }
+                catch (OnlineLogCredentialStorageException) { }
+            }
+            throw new OnlineLogAuthenticationException(request.Headers.Authorization is not null);
+        }
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        var credentials = GetCurrentCredentials();
+        if (sameOrigin && credentials is { NeedsSave: true, Remembered: { } saved } &&
+            request.Headers.Authorization?.Equals(credentials.Authorization) == true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            credentials.NeedsSave = false;
+            try { _credentialStore!.Save(saved); }
+            catch (OnlineLogCredentialStorageException)
+            {
+                credentials.Remembered = null;
+                throw;
+            }
+        }
+    }
 
     private static Uri ValidateDownloadUri(string? value)
     {
@@ -302,4 +425,13 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         DateTimeOffset? RecordedAt,
         DateTimeOffset? UploadedAt);
     private sealed record ErrorResponse(string Error);
+
+    // A class deliberately avoids a generated record ToString containing authentication data.
+    private sealed class DashboardCredentials(string userName, AuthenticationHeaderValue authorization)
+    {
+        public string UserName { get; } = userName;
+        public AuthenticationHeaderValue Authorization { get; } = authorization;
+        public RememberedOnlineLogCredentials? Remembered { get; set; }
+        public bool NeedsSave { get; set; }
+    }
 }

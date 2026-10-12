@@ -2,10 +2,11 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.4.11 (.NET 8 WPF)
+# CANalyser 2.4.12 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
+> Versie `2.4.12` herstelt toegang tot beveiligde online logs met een aanmeldvenster. Inloggegevens kunnen optioneel maximaal 30 dagen versleuteld worden onthouden; Afmelden verwijdert ze.
 > Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.
 > Versie `2.4.10` voegde CSV-export met signaal-, kolom-, tijd- en opmaakkeuze toe. Versie `2.4.9` verbeterde grafiekrespons en tijdelijke opslag; versie `2.4.8` voegde gekalibreerde slagbenutting en analyse-export toe.
 > Versie `2.4.2` onthoudt de laatste vijf online-logselecties, maakt zware delay-/joystick-/actuatoranalyses geheugenveilig op logs met miljoenen meetpunten en herstelt de afzonderlijke actuator-slagbenutting. Afgebroken analyses worden bij de volgende start in telemetry gemeld.
@@ -63,6 +64,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
   slagbenutting van Left/Right/Front, inclusief P01–P99, tijd nabij beide
   uitersten en tijd buiten een instelbare referentieslag.
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
+- Bij een met wachtwoord beveiligd dashboard vraagt Online logs om dezelfde gebruikersnaam en hetzelfde wachtwoord als de website. Met **Inloggegevens 30 dagen onthouden** worden geaccepteerde gegevens via Windows DPAPI versleuteld voor de huidige Windows-gebruiker bewaard. De vaste vervaldatum schuift niet op bij gebruik; Afmelden verwijdert de opgeslagen aanmelding. Zonder vinkje geldt de aanmelding alleen tot het afsluiten van CANalyser. Inloggegevens worden alleen naar het dashboard gestuurd.
 - De laatste vijf online downloadselecties worden direct lokaal opgeslagen en kunnen na herstart of crash met één klik opnieuw worden geselecteerd.
 - Een complete sessie kan in één handeling worden toegevoegd of uitgevinkt. Meerdere sessies van dezelfde logger mogen samen worden geanalyseerd; de absolute tijd en meetonderbrekingen blijven behouden.
 - Binnen iedere geselecteerde sessie moeten de MF4-deelnummers opeenvolgen. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.

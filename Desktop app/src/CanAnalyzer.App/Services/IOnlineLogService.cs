@@ -27,6 +27,13 @@ public sealed record OnlineLogSelection(
 
 public interface IOnlineLogService
 {
+    string? AuthenticationUserName { get; }
+    bool RememberCredentials { get; }
+
+    void SetCredentials(string username, string password, bool rememberFor30Days = false);
+
+    void ClearCredentials();
+
     Task<OnlineLogQueryResult> GetLogsAsync(
         string loggerId,
         DateTimeOffset fromUtc,
@@ -37,4 +44,18 @@ public interface IOnlineLogService
         IReadOnlyList<OnlineLogSelection> files,
         IProgress<OnlineDownloadProgress>? progress,
         CancellationToken cancellationToken);
+}
+
+public sealed class OnlineLogAuthenticationException : System.Net.Http.HttpRequestException
+{
+    public OnlineLogAuthenticationException(bool credentialsRejected)
+        : base(credentialsRejected
+            ? "Het dashboard heeft de inloggegevens niet geaccepteerd. Controleer je gebruikersnaam en wachtwoord."
+            : "Log in op het dashboard om online bestanden te openen.",
+            null, System.Net.HttpStatusCode.Unauthorized)
+    {
+        CredentialsRejected = credentialsRejected;
+    }
+
+    public bool CredentialsRejected { get; }
 }

@@ -164,6 +164,7 @@ public partial class App : Application
         services.AddSingleton<IMessageDialogService, MessageDialogService>();
         services.AddSingleton<IImportRepairWizardService, ImportRepairWizardService>();
         services.AddSingleton<IOnlineLogService, OnlineLogService>();
+        services.AddSingleton<IOnlineLogCredentialStore, OnlineLogCredentialStore>();
         services.AddSingleton<IOnlineLogSelectionHistoryStore, OnlineLogSelectionHistoryStore>();
         services.AddSingleton<IOnlineLogDialogService, OnlineLogDialogService>();
         services.AddSingleton<IUpdateService, UpdateService>();
