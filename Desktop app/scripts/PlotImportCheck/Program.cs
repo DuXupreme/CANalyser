@@ -74,13 +74,14 @@ internal static class Program
     {
         public int Calls { get; private set; }
         public bool Fail { get; set; }
-        public IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> groups, PlotViewOptions options)
+        public IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> groups, PlotViewOptions options,
+            IReadOnlyList<PlotViewport?>? viewports = null)
         {
             Calls++;
             if (Environment.CurrentManagedThreadId == uiThread) throw new InvalidOperationException("Build ran on UI thread");
             Thread.Sleep(300);
             if (Fail) throw new InvalidDataException("Simulated build failure");
-            return new PlotModelBuilder().Build(dataset, groups, options);
+            return new PlotModelBuilder().Build(dataset, groups, options, viewports);
         }
     }
 }

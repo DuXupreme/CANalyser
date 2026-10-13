@@ -17,6 +17,14 @@ public sealed class LatestWorkQueue<TRequest, TResult>(
     private CancellationTokenSource? _cancellation;
     public bool IsRunning => _running is not null;
 
+    /// <summary>Discard queued work and prevent the current worker from publishing.</summary>
+    public void CancelPending()
+    {
+        _pending = null;
+        _version++;
+        _cancellation?.Cancel();
+    }
+
     public Task RequestAsync(TRequest request)
     {
         _pending = (request, ++_version);

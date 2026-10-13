@@ -5,7 +5,6 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using CanAnalyzer.App.Models;
-using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Utilities;
 using CanAnalyzer.App.Services;
@@ -19,9 +18,10 @@ namespace CanAnalyzer.App.Views;
 
 public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 {
-    private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
-
     private readonly XAxisSyncService _xAxisSyncService = new();
+    private readonly LatestWorkQueue<VisualBuildRequest, OxyPlot.Series.Series[][]> _visualBuilds;
+    private readonly CancellationTokenSource _windowLifetime = new();
+    private readonly List<Axis> _navigationAxes = [];
     private readonly DateTimeOffset? _startTimeUtc;
     private DateTime _lastCursorUpdateUtc = DateTime.MinValue;
     private double? _cursorTime;
@@ -36,6 +36,10 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private bool _linkYAxisAcrossPanels = true;
     private bool _showCursorValueLabels = true;
     private bool _suppressVisualRefresh;
+    private bool _restoringView;
+    private bool _isClosed;
+    private bool _isBusy;
+    private string _plotStatus = string.Empty;
     private PlotPanelModel? _activeCursorPanel;
 
     public PlotPanelsWindow(
@@ -51,6 +55,19 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         Panels.CollectionChanged += (_, _) => history.Clear();
         _subplotHeight = Math.Clamp(renderedOptions.SubplotHeight, 160, 1300);
         _displayLimits = displayLimits;
+        _visualBuilds = new(
+            (request, cancellation) => Task.Run(() => BuildVisualSeries(request, cancellation), cancellation),
+            PublishVisualSeries,
+            running =>
+            {
+                if (_isClosed) return;
+                IsBusy = running;
+                if (running) PlotStatus = "Grafiek bijwerken...";
+            },
+            error =>
+            {
+                if (!_isClosed) PlotStatus = $"Grafiek bijwerken mislukt: {error.Message}";
+            });
         _displayLimits.PropertyChanged += OnDisplayLimitsChanged;
         _linkXAxisAcrossPanels = linkXAxisAcrossPanels;
         _linkYAxisAcrossPanels = linkYAxisAcrossPanels;
@@ -65,6 +82,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         DataContext = this;
         Loaded += OnLoaded;
         Closed += OnClosed;
+        BindNavigationHandlers();
         // The user can change shared limits while the panels are being built in the background.
         if (renderedOptions.UseDownsampling != UseDownsampling ||
             (UseDownsampling && renderedOptions.MaxPointsPerTrace != MaxPointsPerTrace))
@@ -74,6 +92,18 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<PlotPanelModel> Panels { get; } = [];
+
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set => SetField(ref _isBusy, value);
+    }
+
+    public string PlotStatus
+    {
+        get => _plotStatus;
+        private set => SetField(ref _plotStatus, value);
+    }
 
     public int SubplotHeight
     {
@@ -98,6 +128,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
             OnPropertyChanged(e.PropertyName);
+            if (e.PropertyName == nameof(DisplayLimits.UseDownsampling) && UseDownsampling && !_visualBuilds.IsRunning)
+            {
+                foreach (var panel in Panels)
+                    ViewportSampling.ResumeDownsampling(panel.PlotModel, MaxPointsPerTrace);
+                PlotStatus = string.Empty;
+                return;
+            }
             if (UseDownsampling || e.PropertyName == nameof(DisplayLimits.UseDownsampling))
                 ApplyVisualOptionsPreservingView();
         }
@@ -182,15 +219,46 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _activeCursorPanel ??= Panels.FirstOrDefault();
-        ApplyAxisSyncConfiguration();
-        _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
+        _restoringView = true;
+        try
+        {
+            ApplyAxisSyncConfiguration();
+            _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
+        }
+        finally { _restoringView = false; }
         RefreshCursorAnnotations();
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _isClosed = true;
+        _windowLifetime.Cancel();
+        _windowLifetime.Dispose();
         _displayLimits.PropertyChanged -= OnDisplayLimitsChanged;
+        UnbindNavigationHandlers();
         _xAxisSyncService.Bind([]);
+    }
+
+    private void BindNavigationHandlers()
+    {
+        UnbindNavigationHandlers();
+        foreach (var axis in Panels.SelectMany(panel => panel.PlotModel.Axes))
+        {
+            axis.AxisChanged += OnNavigationAxisChanged;
+            _navigationAxes.Add(axis);
+        }
+    }
+
+    private void UnbindNavigationHandlers()
+    {
+        foreach (var axis in _navigationAxes) axis.AxisChanged -= OnNavigationAxisChanged;
+        _navigationAxes.Clear();
+    }
+
+    private void OnNavigationAxisChanged(object? sender, AxisChangedEventArgs e)
+    {
+        if (!_restoringView && !_isClosed && !UseDownsampling)
+            UseDownsampling = true;
     }
 
     private void OnPlotMouseMove(object sender, MouseEventArgs e)
@@ -779,33 +847,88 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     private void ApplyVisualOptionsPreservingView()
     {
-        if (_suppressVisualRefresh || Panels.Count == 0)
-        {
-            return;
-        }
+        if (_isClosed || _suppressVisualRefresh || Panels.Count == 0) return;
 
-        var snapshots = CapturePanelSnapshots();
-        foreach (var panel in Panels)
-        {
-            var model = panel.PlotModel;
-            var xAxis = model.Axes.FirstOrDefault(static axis => axis.Position == AxisPosition.Bottom);
-            var visibleMinimum = xAxis?.ActualMinimum;
-            var visibleMaximum = xAxis?.ActualMaximum;
-            model.IsLegendVisible = ShowLegend;
-            model.Series.Clear();
+        // Capture UI state now; workers only read these source buffers and their own options.
+        var options = CaptureVisualOptions();
+        if (options.UseDownsampling)
+            foreach (var panel in Panels) ViewportSampling.ResumeDownsampling(panel.PlotModel, MaxPointsPerTrace);
+        var panels = Panels.Select(panel => new PanelBuildRequest(panel.SeriesData.ToArray(),
+            CaptureViewport(panel.PlotModel))).ToArray();
+        _ = _visualBuilds.RequestAsync(new(options, panels, _windowLifetime.Token));
+    }
 
-            foreach (var series in panel.SeriesData)
+    private PlotViewOptions CaptureVisualOptions() => new()
+    {
+        UseDownsampling = UseDownsampling,
+        MaxPointsPerTrace = MaxPointsPerTrace,
+        MarkersOnly = MarkersOnly,
+        StepPlot = StepPlot,
+        ShowLegend = ShowLegend
+    };
+
+    private static PlotViewport? CaptureViewport(PlotModel model)
+    {
+        var axis = model.Axes.FirstOrDefault(axis => axis.Position == AxisPosition.Bottom);
+        if (axis is null) return null;
+        var range = CaptureAxisRange(axis);
+        return double.IsFinite(range.Minimum) && double.IsFinite(range.Maximum) && range.Maximum > range.Minimum
+            ? new PlotViewport(range.Minimum, range.Maximum) : null;
+    }
+
+    private static OxyPlot.Series.Series[][] BuildVisualSeries(VisualBuildRequest request, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, request.WindowLifetime);
+        var token = linked.Token;
+        var result = new OxyPlot.Series.Series[request.Panels.Length][];
+        for (var i = 0; i < request.Panels.Length; i++)
+        {
+            var panel = request.Panels[i];
+            result[i] = new OxyPlot.Series.Series[panel.Sources.Length];
+            for (var j = 0; j < panel.Sources.Length; j++)
             {
-                var rendered = BuildSeries(series, visibleMinimum, visibleMaximum);
-                model.Series.Add(rendered);
+                token.ThrowIfCancellationRequested();
+                result[i][j] = PlotSeriesRenderer.Build(panel.Sources[j], request.Options, panel.Viewport);
             }
-            ViewportSampling.Attach(model, panel.SeriesData, UseDownsampling, MaxPointsPerTrace);
         }
+        token.ThrowIfCancellationRequested();
+        return result;
+    }
 
-        RestorePanelSnapshots(snapshots);
-        ApplyAxisSyncConfiguration();
-        _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
+    private void PublishVisualSeries(VisualBuildRequest request, OxyPlot.Series.Series[][] rendered)
+    {
+        if (_isClosed || rendered.Length != Panels.Count) return;
+        // Capture at publication, so a pan, zoom or legend toggle during the build wins.
+        var snapshots = CapturePanelSnapshots();
+        _restoringView = true;
+        _xAxisSyncService.Bind([]);
+        try
+        {
+            for (var i = 0; i < Panels.Count; i++)
+            {
+                var model = Panels[i].PlotModel;
+                model.IsLegendVisible = ShowLegend;
+                model.Series.Clear();
+                foreach (var series in rendered[i]) model.Series.Add(series);
+            }
+            RestorePanelSnapshots(snapshots);
+            // These same models already carry the current linked ranges. Rebinding must not
+            // turn a pending automatic reset back into an explicit range from stale extents.
+            _xAxisSyncService.Configure(syncXAxis: false, syncYAxis: false);
+            _xAxisSyncService.Bind(Panels.Select(panel => panel.PlotModel));
+            ApplyAxisSyncConfiguration();
+            for (var i = 0; i < Panels.Count; i++)
+            {
+                var panel = Panels[i];
+                // Preparation belongs to the worker-created series. Attach only binds events.
+                ViewportSampling.Attach(panel.PlotModel, request.Panels[i].Sources,
+                    request.Options.UseDownsampling, request.Options.MaxPointsPerTrace, request.Panels[i].Viewport);
+                panel.PlotModel.InvalidatePlot(true);
+            }
+        }
+        finally { _restoringView = false; }
         RefreshCursorAnnotations();
+        PlotStatus = string.Empty;
     }
 
     private void ApplyAxisSyncConfiguration()
@@ -813,113 +936,17 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         _xAxisSyncService.Configure(syncXAxis: LinkXAxisAcrossPanels, syncYAxis: LinkYAxisAcrossPanels);
     }
 
-    private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series, double? visibleMinimum, double? visibleMaximum)
-    {
-        // A style change must not permanently discard points outside the current view.
-        var visibleTime = series.Time;
-        var visibleValue = series.Value;
-        (double[] x, double[] y) = UseDownsampling
-            ? series.RangeIndex.SupportsRangeQueries
-                ? series.RangeIndex.Select(null, null, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
-                : Downsampling.MinMax(visibleTime, visibleValue, Math.Clamp(MaxPointsPerTrace, 200, 200_000))
-            : (visibleTime, visibleValue);
-        if (MarkersOnly)
-        {
-            var scatter = new ScatterSeries
-            {
-                Title = series.Label,
-                MarkerFill = series.Color,
-                MarkerStroke = series.Color,
-                MarkerType = MarkerType.Circle,
-                MarkerSize = 2.5,
-                YAxisKey = series.YAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                TrackerFormatString = PreciseTrackerFormat
-            };
+    // Retained for the series construction regression check; live refreshes use the worker above.
+    private OxyPlot.Series.Series BuildSeries(RenderedSeriesData series, double? visibleMinimum, double? visibleMaximum) =>
+        PlotSeriesRenderer.Build(series, CaptureVisualOptions(),
+            visibleMinimum is { } minimum && visibleMaximum is { } maximum &&
+            double.IsFinite(minimum) && double.IsFinite(maximum) && maximum > minimum
+                ? new PlotViewport(minimum, maximum) : null);
 
-            for (var i = 0; i < x.Length; i++)
-            {
-                scatter.Points.Add(new ScatterPoint(x[i], y[i]));
-            }
-
-            return scatter;
-        }
-
-        if (StepPlot)
-        {
-            var stair = new StairStepSeries
-            {
-                Title = series.Label,
-                Color = series.Color,
-                StrokeThickness = 1.2,
-                YAxisKey = series.YAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                Decimator = UseDownsampling ? Decimator.Decimate : null,
-                TrackerFormatString = PreciseTrackerFormat
-            };
-
-            for (var i = 0; i < x.Length; i++)
-            {
-                if (CrossesGap(x, i, series.Gaps)) stair.Points.Add(DataPoint.Undefined);
-                stair.Points.Add(new DataPoint(x[i], y[i]));
-            }
-
-            return stair;
-        }
-
-        var line = new LineSeries
-        {
-            Title = series.Label,
-            Color = series.Color,
-            StrokeThickness = 1.2,
-            YAxisKey = series.YAxisKey,
-            EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-            Decimator = UseDownsampling ? Decimator.Decimate : null,
-            TrackerFormatString = PreciseTrackerFormat
-        };
-
-        for (var i = 0; i < x.Length; i++)
-        {
-            if (CrossesGap(x, i, series.Gaps)) line.Points.Add(DataPoint.Undefined);
-            line.Points.Add(new DataPoint(x[i], y[i]));
-        }
-
-        return line;
-    }
-
-    private static bool CrossesGap(double[] time, int index, IReadOnlyList<MeasurementGap> gaps) =>
-        index > 0 && gaps.Any(gap => time[index - 1] <= gap.StartSeconds && time[index] >= gap.EndSeconds);
-
-    private static int CountVisible(double[] values, double? minimum, double? maximum) =>
-        Math.Max(0, FindFirstAfter(values, maximum) - FindFirstAtOrAfter(values, minimum));
-
-    private static int FindFirstAtOrAfter(double[] values, double? threshold)
-    {
-        if (!threshold.HasValue || double.IsNaN(threshold.Value) || double.IsInfinity(threshold.Value)) return 0;
-        var low = 0;
-        var high = values.Length;
-        while (low < high)
-        {
-            var middle = low + ((high - low) / 2);
-            if (values[middle] < threshold.Value) low = middle + 1; else high = middle;
-        }
-
-        return low;
-    }
-
-    private static int FindFirstAfter(double[] values, double? threshold)
-    {
-        if (!threshold.HasValue || double.IsNaN(threshold.Value) || double.IsInfinity(threshold.Value)) return values.Length;
-        var low = 0;
-        var high = values.Length;
-        while (low < high)
-        {
-            var middle = low + ((high - low) / 2);
-            if (values[middle] <= threshold.Value) low = middle + 1; else high = middle;
-        }
-
-        return low;
-    }
+    private static AxisRange CaptureAxisRange(Axis axis) =>
+        axis is ViewportAxis viewportAxis
+            ? new(viewportAxis.VisibleMinimum, viewportAxis.VisibleMaximum, !viewportAxis.HasUserRange)
+            : new(axis.ActualMinimum, axis.ActualMaximum, false);
 
     private List<PanelViewSnapshot> CapturePanelSnapshots()
     {
@@ -929,7 +956,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
             var axisRanges = new Dictionary<string, AxisRange>(StringComparer.Ordinal);
             foreach (var axis in panel.PlotModel.Axes)
             {
-                axisRanges[GetAxisId(axis)] = new AxisRange(axis.ActualMinimum, axis.ActualMaximum);
+                axisRanges[GetAxisId(axis)] = CaptureAxisRange(axis);
             }
 
             var visibility = panel.PlotModel.Series
@@ -957,7 +984,13 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                     continue;
                 }
 
-                if (double.IsNaN(range.Minimum) || double.IsNaN(range.Maximum) || range.Maximum <= range.Minimum)
+                if (range.IsAutomatic)
+                {
+                    axis.Reset();
+                    continue;
+                }
+
+                if (!double.IsFinite(range.Minimum) || !double.IsFinite(range.Maximum) || range.Maximum <= range.Minimum)
                 {
                     continue;
                 }
@@ -1043,7 +1076,11 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    private sealed record AxisRange(double Minimum, double Maximum);
+    private sealed record AxisRange(double Minimum, double Maximum, bool IsAutomatic);
+
+    private sealed record PanelBuildRequest(RenderedSeriesData[] Sources, PlotViewport? Viewport);
+
+    private sealed record VisualBuildRequest(PlotViewOptions Options, PanelBuildRequest[] Panels, CancellationToken WindowLifetime);
 
     private sealed record PanelViewSnapshot(
         IReadOnlyDictionary<string, AxisRange> AxisRanges,

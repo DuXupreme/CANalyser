@@ -2,10 +2,11 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.4.12 (.NET 8 WPF)
+# CANalyser 2.4.13 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
+> Versie `2.4.13` beperkt weergave zonder downsampling tot het zichtbare tijdvak. Verschuiven, zoomen en resetten schakelen downsampling direct weer in. Losse grafiekvensters bereiden hun meetpunten op de achtergrond voor.
 > Versie `2.4.12` herstelt toegang tot beveiligde online logs met een aanmeldvenster. Inloggegevens kunnen optioneel maximaal 30 dagen versleuteld worden onthouden; Afmelden verwijdert ze.
 > Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.
 > Versie `2.4.10` voegde CSV-export met signaal-, kolom-, tijd- en opmaakkeuze toe. Versie `2.4.9` verbeterde grafiekrespons en tijdelijke opslag; versie `2.4.8` voegde gekalibreerde slagbenutting en analyse-export toe.

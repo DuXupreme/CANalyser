@@ -46,11 +46,17 @@ public sealed class DisplayLimitsTests
                 settings.DefaultMaxPointsPerTrace = 600;
                 Assert.Equal(600, first.MaxPointsPerTrace);
                 Assert.Equal(600, second.MaxPointsPerTrace);
+                while (analysis.IsBusy || first.IsBusy || second.IsBusy) await Task.Delay(10);
+                // Establish the actual viewport before requesting full precision.
+                foreach (var panel in analysis.PlotPanels.Concat(first.Panels).Concat(second.Panels))
+                    ((OxyPlot.IPlotModel)panel.PlotModel).Update(true);
                 analysis.UseDownsampling = false;
                 Assert.False(first.UseDownsampling);
                 Assert.False(settings.DefaultUseDownsampling);
+                while (analysis.IsBusy || first.IsBusy || second.IsBusy) await Task.Delay(10);
+                foreach (var panel in analysis.PlotPanels.Concat(first.Panels).Concat(second.Panels))
+                    ((OxyPlot.IPlotModel)panel.PlotModel).Update(true);
                 Assert.Equal(source.Time.Length, ((LineSeries)second.Panels[0].PlotModel.Series[0]).Points.Count);
-                while (analysis.IsBusy) await Task.Delay(10);
                 Assert.Equal(source.Time.Length, ((LineSeries)analysis.PlotPanels[0].PlotModel.Series[0]).Points.Count);
                 Assert.Equal(values, source.Value);
                 Assert.Same(source.Time, first.Panels[0].SeriesData[0].Time);

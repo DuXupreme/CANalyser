@@ -34,8 +34,10 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private PlotPanelModel? _activeCursorPanel;
     private bool _suppressAutoRebuild;
     private readonly LatestWorkQueue<PlotBuildRequest, IReadOnlyList<PlotPanelModel>> _plotBuilds;
+    private readonly List<Axis> _navigationAxes = [];
+    private bool _displayLimitsOnlyBuild;
     private sealed record PlotBuildRequest(CanDataset? Dataset, IReadOnlyList<PlotGroup> Groups,
-        PlotViewOptions Options, IReadOnlyList<PanelViewSnapshot>? Snapshots);
+        PlotViewOptions Options, IReadOnlyList<PanelViewSnapshot>? Snapshots, IReadOnlyList<PlotViewport?>? Viewports);
 
     [ObservableProperty]
     private PlotGroupViewModel? _selectedPlotGroup;
@@ -252,8 +254,21 @@ public sealed partial class AnalysisViewModel : ObservableObject
         if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
             OnPropertyChanged(e.PropertyName);
+            if (UseDownsampling)
+                foreach (var panel in PlotPanels) ViewportSampling.ResumeDownsampling(panel.PlotModel, MaxPointsPerTrace);
+            // Resuming an already-built plot must keep its model/controller alive during
+            // the mouse gesture (and retain Ctrl+Z navigation history).
+            if (e.PropertyName == nameof(DisplayLimits.UseDownsampling) && UseDownsampling && PlotPanels.Count > 0 &&
+                (!_plotBuilds.IsRunning || _displayLimitsOnlyBuild))
+            {
+                _plotBuilds.CancelPending();
+                return;
+            }
             if (UseDownsampling || e.PropertyName == nameof(DisplayLimits.UseDownsampling))
-                TriggerLiveRebuild();
+            {
+                if (!_suppressAutoRebuild && _dataset is not null)
+                    _ = RequestPlotBuild(preserveView: true, displayLimitsOnly: true);
+            }
         }
     }
 
@@ -293,6 +308,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
 
         PlotGroups.Clear();
+        UnbindPlotNavigation();
         PlotPanels.Clear();
         SelectedPlotGroup = null;
         CursorTime = null;
@@ -540,12 +556,24 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private void RebuildPlots(bool preserveView = false) => _ = RebuildPlotsAsync(preserveView);
 
-    private Task RebuildPlotsAsync(bool preserveView = false)
+    private Task RebuildPlotsAsync(bool preserveView = false) => RequestPlotBuild(preserveView, displayLimitsOnly: false);
+
+    private Task RequestPlotBuild(bool preserveView, bool displayLimitsOnly)
     {
+        _displayLimitsOnlyBuild = displayLimitsOnly && (!_plotBuilds.IsRunning || _displayLimitsOnlyBuild);
         var groups = CapturePlotGroups().Where(group => group.Signals.Count > 0).ToList();
+        // Full precision is a temporary inspection of an existing viewport. A fresh plot
+        // starts sampled, including when an older preset had downsampling switched off.
+        if (!preserveView && !UseDownsampling)
+        {
+            var suppressed = _suppressAutoRebuild;
+            _suppressAutoRebuild = true;
+            try { UseDownsampling = true; }
+            finally { _suppressAutoRebuild = suppressed; }
+        }
         BusyLabel = $"{groups.Count} subplots herberekenen...";
         return _plotBuilds.RequestAsync(new(_dataset, groups, CaptureViewOptions(),
-            preserveView ? CapturePanelSnapshots() : null));
+            preserveView ? CapturePanelSnapshots() : null, preserveView ? CaptureViewports() : null));
     }
 
     private async Task<IReadOnlyList<PlotPanelModel>> BuildPlotsInBackgroundAsync(PlotBuildRequest request, CancellationToken token)
@@ -557,7 +585,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             using (lease)
             {
                 token.ThrowIfCancellationRequested();
-                return _plotModelBuilder.Build(request.Dataset, request.Groups, request.Options);
+                return _plotModelBuilder.Build(request.Dataset, request.Groups, request.Options, request.Viewports);
             }
         });
     }
@@ -565,6 +593,10 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private void PublishPlots(PlotBuildRequest request, IReadOnlyList<PlotPanelModel> panels)
     {
         if (!ReferenceEquals(request.Dataset, _dataset)) return;
+        // The user may have continued navigating while the worker was building.
+        var snapshots = request.Snapshots is not null ? CapturePanelSnapshots() : null;
+        UnbindPlotNavigation();
+        _xAxisSyncService.Bind([]);
         PlotPanels.Clear();
         foreach (var panel in panels)
         {
@@ -572,9 +604,14 @@ public sealed partial class AnalysisViewModel : ObservableObject
             PlotPanels.Add(panel);
         }
         _activeCursorPanel = PlotPanels.FirstOrDefault();
-        if (request.Snapshots is not null) RestorePanelSnapshots(request.Snapshots);
-        ApplyAxisSyncConfiguration();
+        if (snapshots is not null) RestorePanelSnapshots(snapshots);
+        // Existing ranges are already linked where requested. Do not union stale Actual
+        // ranges after a Reset that has not reached the next render yet.
+        if (snapshots is not null) _xAxisSyncService.Configure(false, false);
+        else ApplyAxisSyncConfiguration();
         _xAxisSyncService.Bind(PlotPanels.Select(panel => panel.PlotModel));
+        ApplyAxisSyncConfiguration();
+        BindPlotNavigation();
         RefreshCursorAnnotations();
         if (panels.Count == 0) CursorValueInfo = "Signaalwaarde: -";
     }
@@ -589,6 +626,35 @@ public sealed partial class AnalysisViewModel : ObservableObject
         RebuildPlots(preserveView: true);
     }
 
+    private List<PlotViewport?> CaptureViewports() => PlotPanels.Select(panel =>
+    {
+        var axis = panel.PlotModel.Axes.FirstOrDefault(a => a.Position == AxisPosition.Bottom);
+        if (axis is null) return null;
+        var range = CaptureAxisRange(axis);
+        return double.IsFinite(range.Minimum) && double.IsFinite(range.Maximum) && range.Maximum > range.Minimum
+            ? (PlotViewport?)new PlotViewport(range.Minimum, range.Maximum) : null;
+    }).ToList();
+
+    private void BindPlotNavigation()
+    {
+        foreach (var axis in PlotPanels.SelectMany(panel => panel.PlotModel.Axes))
+        {
+            axis.AxisChanged += OnPlotNavigation;
+            _navigationAxes.Add(axis);
+        }
+    }
+
+    private void UnbindPlotNavigation()
+    {
+        foreach (var axis in _navigationAxes) axis.AxisChanged -= OnPlotNavigation;
+        _navigationAxes.Clear();
+    }
+
+    private void OnPlotNavigation(object? sender, AxisChangedEventArgs e)
+    {
+        if (!UseDownsampling) UseDownsampling = true;
+    }
+
     private List<PanelViewSnapshot> CapturePanelSnapshots()
     {
         var snapshots = new List<PanelViewSnapshot>(PlotPanels.Count);
@@ -597,7 +663,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             var axisRanges = new Dictionary<string, AxisRange>(StringComparer.Ordinal);
             foreach (var axis in panel.PlotModel.Axes)
             {
-                axisRanges[GetAxisId(axis)] = new AxisRange(axis.ActualMinimum, axis.ActualMaximum);
+                axisRanges[GetAxisId(axis)] = CaptureAxisRange(axis);
             }
 
             var visibility = panel.PlotModel.Series
@@ -622,6 +688,12 @@ public sealed partial class AnalysisViewModel : ObservableObject
             {
                 if (!snapshot.AxisRanges.TryGetValue(GetAxisId(axis), out var range))
                 {
+                    continue;
+                }
+
+                if (range.IsAutomatic)
+                {
+                    axis.Reset();
                     continue;
                 }
 
@@ -660,7 +732,12 @@ public sealed partial class AnalysisViewModel : ObservableObject
         return $"{axis.Position}:{axis.PositionTier}";
     }
 
-    private sealed record AxisRange(double Minimum, double Maximum);
+    private static AxisRange CaptureAxisRange(Axis axis) =>
+        axis is ViewportAxis view
+            ? new(view.VisibleMinimum, view.VisibleMaximum, IsAutomatic: !view.HasUserRange)
+            : new(axis.ActualMinimum, axis.ActualMaximum);
+
+    private sealed record AxisRange(double Minimum, double Maximum, bool IsAutomatic = false);
 
     private sealed record PanelViewSnapshot(
         IReadOnlyDictionary<string, AxisRange> AxisRanges,
@@ -849,6 +926,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             }
 
             var options = CaptureViewOptions();
+            var viewports = CaptureViewports();
             var dataset = _dataset;
             var reader = dataset.AcquireReadLease();
             _openingDetached = true;
@@ -856,7 +934,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
             BusyLabel = "Apart grafiekvenster voorbereiden...";
             var detachedPanels = await Task.Run(() =>
             {
-                using (reader) return _plotModelBuilder.Build(dataset, groups, options);
+                using (reader) return _plotModelBuilder.Build(dataset, groups, options, viewports);
             });
             if (!ReferenceEquals(dataset, _dataset)) return;
             _plotWindowService.ShowPlots(

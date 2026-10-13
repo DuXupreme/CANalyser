@@ -11,5 +11,6 @@ public interface IPlotModelBuilder
     IReadOnlyList<PlotPanelModel> Build(
         CanDataset dataset,
         IReadOnlyList<PlotGroup> plotGroups,
-        PlotViewOptions viewOptions);
+        PlotViewOptions viewOptions,
+        IReadOnlyList<PlotViewport?>? viewports = null);
 }

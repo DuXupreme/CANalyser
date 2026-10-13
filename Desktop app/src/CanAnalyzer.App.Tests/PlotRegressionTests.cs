@@ -41,11 +41,12 @@ public sealed class PlotRegressionTests
     private sealed class SlowBuilder : IPlotModelBuilder
     {
         public readonly List<int> Requests = [];
-        public IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> groups, PlotViewOptions options)
+        public IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> groups, PlotViewOptions options,
+            IReadOnlyList<PlotViewport?>? viewports = null)
         {
             Requests.Add(options.MaxPointsPerTrace);
             Thread.Sleep(150);
-            return new PlotModelBuilder().Build(dataset, groups, options);
+            return new PlotModelBuilder().Build(dataset, groups, options, viewports);
         }
     }
 

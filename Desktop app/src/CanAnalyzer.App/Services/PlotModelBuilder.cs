@@ -6,6 +6,7 @@ using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Legends;
 using OxyPlot.Series;
+using System.Runtime.CompilerServices;
 
 namespace CanAnalyzer.App.Services;
 
@@ -13,7 +14,7 @@ namespace CanAnalyzer.App.Services;
 public sealed class PlotModelBuilder : IPlotModelBuilder
 {
     private const string AxisNumberFormat = "0.###";
-    private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
+    private readonly ConditionalWeakTable<double[], ConditionalWeakTable<double[], SignalRangeIndex>> _indices = new();
 
     private static readonly OxyColor[] ColorCycle =
     [
@@ -32,10 +33,10 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
     public IReadOnlyList<PlotPanelModel> Build(
         CanDataset dataset,
         IReadOnlyList<PlotGroup> plotGroups,
-        PlotViewOptions viewOptions)
+        PlotViewOptions viewOptions,
+        IReadOnlyList<PlotViewport?>? viewports = null)
     {
         var panels = new List<PlotPanelModel>();
-        var indices = new Dictionary<(double[] Time, double[] Value), SignalRangeIndex>();
         var controller = CreateInteractionController();
         uint? frameIdFilter = null;
         if (!string.IsNullOrWhiteSpace(viewOptions.FrameIdFilter))
@@ -58,6 +59,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             }
 
             var renderedSeries = new List<RenderedSeriesData>();
+            var viewport = viewports is not null && index < viewports.Count ? viewports[index] : null;
             var title = string.IsNullOrWhiteSpace(group.Title) ? $"Plot {index + 1}" : group.Title.Trim();
             var model = new PlotModel
             {
@@ -78,7 +80,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 });
             }
 
-            var xAxis = new LinearAxis
+            var xAxis = new ViewportAxis
             {
                 Position = AxisPosition.Bottom,
                 Title = "Tijd [s]",
@@ -103,7 +105,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 });
             }
 
-            var primaryYAxis = new LinearAxis
+            var primaryYAxis = new ViewportAxis
             {
                 Position = AxisPosition.Left,
                 Key = "Y1",
@@ -137,7 +139,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 if (!group.LockYAxis && signalIndex > 0)
                 {
                     yAxisKey = $"Y{signalIndex + 1}";
-                    var rightAxis = new LinearAxis
+                    var rightAxis = new ViewportAxis
                     {
                         Position = AxisPosition.Right,
                         PositionTier = signalIndex - 1,
@@ -158,26 +160,19 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 }
 
                 var seriesColor = ColorCycle[colorIndex % ColorCycle.Length];
-                SignalRangeIndex? rangeIndex = null;
-                if (viewOptions.UseDownsampling && !indices.TryGetValue((filtered.X, filtered.Y), out rangeIndex))
-                {
-                    rangeIndex = new(filtered.X, filtered.Y);
-                    indices.Add((filtered.X, filtered.Y), rangeIndex);
-                }
-                renderedSeries.Add(new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor)
-                { Gaps = dataset.ImportReport?.Gaps ?? [], RangeIndex = rangeIndex! });
-
-                (double[] x, double[] y) = viewOptions.UseDownsampling
-                    ? rangeIndex!.SupportsRangeQueries
-                        ? rangeIndex.Select(null, null, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
-                        : Downsampling.MinMax(filtered.X, filtered.Y, Math.Clamp(viewOptions.MaxPointsPerTrace, 200, 200_000))
-                    : (filtered.X, filtered.Y);
-
-                AddSeries(model, x, y, label, yAxisKey, seriesColor, viewOptions, dataset.ImportReport?.Gaps ?? []);
+                // Source buffers are immutable. Reuse the range index when only display options change.
+                var values = _indices.GetValue(filtered.X, static _ => new());
+                var rangeIndex = values.GetValue(filtered.Y, y => new(filtered.X, y));
+                var source = new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor)
+                { Gaps = dataset.ImportReport?.Gaps ?? [], RangeIndex = rangeIndex };
+                renderedSeries.Add(source);
+                model.Series.Add(PlotSeriesRenderer.Build(source, viewOptions, viewport));
                 colorIndex++;
             }
 
-            ViewportSampling.Attach(model, renderedSeries, viewOptions.UseDownsampling, viewOptions.MaxPointsPerTrace);
+            if (viewport is { IsValid: true } range)
+                xAxis.Zoom(range.Minimum, range.Maximum);
+            ViewportSampling.Attach(model, renderedSeries, viewOptions.UseDownsampling, viewOptions.MaxPointsPerTrace, viewport);
             panels.Add(new PlotPanelModel
             {
                 Title = title,
@@ -251,83 +246,6 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
 
         return (xOut.ToArray(), yOut.ToArray());
     }
-
-    private static void AddSeries(
-        PlotModel model,
-        double[] x,
-        double[] y,
-        string label,
-        string yAxisKey,
-        OxyColor color,
-        PlotViewOptions options,
-        IReadOnlyList<MeasurementGap> gaps)
-    {
-        if (options.MarkersOnly)
-        {
-            var scatter = new ScatterSeries
-            {
-                Title = label,
-                MarkerFill = color,
-                MarkerStroke = color,
-                MarkerType = MarkerType.Circle,
-                MarkerSize = 2.5,
-                YAxisKey = yAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                TrackerFormatString = PreciseTrackerFormat
-            };
-
-            for (var i = 0; i < x.Length; i++)
-            {
-                scatter.Points.Add(new ScatterPoint(x[i], y[i]));
-            }
-
-            model.Series.Add(scatter);
-            return;
-        }
-
-        if (options.StepPlot)
-        {
-            var stair = new StairStepSeries
-            {
-                Title = label,
-                Color = color,
-                StrokeThickness = 1.2,
-                YAxisKey = yAxisKey,
-                EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-                Decimator = options.UseDownsampling ? Decimator.Decimate : null,
-                TrackerFormatString = PreciseTrackerFormat
-            };
-            for (var i = 0; i < x.Length; i++)
-            {
-                if (CrossesGap(x, i, gaps)) stair.Points.Add(DataPoint.Undefined);
-                stair.Points.Add(new DataPoint(x[i], y[i]));
-            }
-
-            model.Series.Add(stair);
-            return;
-        }
-
-        var line = new LineSeries
-        {
-            Title = label,
-            Color = color,
-            StrokeThickness = 1.2,
-            YAxisKey = yAxisKey,
-            EdgeRenderingMode = EdgeRenderingMode.PreferSpeed,
-            Decimator = options.UseDownsampling ? Decimator.Decimate : null,
-            TrackerFormatString = PreciseTrackerFormat
-        };
-        for (var i = 0; i < x.Length; i++)
-        {
-            if (CrossesGap(x, i, gaps)) line.Points.Add(DataPoint.Undefined);
-            line.Points.Add(new DataPoint(x[i], y[i]));
-        }
-
-        model.Series.Add(line);
-    }
-
-    private static bool CrossesGap(double[] time, int index, IReadOnlyList<MeasurementGap> gaps) =>
-        index > 0 && gaps.Any(gap => time[index - 1] <= gap.StartSeconds && time[index] >= gap.EndSeconds);
 
     private static IPlotController CreateInteractionController()
     {

@@ -199,7 +199,7 @@
                             <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
                                       IsChecked="{Binding UseDownsampling}"
                                       Margin="0,4,0,0" />
-                            <TextBlock Text="Gedeeld met Instellingen en alle losse plotvensters. De puntlimiet geldt alleen bij downsampling; analyse en CSV-export gebruiken de brondata."
+                            <TextBlock Text="Gedeeld met Instellingen en alle losse plotvensters. Zonder downsampling: alle punten in het zichtbare tijdvak. Bij verschuiven, zoomen of resetten gaat downsampling weer aan. Analyse en CSV-export gebruiken de brondata."
                                        Width="260"
                                        Margin="0,3,0,0"
                                        Foreground="#7A4A00"

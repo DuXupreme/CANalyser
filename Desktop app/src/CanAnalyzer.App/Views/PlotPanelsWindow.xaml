@@ -22,7 +22,7 @@
             <StackPanel>
                 <TextBlock Text="Aparte plotweergave: box-selectie zoom (linkermuisknop), pannen (rechtermuisknop), muiswiel zoom."
                            Foreground="#333333" />
-                <TextBlock Text="Puntlimiet en downsampling zijn gedeeld met Analyse, Instellingen en alle losse plotvensters. De limiet geldt alleen bij downsampling; analyse en CSV-export gebruiken de brondata."
+                <TextBlock Text="Puntlimiet en downsampling zijn gedeeld met alle grafieken. Zonder downsampling worden de originele punten in het zichtbare tijdvak getekend. Verschuiven of zoomen schakelt downsampling weer in. Analyse en CSV-export gebruiken de brondata."
                            Foreground="#7A4A00"
                            TextWrapping="Wrap"
                            Margin="0,3,0,0" />
@@ -57,6 +57,7 @@
                                       Margin="0,0,8,0" />
                             <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
                                       IsChecked="{Binding UseDownsampling, Mode=TwoWay}"
+                                      ToolTip="Uit: originele punten in het zichtbare tijdvak. Bij verschuiven of zoomen gaat downsampling weer aan."
                                       Margin="0,0,8,0" />
                             <CheckBox Content="Koppel X-assen"
                                       IsChecked="{Binding LinkXAxisAcrossPanels, Mode=TwoWay}"
@@ -80,6 +81,9 @@
                            Text="Cursor: - | A: - | B: - | dt: -"
                            TextWrapping="Wrap"
                            Margin="0,4,0,0" />
+                <TextBlock Text="{Binding PlotStatus}"
+                           Foreground="#7A4A00"
+                           TextWrapping="Wrap" />
                 <TextBlock x:Name="CursorValueText"
                            Text="Signaalwaarde: -"
                            Margin="0,1,0,0" />
