@@ -415,11 +415,14 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException)
         {
             _failedAnalyses.Add(name);
-            _ = _telemetryService.TrackEventAsync("analytics_recompute_failed", new Dictionary<string, object?>
+            var properties = new Dictionary<string, object?>
             {
                 ["exception_type"] = ex.GetType().Name,
                 ["analysis_stage"] = name
-            });
+            };
+            if (name == "Latency" && ex is ArgumentException invalidInput)
+                properties["failure_reason"] = DelayInputFailure.GetTelemetryCode(invalidInput);
+            _ = _telemetryService.TrackEventAsync("analytics_recompute_failed", properties);
             if (name == "Latency")
             {
                 _lastDelayResult = null; _exportFirstResponse = null; DelayMetrics.Clear();
@@ -872,7 +875,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
     {
         if (window.Start is not { } start || window.End is not { } end) return source;
         if (!double.IsFinite(start) || !double.IsFinite(end) || end <= start)
-            throw new ArgumentException("Kies een geldig tijdvenster op Joystick gebruiksanalyse.");
+            throw DelayInputFailure.Create(DelayInputFailureReason.InvalidTimeWindow);
         var indices = Enumerable.Range(0, source.Time.Length).Where(i => source.Time[i] >= start && source.Time[i] <= end).ToArray();
         return new SignalSeries(source.Label, indices.Select(i => source.Time[i]).ToArray(), indices.Select(i => source.Value[i]).ToArray());
     }
@@ -961,7 +964,7 @@ public sealed partial class JoystickAnalyticsViewModel : ObservableObject
             var command = Windowed(cmd, window); var response = Windowed(rsp, window);
             if (command.Time.Length > 0 && response.Time.Length > 0 && (gaps ?? []).Any(g =>
                 g.StartSeconds < Math.Min(command.Time[^1], response.Time[^1]) && g.EndSeconds > Math.Max(command.Time[0], response.Time[0])))
-                throw new ArgumentException("Datagat in delayselectie; kies één aaneengesloten meetperiode met het tijdvenster.");
+                throw DelayInputFailure.Create(DelayInputFailureReason.DataGap);
             DelayAnalysisResult? correlation = null;
             string? note = null;
             try { correlation = _analyticsService.AnalyzeDelay(command, response, searchRange, 0.5, 200_000); }

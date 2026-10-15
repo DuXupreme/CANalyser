@@ -19,6 +19,7 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
     private TelemetryService? _crashTelemetry;
+    private DispatcherWatchdog? _dispatcherWatchdog;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -43,6 +44,7 @@ public partial class App : Application
         {
             window.ContentRendered -= CloseSplash;
             splash.Close();
+            _dispatcherWatchdog = new DispatcherWatchdog(Dispatcher, _crashTelemetry.RecordDispatcherResponsiveness);
         }
 
         window.ContentRendered += CloseSplash;
@@ -147,6 +149,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _dispatcherWatchdog?.Dispose();
         _serviceProvider?.Dispose();
         base.OnExit(e);
     }

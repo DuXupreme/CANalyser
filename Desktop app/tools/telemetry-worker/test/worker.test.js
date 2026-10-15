@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
-import { Script } from 'node:vm';
+import { Script, createContext } from 'node:vm';
 
 registerHooks({ load(url, context, nextLoad) {
   if (url.endsWith('.html')) return { format:'module', source:'export default ' + JSON.stringify(readFileSync(new URL(url),'utf8')), shortCircuit:true };
@@ -34,6 +34,51 @@ test('crash events are accepted, deduplicated and shown as errors', async () => 
   assert.match(dashboard, /App onverwacht afgesloten/);
 });
 
+test('UI hangs and recovery survive ingestion, deduplication and dashboard filters with readable duration', async () => {
+  const f = fixture();
+  try {
+    for (const [name, milliseconds] of [['app_ui_unresponsive',15000],['app_ui_responsive_again',23500]]) {
+      const payload = { event_id:name + '-test',event_name:name,timestamp_utc:new Date().toISOString(),
+        app_version:'2.4.13-test',installation_id:'test',session_id:'hung-session',
+        properties:{source:'dispatcher_watchdog',unresponsive_ms:milliseconds,ui_activity:'plot_render',ui_activity_elapsed_ms:15020,working_set_bytes:104857600,
+          managed_memory_bytes:123456,gen2_collections:3} };
+      for (let attempt=0;attempt<2;attempt++) {
+        const response = await worker.fetch(new Request('https://test.local/events',{
+          method:'POST',body:JSON.stringify(payload),headers:{'content-type':'application/json'}
+        }),{DB:f.DB});
+        assert.equal(response.status,200);
+      }
+    }
+    const summary = await (await f.request('/summary')).json();
+    assert.equal(summary.totals.event_count,2);
+    assert.equal(summary.totals.usage_count,0);
+    assert.equal(summary.totals.avg_decode_ms,null);
+    const events = (await (await f.request('/events')).json()).events;
+    const html = await (await f.request('/dashboard')).text();
+    const nodes = new Map();
+    const element = id => {
+      if (!nodes.has(id)) nodes.set(id,{value:id === 'eventFilter' ? 'error' : '',innerHTML:'',textContent:'',addEventListener(){}});
+      return nodes.get(id);
+    };
+    const context = createContext({document:{getElementById:element},sessionStorage:{getItem(){return null;}},setInterval(){}});
+    new Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]).runInContext(context);
+    new Script('recent = ' + JSON.stringify(events) + '; renderRecent();').runInContext(context);
+    assert.match(element('recentEvents').innerHTML,/App reageert niet/);
+    assert.doesNotMatch(element('recentEvents').innerHTML,/App reageert weer/);
+    assert.match(element('recentEvents').innerHTML,/Duur zonder UI-reactie: <strong>15 s/);
+    assert.match(element('recentEvents').innerHTML,/Controle van UI-respons/);
+    assert.match(element('recentEvents').innerHTML,/Actieve UI-bewerking: <strong>Grafiek tekenen/);
+    element('eventFilter').value = 'system';
+    new Script('renderRecent();').runInContext(context);
+    assert.match(element('recentEvents').innerHTML,/App reageert niet/);
+    assert.match(element('recentEvents').innerHTML,/App reageert weer/);
+    assert.match(element('recentEvents').innerHTML,/23,5 s/);
+    element('eventFilter').value = 'usage';
+    new Script('renderRecent();').runInContext(context);
+    assert.match(element('recentEvents').innerHTML,/Geen gebeurtenissen gevonden/);
+  } finally { f.sqlite.close(); }
+});
+
 function fixture() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));
@@ -60,6 +105,92 @@ function fixture() {
     return worker.fetch(new Request('https://test.local'+path,{headers:authenticated ? {authorization:'Bearer test-token'} : {}}),{ DB,ADMIN_TOKEN:'test-token' });
   }
   return {sqlite,DB,insert,request};
+}
+
+test('latency failure reasons are accepted, shown in Dutch and retain technical NDJSON codes', async () => {
+  const f = fixture();
+  try {
+    const reasons = {
+      data_gap:'Onderbreking in meetgegevens',
+      duplicate_timestamp:'Dubbele tijdstempel',
+      non_monotonic_timestamp:'Tijdstempels niet oplopend',
+      non_finite_time:'Ongeldige tijdstempel (NaN of oneindig)',
+      non_finite_value:'Ongeldige meetwaarde (NaN of oneindig)',
+      invalid_time_window:'Ongeldig tijdvenster',
+      other_invalid_input:'Andere ongeldige invoer'
+    };
+    for (const failure_reason of Object.keys(reasons)) {
+      const payload = {event_id:'latency-' + failure_reason,event_name:'analytics_recompute_failed',
+        timestamp_utc:new Date().toISOString(),app_version:'2.4.14-test',installation_id:'test',session_id:'test',
+        properties:{analysis_stage:'Latency',exception_type:'ArgumentException',failure_reason}};
+      const response = await worker.fetch(new Request('https://test.local/events',{
+        method:'POST',body:JSON.stringify(payload),headers:{'content-type':'application/json'}
+      }),{DB:f.DB});
+      assert.equal(response.status,200);
+    }
+    const events = (await (await f.request('/events')).json()).events;
+    const {context,element} = dashboardContext(await (await f.request('/dashboard')).text());
+    element('eventFilter').value = 'error';
+    new Script('recent = ' + JSON.stringify(events) + '; renderRecent();').runInContext(context);
+    const rendered = element('recentEvents').innerHTML;
+    assert.match(rendered,/Analyse mislukt/);
+    assert.match(rendered,/Analysefase: <strong>Latentieanalyse<\/strong>/);
+    for (const [code,label] of Object.entries(reasons)) {
+      assert.ok(rendered.includes('Foutoorzaak: <strong>' + label + '</strong>'));
+      assert.ok(!rendered.includes(code));
+    }
+    const exported = (await (await f.request('/export.ndjson')).text()).trim().split('\n').map(JSON.parse);
+    assert.equal(exported.length,Object.keys(reasons).length);
+    for (const row of exported) {
+      assert.equal(row.event_name,'analytics_recompute_failed');
+      assert.deepEqual(row.properties,{
+        analysis_stage:'Latency',exception_type:'ArgumentException',failure_reason:row.properties.failure_reason
+      });
+      assert.ok(Object.hasOwn(reasons,row.properties.failure_reason));
+    }
+    const summary = await (await f.request('/summary')).json();
+    assert.equal(summary.totals.event_count,7);
+    assert.equal(summary.totals.usage_count,0);
+  } finally { f.sqlite.close(); }
+});
+
+test('analysis labels support legacy events and hide unknown diagnostic values', async () => {
+  const f = fixture();
+  try {
+    const legacy = {exception_type:'ArgumentException',analysis_stage:'Latency'};
+    const response = await worker.fetch(new Request('https://test.local/events',{
+      method:'POST',body:JSON.stringify({event_id:'legacy-latency',event_name:'analytics_recompute_failed',
+        timestamp_utc:new Date().toISOString(),app_version:'2.4.13',installation_id:'test',session_id:'test',properties:legacy})
+    }),{DB:f.DB});
+    assert.equal(response.status,200);
+    const events = (await (await f.request('/events')).json()).events;
+    assert.deepEqual(events[0].properties,legacy);
+    const {context,element} = dashboardContext(await (await f.request('/dashboard')).text());
+    new Script('recent = ' + JSON.stringify(events) + '; renderRecent();').runInContext(context);
+    assert.match(element('recentEvents').innerHTML,/Latentieanalyse/);
+    assert.doesNotMatch(element('recentEvents').innerHTML,/Foutoorzaak/);
+    for (const [code,label] of Object.entries({Gebruik:'Gebruiksanalyse',Actuatorvolging:'Actuatorvolging',CAN:'CAN-analyse'})) {
+      assert.equal(new Script('propertyValue("analysis_stage",' + JSON.stringify(code) + ')').runInContext(context),label);
+    }
+    for (const value of ['unrecognized', '<script>private signal details</script>', 'constructor', 'toString', 123, true]) {
+      assert.equal(new Script('propertyValue("analysis_stage",' + JSON.stringify(value) + ')').runInContext(context),'Onbekende analysefase');
+      assert.equal(new Script('propertyValue("failure_reason",' + JSON.stringify(value) + ')').runInContext(context),'Onbekende foutoorzaak');
+    }
+    for (const key of ['analysis_stage','failure_reason']) {
+      assert.equal(new Script('propertyValue(' + JSON.stringify(key) + ',null)').runInContext(context),'Onbekend');
+    }
+  } finally { f.sqlite.close(); }
+});
+
+function dashboardContext(html) {
+  const nodes = new Map();
+  const element = id => {
+    if (!nodes.has(id)) nodes.set(id,{value:id === 'eventFilter' ? 'all' : '',innerHTML:'',textContent:'',addEventListener(){}});
+    return nodes.get(id);
+  };
+  const context = createContext({document:{getElementById:element},sessionStorage:{getItem(){return null;}},setInterval(){}});
+  new Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]).runInContext(context);
+  return {context,element};
 }
 
 test('period totals use all rows, exclude system events from usage and deduplicate installations', async () => {

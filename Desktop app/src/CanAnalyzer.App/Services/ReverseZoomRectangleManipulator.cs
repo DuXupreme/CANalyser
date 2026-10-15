@@ -29,8 +29,11 @@ public sealed class ReverseZoomRectangleManipulator : ZoomRectangleManipulator
         var reverseDrag = IsReverseDrag(StartPosition, e.Position);
         var ranges = CaptureTargetRanges(model, xAxis, reverseDrag, StartPosition, e.Position);
 
-        // Let base manipulator finish rectangle lifecycle (clears selection visual).
-        base.Completed(e);
+        // The base completion also zooms and invalidates the model. Only finish its
+        // overlay lifecycle here, then apply the final ranges once (also for reverse zoom).
+        PlotView?.SetCursorType(CursorType.Default);
+        PlotView?.HideZoomRectangle();
+        e.Handled = true;
 
         if (ranges.Count == 0)
         {
@@ -43,7 +46,6 @@ public sealed class ReverseZoomRectangleManipulator : ZoomRectangleManipulator
         }
 
         PlotView?.InvalidatePlot(false);
-        e.Handled = true;
     }
 
     private static bool IsReverseDrag(ScreenPoint start, ScreenPoint end)

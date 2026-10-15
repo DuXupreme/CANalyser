@@ -31,16 +31,22 @@ public sealed class TelemetryService : ITelemetryService, IDisposable
     private TelemetryOptions _options = new();
     private DateTime _lastRetentionCleanupUtc = DateTime.MinValue;
     private readonly CrashTelemetryJournal _crashJournal;
+    private readonly PendingTelemetryEvents _pendingResponsiveness;
     private bool _sessionStarted;
+    private volatile bool _disposed;
 
     public TelemetryService(ILogger<TelemetryService> logger)
+        : this(logger, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CanAnalyzer"))
+    {
+    }
+
+    public TelemetryService(ILogger<TelemetryService> logger, string diagnosticDirectory)
     {
         _logger = logger;
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "CanAnalyzer");
+        var root = diagnosticDirectory;
         LocalLogPath = Path.Combine(root, "telemetry-events.jsonl");
         _crashJournal = new CrashTelemetryJournal(Path.Combine(root, "pending-crashes"));
+        _pendingResponsiveness = new PendingTelemetryEvents(Path.Combine(root, "pending-responsiveness"));
         _activeOperationPath = Path.Combine(root, "telemetry-active-operation.json");
     }
 
@@ -80,6 +86,7 @@ public sealed class TelemetryService : ITelemetryService, IDisposable
                 }), SerializerOptions));
             _sessionStarted = true;
             _ = Task.Run(ReplayCrashesAsync);
+            _ = Task.Run(ReplayResponsivenessAsync);
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Crash journal unavailable."); }
     }
@@ -119,8 +126,65 @@ public sealed class TelemetryService : ITelemetryService, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         try { _crashJournal.Dispose(); }
         catch (Exception ex) { _logger.LogDebug(ex, "Could not close crash journal."); }
+    }
+
+    /// <summary>Called only by the watchdog thread; persist before attempting any network request.</summary>
+    public void RecordDispatcherResponsiveness(DispatcherResponsivenessEvent report)
+    {
+        try
+        {
+            TelemetryOptions options;
+            lock (_sync) options = CopyOptions(_options);
+            if (_disposed || !options.Enabled) return;
+            var properties = new Dictionary<string, object?>
+            {
+                ["source"] = "dispatcher_watchdog",
+                ["unresponsive_ms"] = (long)report.UnresponsiveFor.TotalMilliseconds,
+                ["working_set_bytes"] = Environment.WorkingSet,
+                ["managed_memory_bytes"] = GC.GetTotalMemory(forceFullCollection: false),
+                ["gen2_collections"] = GC.CollectionCount(2)
+            };
+            if (UiActivityDiagnostics.Capture() is { } activity)
+            {
+                properties["ui_activity"] = activity.Name;
+                properties["ui_activity_elapsed_ms"] = (long)activity.Elapsed.TotalMilliseconds;
+            }
+            var json = JsonSerializer.Serialize(CreatePayload(
+                report.Recovered ? "app_ui_responsive_again" : "app_ui_unresponsive", options,
+                properties), SerializerOptions);
+            _pendingResponsiveness.Record(json);
+            // A full queue still needs a retry when connectivity has returned.
+            _ = Task.Run(ReplayResponsivenessAsync);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "UI responsiveness diagnostic could not be recorded."); }
+    }
+
+    private async Task ReplayResponsivenessAsync()
+    {
+        try
+        {
+            // This budget includes local I/O and all uploads, not five seconds per queued event.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _pendingResponsiveness.ReplayAsync(async (json, token) =>
+            {
+                TelemetryOptions options;
+                lock (_sync) options = CopyOptions(_options);
+                if (_disposed || !options.Enabled) return false;
+                await _localLogGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await PruneLocalLogAsync(options, token).ConfigureAwait(false);
+                    await AppendLocalAsync(json, token).ConfigureAwait(false);
+                }
+                finally { _localLogGate.Release(); }
+                lock (_sync) options = CopyOptions(_options);
+                return !_disposed && options.Enabled && await PostRemoteAsync(json, options, token).ConfigureAwait(false);
+            }, timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "UI responsiveness upload deferred until next start."); }
     }
 
     public async Task TrackEventAsync(

@@ -11,6 +11,48 @@ public static class PlotSeriesRenderer
 {
     private const string PreciseTrackerFormat = "{0}\nTijd: {2:G17}\nWaarde: {4:G17}";
     private static readonly ConditionalWeakTable<Series, PreparedSeries> Prepared = new();
+    private static readonly ConditionalWeakTable<IReadOnlyList<MeasurementGap>, MeasurementGapIndex> GapIndexes = new();
+
+    // Imported gaps are immutable and shared by all traces in a dataset. A segment crosses
+    // a gap when its lower X is <= the gap start and its upper X is >= the gap end. Sorting
+    // starts and retaining suffix-minimum ends answers that query without scanning every
+    // gap per point, including for unordered timestamps and overlapping/unsorted gaps.
+    private sealed class MeasurementGapIndex
+    {
+        private readonly double[] _starts;
+        private readonly double[] _minimumEnds;
+
+        public MeasurementGapIndex(IReadOnlyList<MeasurementGap> gaps)
+        {
+            var ordered = gaps.Where(static gap => !double.IsNaN(gap.StartSeconds) && !double.IsNaN(gap.EndSeconds))
+                .OrderBy(static gap => gap.StartSeconds).ToArray();
+            _starts = new double[ordered.Length];
+            _minimumEnds = new double[ordered.Length];
+            var minimumEnd = double.PositiveInfinity;
+            for (var i = ordered.Length - 1; i >= 0; i--)
+            {
+                _starts[i] = ordered[i].StartSeconds;
+                minimumEnd = Math.Min(minimumEnd, ordered[i].EndSeconds);
+                _minimumEnds[i] = minimumEnd;
+            }
+        }
+
+        public bool CrossesGap(double first, double second)
+        {
+            if (double.IsNaN(first) || double.IsNaN(second)) return false;
+            var minimum = Math.Min(first, second);
+            var maximum = Math.Max(first, second);
+            var low = 0;
+            var high = _starts.Length;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                if (_starts[middle] < minimum) low = middle + 1;
+                else high = middle;
+            }
+            return low < _minimumEnds.Length && _minimumEnds[low] <= maximum;
+        }
+    }
 
     internal sealed record PointBuffer(DataPoint[]? Line, ScatterPoint[]? Scatter)
     {
@@ -107,10 +149,17 @@ public static class PlotSeriesRenderer
                 if (double.IsFinite(x[i]) && double.IsFinite(y[i])) points.Add(new(x[i], y[i]));
             return new(null, points.ToArray());
         }
+        if (source.Gaps.Count == 0)
+        {
+            var points = new DataPoint[x.Length];
+            for (var i = 0; i < x.Length; i++) points[i] = new(x[i], y[i]);
+            return new(points, null);
+        }
+        var gapIndex = GapIndexes.GetValue(source.Gaps, static gaps => new MeasurementGapIndex(gaps));
         var line = new List<DataPoint>(x.Length);
         for (var i = 0; i < x.Length; i++)
         {
-            if (i > 0 && source.Gaps.Any(g => Math.Min(x[i - 1], x[i]) <= g.StartSeconds && Math.Max(x[i - 1], x[i]) >= g.EndSeconds))
+            if (i > 0 && gapIndex.CrossesGap(x[i - 1], x[i]))
                 line.Add(DataPoint.Undefined);
             line.Add(new(x[i], y[i]));
         }

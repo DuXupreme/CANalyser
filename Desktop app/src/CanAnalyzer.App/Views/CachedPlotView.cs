@@ -1,14 +1,105 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Threading;
 using OxyPlot;
 using OxyPlot.Wpf;
 
 namespace CanAnalyzer.App.Views;
 
-/// <summary>Reuses unchanged, exactly measured WPF labels between redraws.</summary>
-public sealed class CachedPlotView : PlotView
+/// <summary>Coalesces navigation redraws and reuses exactly measured WPF labels.</summary>
+public sealed class CachedPlotView : PlotView, IPlotView
 {
+    private bool _dirty;
+    private bool _updateData;
+    private int _workerRequestPosted;
+    private int _workerUpdateData;
+    private ScrollViewer? _scrollViewer;
+    private ScrollContentPresenter? _viewport;
+    private Window? _window;
+
+    public CachedPlotView()
+    {
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        IsVisibleChanged += (_, _) => ScheduleIfVisible();
+        SizeChanged += (_, _) => ScheduleIfVisible();
+    }
+
+    // OxyPlot 2.1's non-virtual method updates AND renders synchronously on the UI
+    // thread. Reimplement the interface used by PlotModel and mouse manipulators,
+    // so X/Y synchronization cannot render the same panel twice in one input event.
+    public new void InvalidatePlot(bool updateData = true)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            if (updateData) Interlocked.Exchange(ref _workerUpdateData, 1);
+            if (Interlocked.Exchange(ref _workerRequestPosted, 1) == 0 && !Dispatcher.HasShutdownStarted)
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    Interlocked.Exchange(ref _workerRequestPosted, 0);
+                    InvalidatePlot(Interlocked.Exchange(ref _workerUpdateData, 0) != 0);
+                }));
+            return;
+        }
+        _dirty = true;
+        _updateData |= updateData;
+        ScheduleIfVisible();
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        for (DependencyObject? parent = VisualTreeHelper.GetParent(this); parent is not null;
+             parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is ScrollContentPresenter viewport && _viewport is null) _viewport = viewport;
+            if (parent is ScrollViewer scrollViewer) { _scrollViewer = scrollViewer; break; }
+        }
+        if (_scrollViewer is not null) _scrollViewer.ScrollChanged += OnScrollChanged;
+        _window = Window.GetWindow(this);
+        if (_window is not null) _window.StateChanged += OnWindowStateChanged;
+        ScheduleIfVisible();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (_scrollViewer is not null) _scrollViewer.ScrollChanged -= OnScrollChanged;
+        if (_window is not null) _window.StateChanged -= OnWindowStateChanged;
+        _scrollViewer = null; _viewport = null; _window = null;
+        // Keep the dirty state: a tab/control can be loaded again at a newer range.
+        PlotRenderScheduler.For(Dispatcher).Remove(this);
+    }
+
+    private void OnScrollChanged(object sender, ScrollChangedEventArgs e) => ScheduleIfVisible();
+    private void OnWindowStateChanged(object? sender, EventArgs e) => ScheduleIfVisible();
+
+    private bool CanRender()
+    {
+        if (!IsLoaded || !IsVisible || ActualWidth <= 0 || ActualHeight <= 0 ||
+            _window?.WindowState == WindowState.Minimized) return false;
+        // Reparenting can make the view visible before WPF delivers Unloaded/Loaded.
+        // Keep the dirty request until those events attach the new viewport.
+        if (_viewport is not null && !_viewport.IsAncestorOf(this)) return false;
+        return _viewport is null || TransformToAncestor(_viewport).TransformBounds(new Rect(RenderSize))
+            .IntersectsWith(new Rect(_viewport.RenderSize));
+    }
+
+    private void ScheduleIfVisible()
+    {
+        if (_dirty && CanRender()) PlotRenderScheduler.For(Dispatcher).Request(this);
+    }
+
+    internal void FlushScheduledRender()
+    {
+        if (!_dirty || !CanRender()) return;
+        var updateData = _updateData;
+        _dirty = false; _updateData = false;
+        using var activity = CanAnalyzer.App.Infrastructure.UiActivityDiagnostics.Begin(
+            CanAnalyzer.App.Infrastructure.UiActivity.PlotRender);
+        base.InvalidatePlot(updateData);
+    }
+
     protected override IRenderContext CreateRenderContext() => new CachedCanvasRenderContext(Canvas);
 }
 

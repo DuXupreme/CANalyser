@@ -45,7 +45,16 @@
     const $ = id => document.getElementById(id);
     const colors = ['#3868da','#10a58c','#9364ce','#e39a37','#d56587','#4c9db5'];
     const properties = {
+      analysis_stage:'Analysefase',failure_reason:'Foutoorzaak',
+      unresponsive_ms:'Duur zonder UI-reactie',ui_activity:'Actieve UI-bewerking',ui_activity_elapsed_ms:'Duur actieve UI-bewerking',working_set_bytes:'Werkgeheugen (bytes)',managed_memory_bytes:'Beheerd geheugen (bytes)',gen2_collections:'Volledige GC-cycli',
       duration_ms:'Totale duur',duration_bucket:'Duurcategorie',parse_duration_ms:'Bestand inlezen',dbc_duration_ms:'DBC inlezen',decode_duration_ms:'Decoderen',hash_duration_ms:'Broncontrole',dataset_duration_ms:'Dataset opbouwen',view_duration_ms:'Weergave opbouwen',confirmation_duration_ms:'Bevestigingen',processing_attempts:'Verwerkingspogingen',import_mode:'Importmodus',dataset_completeness:'Volledigheid dataset',raw_frame_bucket:'CAN-frames',extended_frame_bucket:'Extended frames',decoded_sample_bucket:'Gedecodeerde samples',signal_bucket:'Signalen',message_bucket:'Berichten',unmatched_frame_bucket:'Niet-herkende frames',decode_error_bucket:'Decodeerfouten',group_count:'Grafiekgroepen',subplot_count:'Grafieken',use_downsampling:'Downsampling',used_downsampling:'Downsampling',link_x_axis:'X-assen gekoppeld',link_y_axis:'Y-assen gekoppeld',exception_type:'Fouttype',source:'Aanleiding',reason:'Reden',update_available:'Update beschikbaar',has_error:'Fout opgetreden',current_version:'Huidige versie',new_version:'Nieuwe versie',telemetry_configured:'Telemetrie ingeschakeld',telemetry_enabled:'Telemetrie ingeschakeld',telemetry_endpoint_configured:'Telemetrieverbinding ingesteld'
+    };
+    const analysisStages = {Latency:'Latentieanalyse',Gebruik:'Gebruiksanalyse',Actuatorvolging:'Actuatorvolging',CAN:'CAN-analyse'};
+    const failureReasons = {
+      data_gap:'Onderbreking in meetgegevens',duplicate_timestamp:'Dubbele tijdstempel',
+      non_monotonic_timestamp:'Tijdstempels niet oplopend',non_finite_time:'Ongeldige tijdstempel (NaN of oneindig)',
+      non_finite_value:'Ongeldige meetwaarde (NaN of oneindig)',invalid_time_window:'Ongeldig tijdvenster',
+      other_invalid_input:'Andere ongeldige invoer'
     };
     let recent = [], generation = 0, loading = false;
     try { $('token').value = sessionStorage.getItem('canalyser_admin_token') || ''; } catch {}
@@ -146,10 +155,12 @@
     }
     function propertyValue(key,value) {
       if (value == null) return 'Onbekend';
+      if (key === 'analysis_stage') return Object.hasOwn(analysisStages,value) ? analysisStages[value] : 'Onbekende analysefase';
+      if (key === 'failure_reason') return Object.hasOwn(failureReasons,value) ? failureReasons[value] : 'Onbekende foutoorzaak';
       if (key.endsWith('_ms') && typeof value === 'number') return duration(value);
       if (typeof value === 'boolean') return value ? 'Ja' : 'Nee';
       if (typeof value === 'number') return number(value);
-      return ({startup:'Bij opstarten',manual:'Handmatig',not_installed:'App niet geïnstalleerd',Complete:'Volledig',Partial:'Gedeeltelijk'})[value] || String(value);
+      return ({startup:'Bij opstarten',manual:'Handmatig',not_installed:'App niet geïnstalleerd',Complete:'Volledig',Partial:'Gedeeltelijk',dispatcher_watchdog:'Controle van UI-respons',plot_render:'Grafiek tekenen',viewport_sampling:'Zichtbare grafiekpunten selecteren',plot_model_publish:'Grafiekmodel bijwerken'})[value] || String(value);
     }
     function renderRecent() {
       const query = $('search').value.trim().toLocaleLowerCase('nl-NL'), filter = $('eventFilter').value;

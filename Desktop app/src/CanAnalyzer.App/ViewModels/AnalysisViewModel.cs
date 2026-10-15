@@ -593,6 +593,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private void PublishPlots(PlotBuildRequest request, IReadOnlyList<PlotPanelModel> panels)
     {
         if (!ReferenceEquals(request.Dataset, _dataset)) return;
+        using var activity = CanAnalyzer.App.Infrastructure.UiActivityDiagnostics.Begin(
+            CanAnalyzer.App.Infrastructure.UiActivity.PlotModelPublish);
         // The user may have continued navigating while the worker was building.
         var snapshots = request.Snapshots is not null ? CapturePanelSnapshots() : null;
         UnbindPlotNavigation();

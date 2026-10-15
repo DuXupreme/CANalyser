@@ -506,9 +506,16 @@ public sealed class JoystickAnalyticsService : IJoystickAnalyticsService
     private static void ValidateDelaySeries(SignalSeries series)
     {
         for (var i = 0; i < series.Time.Length; i++)
-            if (!double.IsFinite(series.Time[i]) || !double.IsFinite(series.Value[i]) ||
-                (i > 0 && series.Time[i] <= series.Time[i - 1]))
-                throw new ArgumentException($"Signaal {series.Label}: delay vereist eindige waarden en strikt oplopende tijd; kies een geldige meetperiode.");
+        {
+            if (!double.IsFinite(series.Time[i]))
+                throw DelayInputFailure.Create(DelayInputFailureReason.NonFiniteTime);
+            if (!double.IsFinite(series.Value[i]))
+                throw DelayInputFailure.Create(DelayInputFailureReason.NonFiniteValue);
+            if (i > 0 && series.Time[i] == series.Time[i - 1])
+                throw DelayInputFailure.Create(DelayInputFailureReason.DuplicateTimestamp);
+            if (i > 0 && series.Time[i] < series.Time[i - 1])
+                throw DelayInputFailure.Create(DelayInputFailureReason.NonMonotonicTimestamp);
+        }
     }
 
     public ButterflyKinematicsResult AnalyzeButterflyKinematics(

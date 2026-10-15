@@ -76,4 +76,68 @@ public sealed class ViewportSamplingTests
         Assert.False(panels[1].PlotModel.Series[0].IsVisible);
         Assert.Contains(((LineSeries)panels[0].PlotModel.Series[0]).Points, p => p.X == 20.025);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HiddenSeries_SkipsPointUpdatesAndResamplesWhenShownAtSameViewport(bool markers)
+    {
+        using var data = PlotRegressionTests.Dataset(100_000);
+        var panel = Assert.Single(new PlotModelBuilder().Build(data, [new PlotGroup { Signals = ["test"] }],
+            new PlotViewOptions { UseDownsampling = true, MaxPointsPerTrace = 200, MarkersOnly = markers }));
+        var model = panel.PlotModel;
+        var series = model.Series[0];
+        DataPoint[] Points() => series is LineSeries line ? line.Points.ToArray()
+            : ((ScatterSeries)series).Points.Select(p => new DataPoint(p.X, p.Y)).ToArray();
+        ((IPlotModel)model).Update(true);
+        model.Axes[0].Zoom(10, 10.05);
+        ((IPlotModel)model).Update(false);
+        var beforeHiding = Points();
+
+        series.IsVisible = false;
+        model.Axes[0].Zoom(70, 70.05);
+        ((IPlotModel)model).Update(false);
+        ((IPlotModel)model).Update(true);
+        Assert.Equal(beforeHiding, Points());
+
+        series.IsVisible = true;
+        ((IPlotModel)model).Update(true);
+        Assert.Contains(Points(), p => p.X == 70.025);
+        Assert.All(Points(), p => Assert.InRange(p.X, 69.999, 70.051));
+        model.ResetAllAxes();
+        ((IPlotModel)model).Update(true);
+        Assert.Equal(0, Points()[0].X);
+        Assert.Equal(99.999, Points()[^1].X, 6);
+        Assert.Null(model.GetLastPlotException());
+    }
+
+    [Fact]
+    public void HiddenRawSeries_RetiresExactBufferWhenViewportMoves()
+    {
+        var x = Enumerable.Range(0, 100_000).Select(i => i / 1000d).ToArray();
+        var source = new RenderedSeriesData("test", x, x, "Y1", OxyColors.Blue);
+        var viewport = new PlotViewport(10, 20);
+        var line = (LineSeries)PlotSeriesRenderer.Build(source,
+            new PlotViewOptions { UseDownsampling = false, MaxPointsPerTrace = 200 }, viewport);
+        var model = new PlotModel();
+        model.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom });
+        model.Axes.Add(new LinearAxis { Position = AxisPosition.Left, Key = "Y1" });
+        model.Series.Add(line);
+        model.Axes[0].Zoom(10, 20);
+        ViewportSampling.Attach(model, [source], false, 200, viewport);
+        ((IPlotModel)model).Update(true);
+        Assert.Equal(10_003, line.Points.Count);
+
+        line.IsVisible = false;
+        model.Axes[0].Zoom(70, 70.05);
+        ((IPlotModel)model).Update(false);
+        Assert.True(line.Points.Count <= 200);
+        Assert.True(line.Points.Capacity <= 400);
+        Assert.NotNull(line.Decimator);
+
+        line.IsVisible = true;
+        ((IPlotModel)model).Update(true);
+        Assert.Contains(line.Points, p => p.X == 70.025);
+        Assert.All(line.Points, p => Assert.InRange(p.X, 69.999, 70.051));
+    }
 }

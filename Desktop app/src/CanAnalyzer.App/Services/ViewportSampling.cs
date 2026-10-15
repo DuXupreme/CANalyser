@@ -87,47 +87,67 @@ public sealed class ViewportSampling
 
     private void BeforeUpdate(object? sender, EventArgs args)
     {
-        foreach (var trace in _traces) trace.Full.Apply(trace.Series);
+        foreach (var trace in _traces)
+            if (trace.Series.IsVisible) trace.Full.Apply(trace.Series);
     }
 
     private void AfterUpdate(object? sender, EventArgs args)
     {
+        using var activity = CanAnalyzer.App.Infrastructure.UiActivityDiagnostics.Begin(
+            CanAnalyzer.App.Infrastructure.UiActivity.ViewportSampling);
         var minimum = _axis.ActualMinimum; var maximum = _axis.ActualMaximum;
         if (!double.IsFinite(minimum) || !double.IsFinite(maximum)) return;
         if (_rawActive && _rawViewport == new PlotViewport(minimum, maximum))
         {
             foreach (var trace in _traces)
-                (trace.Raw is not null && trace.RawViewport == _rawViewport ? trace.Raw : trace.Full).Apply(trace.Series);
+                if (trace.Series.IsVisible)
+                    (trace.Raw is not null && trace.RawViewport == _rawViewport ? trace.Raw : trace.Full).Apply(trace.Series);
             return;
         }
         if (_rawActive)
         {
             _rawActive = false;
-            foreach (var trace in _traces) ReleaseRaw(trace);
+            foreach (var trace in _traces)
+            {
+                // Hidden traces skipped BeforeUpdate, but must also release an old exact
+                // point list when navigation retires raw mode.
+                if (!trace.Series.IsVisible) trace.Full.Apply(trace.Series);
+                ReleaseRaw(trace);
+            }
         }
 
         // Keep density stable within a power-of-two zoom level; further detail returns on zoom.
         var budget = _model.PlotArea.Width > 0
             ? Math.Clamp((int)Math.Ceiling(_model.PlotArea.Width), 200, _maximumPoints) : _maximumPoints;
-        if (minimum != _minimum || maximum != _maximum || budget != _budget)
+        var viewportChanged = minimum != _minimum || maximum != _maximum || budget != _budget;
+        _minimum = minimum; _maximum = maximum; _budget = budget;
+        foreach (var trace in _traces)
         {
-            _minimum = minimum; _maximum = maximum; _budget = budget;
-            foreach (var trace in _traces)
+            if (!trace.Series.IsVisible)
+            {
+                // Re-showing a trace must sample the current viewport even when the axis
+                // has not changed since the last update while the trace was hidden.
+                trace.Visible = null;
+                continue;
+            }
+            if (viewportChanged || trace.Visible is null)
             {
                 if (trace.Source.Time.Length == 0 || !trace.Source.RangeIndex.SupportsRangeQueries)
                 {
                     trace.Visible = trace.Full;
-                    continue;
                 }
-                var fullSpan = trace.Source.Time[^1] - trace.Source.Time[0];
-                var fraction = fullSpan > 0 ? Math.Clamp((maximum - minimum) / fullSpan, double.Epsilon, 1) : 1;
-                var levelFraction = fraction * Math.Pow(2, Math.Floor(Math.Log2(1 / fraction)));
-                var traceBudget = double.IsFinite(levelFraction) ? Math.Max(8, (int)Math.Ceiling(budget * levelFraction)) : budget;
-                var (x, y) = trace.Source.RangeIndex.Select(minimum, maximum, traceBudget);
-                trace.Visible = PlotSeriesRenderer.CreatePoints(trace.Source, x, y, trace.Series is ScatterSeries);
+                else
+                {
+                    var fullSpan = trace.Source.Time[^1] - trace.Source.Time[0];
+                    var fraction = fullSpan > 0 ? Math.Clamp((maximum - minimum) / fullSpan, double.Epsilon, 1) : 1;
+                    var levelFraction = fraction * Math.Pow(2, Math.Floor(Math.Log2(1 / fraction)));
+                    var traceBudget = double.IsFinite(levelFraction) ? Math.Max(8, (int)Math.Ceiling(budget * levelFraction)) : budget;
+                    var (x, y) = trace.Source.RangeIndex.Select(minimum, maximum, traceBudget);
+                    trace.Visible = PlotSeriesRenderer.CreatePoints(trace.Source, x, y, trace.Series is ScatterSeries);
+                }
             }
+            (trace.Visible ?? trace.Full).Apply(trace.Series);
         }
-        foreach (var trace in _traces) (trace.Visible ?? trace.Full).Apply(trace.Series);
     }
 
     private void ReleaseRaw(Trace trace)

@@ -3,6 +3,8 @@ export const EVENT_CATALOG = {
   app_started: { label: "App gestart", category: "Systeem" },
   app_crashed: { label: "App gecrasht", category: "Systeem", outcome: "error" },
   app_unexpected_exit: { label: "App onverwacht afgesloten", category: "Systeem", outcome: "error" },
+  app_ui_unresponsive: { label: "App reageert niet", category: "Systeem", outcome: "error" },
+  app_ui_responsive_again: { label: "App reageert weer", category: "Systeem" },
   previous_operation_interrupted: { label: "Vorige bewerking onderbroken", category: "Systeem", outcome: "error" },
   load_decode_completed: { label: "Log geladen en gedecodeerd", category: "Logs laden", usage: true },
   load_decode_failed: { label: "Log laden mislukt", category: "Logs laden", outcome: "error" },

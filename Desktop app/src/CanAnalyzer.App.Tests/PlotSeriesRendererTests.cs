@@ -128,6 +128,67 @@ public sealed class PlotSeriesRendererTests
         Assert.Equal(8, series.Points[^1].X);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GapBreaks_PreserveContainmentForUnsortedOverlappingAndInvalidGaps(bool unordered)
+    {
+        double[] x = unordered
+            ? [10, 7, 7, 3, double.NaN, 5, -2, double.NegativeInfinity, 1, double.PositiveInfinity]
+            : [0, 1, 1, 3, 5, 7, 8, 10];
+        MeasurementGap[] gaps =
+        [
+            new(7, 8), new(0, 9), new(3, 7), new(1, 1), new(5, 6), new(-1, 0),
+            new(double.NaN, 3), new(0, double.NaN), new(8, 2),
+            new(double.NegativeInfinity, -3), new(12, double.PositiveInfinity)
+        ];
+        var y = Enumerable.Range(0, x.Length).Select(i => (double)i).ToArray();
+        var source = new RenderedSeriesData("test", x, y, "Y1", OxyColors.Blue) { Gaps = gaps };
+        var series = (LineSeries)PlotSeriesRenderer.Build(source,
+            new PlotViewOptions { UseDownsampling = true, MaxPointsPerTrace = 200 });
+
+        // The previous containment contract is intentionally independent of gap ordering,
+        // overlap, timestamp direction and non-finite endpoints.
+        var expected = new List<DataPoint>();
+        for (var i = 0; i < x.Length; i++)
+        {
+            if (i > 0 && gaps.Any(gap => Math.Min(x[i - 1], x[i]) <= gap.StartSeconds &&
+                Math.Max(x[i - 1], x[i]) >= gap.EndSeconds)) expected.Add(DataPoint.Undefined);
+            expected.Add(new(x[i], y[i]));
+        }
+        Assert.Equal(expected.Select(p => p.X), series.Points.Select(p => p.X));
+        Assert.Equal(expected.Select(p => p.Y), series.Points.Select(p => p.Y));
+    }
+
+    [Fact]
+    public void SharedGaps_AreIndexedOnceInsteadOfEnumeratedForEveryPoint()
+    {
+        var gaps = new CountingGaps(Enumerable.Range(0, 128)
+            .Select(i => new MeasurementGap(10_000 + i * 2, 10_001 + i * 2)).ToArray());
+        var x = Enumerable.Range(0, 2_000).Select(i => (double)i).ToArray();
+        var source = new RenderedSeriesData("first", x, x, "Y1", OxyColors.Blue) { Gaps = gaps };
+        var options = new PlotViewOptions { UseDownsampling = true, MaxPointsPerTrace = 2_000 };
+        var first = (LineSeries)PlotSeriesRenderer.Build(source, options);
+        var second = (LineSeries)PlotSeriesRenderer.Build(source with { Label = "second" }, options);
+
+        Assert.Equal(x, first.Points.Select(p => p.X));
+        Assert.Equal(x, second.Points.Select(p => p.X));
+        Assert.Equal(1, gaps.EnumerationCount);
+    }
+
+    private sealed class CountingGaps(MeasurementGap[] gaps) : IReadOnlyList<MeasurementGap>
+    {
+        public int EnumerationCount { get; private set; }
+        public int Count => gaps.Length;
+        public MeasurementGap this[int index] => gaps[index];
+        public IEnumerator<MeasurementGap> GetEnumerator()
+        {
+            EnumerationCount++;
+            return ((IEnumerable<MeasurementGap>)gaps).GetEnumerator();
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private static RenderedSeriesData Source()
     {
         var x = Enumerable.Range(0, 100_000).Select(i => i / 1000d).ToArray();
