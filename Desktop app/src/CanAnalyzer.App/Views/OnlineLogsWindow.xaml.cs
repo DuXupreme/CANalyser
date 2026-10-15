@@ -53,7 +53,7 @@ public partial class OnlineLogsWindow : Window
     private async Task RefreshAsync()
     {
         if (_keysToRestore is null) _restoreNotice = null;
-        if (MachineBox.SelectedValue is not string loggerId || FromPicker.SelectedDate is not DateTime from || ToPicker.SelectedDate is not DateTime to)
+        if (MachineBox.SelectedValue is not string machineId || FromPicker.SelectedDate is not DateTime from || ToPicker.SelectedDate is not DateTime to)
         {
             MessageBox.Show(this, "Kies een machine en een geldige begin- en einddatum.", "Online logs", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -71,7 +71,7 @@ public partial class OnlineLogsWindow : Window
             var fromUtc = new DateTimeOffset(from.Date).ToUniversalTime();
             var toUtc = new DateTimeOffset(to.Date.AddDays(1)).ToUniversalTime();
             var result = await WithAuthenticationAsync(() =>
-                _onlineLogService.GetLogsAsync(loggerId, fromUtc, toUtc, _windowCts.Token));
+                _onlineLogService.GetLogsAsync(machineId, fromUtc, toUtc, _windowCts.Token));
             Rows.Clear();
             _maximumSelection = result.MaximumSelection;
             _isTruncated = result.Truncated;
@@ -159,18 +159,17 @@ public partial class OnlineLogsWindow : Window
             return;
         }
 
-        if (MachineBox.SelectedValue is string loggerId && FromPicker.SelectedDate is DateTime from && ToPicker.SelectedDate is DateTime to)
+        if (MachineBox.SelectedItem is OnlineMachine machine && FromPicker.SelectedDate is DateTime from && ToPicker.SelectedDate is DateTime to)
         {
-            var machineName = (MachineBox.SelectedItem as OnlineMachine)?.Name ?? OnlineMachineCatalog.ResolveName(loggerId);
             try
             {
                 await _historyStore.RememberAsync(new OnlineLogSelectionHistoryEntry(
-                    loggerId,
-                    machineName,
+                    machine.LoggerId,
+                    machine.Name,
                     from.Date,
                     to.Date,
                     DateTimeOffset.UtcNow,
-                    selections), CancellationToken.None);
+                    selections) { MachineId = machine.MachineId }, CancellationToken.None);
                 ReloadHistory();
             }
             catch (Exception)
@@ -218,7 +217,7 @@ public partial class OnlineLogsWindow : Window
     private async void OnRestoreSelectionClick(object sender, RoutedEventArgs e)
     {
         if (RecentSelectionBox.SelectedItem is not OnlineLogSelectionHistoryEntry entry) return;
-        MachineBox.SelectedValue = entry.LoggerId;
+        MachineBox.SelectedValue = entry.EffectiveMachineId;
         FromPicker.SelectedDate = entry.FromDate.Date;
         ToPicker.SelectedDate = entry.ToDate.Date;
         _keysToRestore = entry.Files.Select(file => file.Key).ToHashSet(StringComparer.Ordinal);

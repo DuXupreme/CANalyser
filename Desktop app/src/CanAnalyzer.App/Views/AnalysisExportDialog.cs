@@ -9,7 +9,7 @@ namespace CanAnalyzer.App.Views;
 public sealed class AnalysisExportDialog : Window
 {
     public AnalysisExportOptions? Options { get; private set; }
-    public AnalysisExportDialog(string loggerId)
+    public AnalysisExportDialog(string loggerId, string machineName)
     {
         Title = "Analyses exporteren"; Width = 560; SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize; WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -20,7 +20,7 @@ public sealed class AnalysisExportDialog : Window
             panel.Children.Add(new TextBlock { Text = title, Margin = new Thickness(0, 10, 0, 3) });
             var input = new TextBox { Text = value }; panel.Children.Add(input); return input;
         }
-        var machine = Field("Machine-ID (leeg = onbekend)", loggerId == "48EDFD35" ? "Vlindermachine 1" : loggerId == "22484AAA" ? "Vlindermachine 2" : "");
+        var machine = Field("Machine-ID (leeg = onbekend)", machineName);
         var logger = Field("Logger-ID (leeg = onbekend)", loggerId);
         var battery = Field("Batterij-ID (leeg = onbekend)", "");
         var gap = Field("Maximale sampleafstand voor algemene signaalstatistieken [s]", "5");

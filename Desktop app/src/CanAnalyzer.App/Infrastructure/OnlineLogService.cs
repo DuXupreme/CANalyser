@@ -76,20 +76,20 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
     }
 
     public async Task<OnlineLogQueryResult> GetLogsAsync(
-        string loggerId,
+        string machineId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         CancellationToken cancellationToken)
     {
-        var result = await GetLogPageAsync(loggerId, fromUtc, toUtc, cancellationToken).ConfigureAwait(false);
+        var result = await GetLogPageAsync(machineId, fromUtc, toUtc, cancellationToken).ConfigureAwait(false);
         if (!result.Truncated) return result;
         // The API caps each response at 200 newest files. Split the half-open
         // recording interval so older morning logs cannot silently disappear.
         if (toUtc - fromUtc <= TimeSpan.FromMilliseconds(1))
             throw new InvalidDataException("Te veel logs met dezelfde meettijd; de loglijst kan niet volledig worden geladen.");
         var middle = fromUtc.AddTicks((toUtc - fromUtc).Ticks / 2);
-        var earlier = await GetLogsAsync(loggerId, fromUtc, middle, cancellationToken).ConfigureAwait(false);
-        var later = await GetLogsAsync(loggerId, middle, toUtc, cancellationToken).ConfigureAwait(false);
+        var earlier = await GetLogsAsync(machineId, fromUtc, middle, cancellationToken).ConfigureAwait(false);
+        var later = await GetLogsAsync(machineId, middle, toUtc, cancellationToken).ConfigureAwait(false);
         return new OnlineLogQueryResult(earlier.Files.Concat(later.Files)
             .DistinctBy(static file => file.Key)
             .OrderByDescending(static file => file.RecordedAt).ToArray(), false,
@@ -111,9 +111,9 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
     }
 
     private async Task<OnlineLogQueryResult> GetLogPageAsync(
-        string loggerId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+        string machineId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
     {
-        var url = "api/logs?machine=" + Uri.EscapeDataString(loggerId)
+        var url = "api/logs?machine=" + Uri.EscapeDataString(machineId)
                   + "&from=" + Uri.EscapeDataString(fromUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&timeBasis=recording";

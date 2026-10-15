@@ -40,8 +40,26 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
                 ? await ExtractArchiveAsync(filePath, inputDirectory, sourceFiles, progress, cancellationToken).ConfigureAwait(false)
                 : new[] { Path.GetFullPath(filePath) };
             if (sourceFiles.Count == 0) sourceFiles.Add(SourceLogFile.FromLocalFile(filePath));
+            var sourceIndices = inputPaths.Select((path, index) => (Stem: Path.GetFileNameWithoutExtension(path), Index: index))
+                .GroupBy(item => item.Stem, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Key, group => group.Single().Index, StringComparer.OrdinalIgnoreCase);
             var trcPaths = await converter.ConvertToPeakTrcAsync(inputPaths, outputDirectory, progress, cancellationToken)
                 .ConfigureAwait(false);
+            var outputSourceIndices = trcPaths.Select(path =>
+                {
+                    var stem = Path.GetFileNameWithoutExtension(path);
+                    var matched = sourceIndices.TryGetValue(stem, out var index);
+                    // The pinned CANedge converter appends _CAN to the input stem.
+                    if (!matched && stem.EndsWith("_CAN", StringComparison.OrdinalIgnoreCase))
+                        matched = sourceIndices.TryGetValue(stem[..^4], out index);
+                    if (!matched && inputPaths.Count == 1 && trcPaths.Count == 1) { matched = true; index = 0; }
+                    return (Path: path, Index: matched ? (int?)index : null);
+                })
+                .Where(item => item.Index.HasValue)
+                .GroupBy(item => item.Index!.Value)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Single().Path, group => group.Key, StringComparer.OrdinalIgnoreCase);
 
             var parsedFiles = new List<(string Path, CanLogParseResult Result)>(trcPaths.Count);
             try
@@ -52,6 +70,10 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
                     var parsed = await peakParser.ParseAsync(trcPath, mode, progress, cancellationToken).ConfigureAwait(false)
                         ?? throw new InvalidDataException($"De geconverteerde log bevat geen CAN-frames: {Path.GetFileName(trcPath)}");
                     parsedFiles.Add((trcPath, parsed));
+                    // Converter output order is not source order. Match the unique source
+                    // basename, retaining unknown identity if a converter cannot prove it.
+                    if (outputSourceIndices.TryGetValue(trcPath, out var sourceIndex))
+                        sourceFiles[sourceIndex] = sourceFiles[sourceIndex] with { RecordedAt = FirstMeasurementTime(parsed) };
                 }
 
                 return MergeChronologically(parsedFiles, mode, progress, cancellationToken) with
@@ -68,6 +90,15 @@ public sealed class Mdf4Parser(IMdf4ConversionService converter, PeakTrcParser p
         {
             TryDeleteDirectory(workDirectory);
         }
+    }
+
+    private static DateTimeOffset? FirstMeasurementTime(CanLogParseResult parsed)
+    {
+        if (parsed.StartTimeUtc is not { } origin || parsed.Frames.Count == 0) return null;
+        var ticks = Math.DivRem(parsed.Frames[0].TimestampNanoseconds, 100, out var remainder);
+        if (remainder < 0) ticks--;
+        try { return origin.AddTicks(ticks); }
+        catch (ArgumentOutOfRangeException) { return null; }
     }
 
     private static async Task<IReadOnlyList<string>> ExtractArchiveAsync(

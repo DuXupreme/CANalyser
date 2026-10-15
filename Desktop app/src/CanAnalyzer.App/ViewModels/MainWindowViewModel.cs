@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using CanAnalyzer.Core.Analysis;
 using System.Diagnostics;
 using System.ComponentModel;
@@ -823,9 +822,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 sourceEntries = archive.Entries.Where(e => e.Name.EndsWith(".mf4", StringComparison.OrdinalIgnoreCase))
                     .Select(e => e.FullName).ToArray();
             }
-            var loggerIds = sourceEntries.Select(e => Regex.Match(e, @"(?:^|[/\\])([A-Fa-f0-9]{8})[/\\]")).Where(m => m.Success)
-                .Select(m => m.Groups[1].Value.ToUpperInvariant()).Distinct().ToArray();
-            var dialog = new CanAnalyzer.App.Views.AnalysisExportDialog(loggerIds.Length == 1 ? loggerIds[0] : "");
+            var loggerIds = dataset.SourceFiles.Select(source => source.Logger).Where(logger => !string.IsNullOrWhiteSpace(logger))
+                .Select(logger => logger!.ToUpperInvariant()).Distinct().ToArray();
+            var dialog = new CanAnalyzer.App.Views.AnalysisExportDialog(loggerIds.Length == 1 ? loggerIds[0] : "",
+                CanAnalyzer.App.Models.OnlineMachineCatalog.ResolveExportMachine(dataset.SourceFiles));
             if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner) dialog.Owner = owner;
             if (dialog.ShowDialog() != true || dialog.Options is not { } options) return;
             var save = new Microsoft.Win32.SaveFileDialog

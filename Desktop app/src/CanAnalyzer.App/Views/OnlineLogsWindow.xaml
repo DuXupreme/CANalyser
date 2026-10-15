@@ -37,7 +37,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="Machine" VerticalAlignment="Center" Margin="0,0,8,0" />
-            <ComboBox x:Name="MachineBox" Grid.Column="1" DisplayMemberPath="Name" SelectedValuePath="LoggerId" />
+            <ComboBox x:Name="MachineBox" Grid.Column="1" DisplayMemberPath="Name" SelectedValuePath="MachineId" />
             <TextBlock Grid.Column="2" Text="Meetstart van" VerticalAlignment="Center" Margin="18,0,8,0" />
             <DatePicker x:Name="FromPicker" Grid.Column="3" />
             <TextBlock Grid.Column="4" Text="Tot en met" VerticalAlignment="Center" Margin="18,0,8,0" />

@@ -9,6 +9,22 @@ namespace CanAnalyzer.Tests;
 
 public sealed class OnlineLogRegressionTests
 {
+    [Theory]
+    [InlineData("48EDFD35")]
+    [InlineData("machine-3")]
+    public async Task ReassignedLoggerUsesDistinctMachineFilterThroughoutPagination(string machineId)
+    {
+        var calls = 0;
+        using var service = Service(request =>
+        {
+            Assert.Contains("machine=" + machineId + "&", request.RequestUri!.Query);
+            return Payload(++calls == 1, []);
+        });
+        await service.GetLogsAsync(machineId, DateTimeOffset.Parse("2026-10-14T00:00:00Z"),
+            DateTimeOffset.Parse("2026-10-16T00:00:00Z"), default);
+        Assert.Equal(3, calls);
+    }
+
     [Fact]
     public void SplitLogStartIncludesFirstRecordOffsetWithoutChangingTimeOrigin()
     {

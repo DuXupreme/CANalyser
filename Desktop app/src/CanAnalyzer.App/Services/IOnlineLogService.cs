@@ -35,7 +35,7 @@ public interface IOnlineLogService
     void ClearCredentials();
 
     Task<OnlineLogQueryResult> GetLogsAsync(
-        string loggerId,
+        string machineId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         CancellationToken cancellationToken);

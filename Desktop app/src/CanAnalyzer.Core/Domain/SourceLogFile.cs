@@ -3,6 +3,9 @@ namespace CanAnalyzer.Core.Domain;
 /// <summary>Original source identity, retained independently of temporary conversion/cache filenames.</summary>
 public sealed record SourceLogFile(string Name, string SourcePath, string? Logger, string? Session)
 {
+    /// <summary>Actual first measurement in this source; never its upload or filesystem time.</summary>
+    public DateTimeOffset? RecordedAt { get; init; }
+
     public static SourceLogFile FromArchiveEntry(string entryPath)
     {
         var normalized = entryPath.Replace('\\', '/');

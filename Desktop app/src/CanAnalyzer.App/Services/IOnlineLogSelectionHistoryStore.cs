@@ -8,6 +8,10 @@ public sealed record OnlineLogSelectionHistoryEntry(
     DateTimeOffset SelectedAtUtc,
     IReadOnlyList<OnlineLogSelection> Files)
 {
+    // Older saved selections only contain LoggerId; those remain machine 1/2 selections.
+    public string? MachineId { get; init; }
+    public string EffectiveMachineId => string.IsNullOrWhiteSpace(MachineId) ? LoggerId : MachineId;
+
     public string DisplayName
     {
         get
