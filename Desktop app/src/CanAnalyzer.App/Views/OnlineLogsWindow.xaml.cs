@@ -14,6 +14,7 @@ public partial class OnlineLogsWindow : Window
 {
     private readonly IOnlineLogService _onlineLogService;
     private readonly IOnlineLogSelectionHistoryStore _historyStore;
+    private readonly TimeZoneInfo _timeZone;
     private readonly CancellationTokenSource _windowCts = new();
     private int _maximumSelection = Mdf4ImportLimits.MaximumFiles;
     private bool _isTruncated;
@@ -22,11 +23,13 @@ public partial class OnlineLogsWindow : Window
     private string? _restoreNotice;
     private string? _loadError;
 
-    public OnlineLogsWindow(IOnlineLogService onlineLogService, IOnlineLogSelectionHistoryStore historyStore)
+    public OnlineLogsWindow(IOnlineLogService onlineLogService, IOnlineLogSelectionHistoryStore historyStore,
+        TimeZoneInfo? timeZone = null)
     {
         InitializeComponent();
         _onlineLogService = onlineLogService;
         _historyStore = historyStore;
+        _timeZone = timeZone ?? TimeZoneInfo.Local;
         DataContext = this;
         MachineBox.ItemsSource = OnlineMachineCatalog.Machines;
         MachineBox.SelectedIndex = 0;
@@ -68,8 +71,7 @@ public partial class OnlineLogsWindow : Window
         _loadError = null;
         try
         {
-            var fromUtc = new DateTimeOffset(from.Date).ToUniversalTime();
-            var toUtc = new DateTimeOffset(to.Date.AddDays(1)).ToUniversalTime();
+            var (fromUtc, toUtc) = OnlineLogDateRange.FromInclusiveDates(from, to, _timeZone);
             var result = await WithAuthenticationAsync(() =>
                 _onlineLogService.GetLogsAsync(machineId, fromUtc, toUtc, _windowCts.Token));
             Rows.Clear();

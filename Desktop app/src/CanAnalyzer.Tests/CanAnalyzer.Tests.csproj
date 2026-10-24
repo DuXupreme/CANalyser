@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CanAnalyzer.Core\CanAnalyzer.Core.csproj" />
     <Compile Include="..\CanAnalyzer.App\Infrastructure\OnlineLogService.cs" Link="OnlineLogService.cs" />
+    <Compile Include="..\CanAnalyzer.App\Infrastructure\OnlineLogDateRange.cs" Link="OnlineLogDateRange.cs" />
     <Compile Include="..\CanAnalyzer.App\Services\IOnlineLogService.cs" Link="IOnlineLogService.cs" />
     <Compile Include="..\CanAnalyzer.App\Services\IOnlineLogCredentialStore.cs" Link="IOnlineLogCredentialStore.cs" />
     <Compile Include="..\CanAnalyzer.App\Infrastructure\CrashTelemetryJournal.cs" Link="CrashTelemetryJournal.cs" />
