@@ -503,19 +503,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         foreach (var panel in Panels)
         {
             var model = panel.PlotModel;
-            var removable = model.Annotations
-                .Where(annotation =>
-                    string.Equals(annotation.Tag as string, "cursor-main", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-a", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-b", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-value-point", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-value-text", StringComparison.Ordinal))
-                .ToList();
-
-            foreach (var annotation in removable)
-            {
-                model.Annotations.Remove(annotation);
-            }
+            var annotations = new List<Annotation>();
 
             if (_cursorTime.HasValue)
             {
@@ -525,7 +513,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                     .Select(series => series.Title)
                     .ToHashSet(StringComparer.Ordinal);
 
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-main",
                     Type = LineAnnotationType.Vertical,
@@ -574,7 +562,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                         var y = series.Value[index];
                         var label = $"{ShortSignalLabel(series.Label)}={y.ToString("G17", CultureInfo.InvariantCulture)}";
 
-                        model.Annotations.Add(new PointAnnotation
+                        annotations.Add(new PointAnnotation
                         {
                             Tag = "cursor-value-point",
                             X = x,
@@ -587,7 +575,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                             Size = 3.5
                         });
 
-                        model.Annotations.Add(new TextAnnotation
+                        annotations.Add(new TextAnnotation
                         {
                             Tag = "cursor-value-text",
                             Text = label,
@@ -607,7 +595,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
             if (_flagATime.HasValue)
             {
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-a",
                     Type = LineAnnotationType.Vertical,
@@ -622,7 +610,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
             if (_flagBTime.HasValue)
             {
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-b",
                     Type = LineAnnotationType.Vertical,
@@ -635,7 +623,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
                 });
             }
 
-            model.InvalidatePlot(false);
+            PlotCursorAnnotations.Set(model, annotations);
         }
     }
 
@@ -888,7 +876,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
             for (var j = 0; j < panel.Sources.Length; j++)
             {
                 token.ThrowIfCancellationRequested();
-                result[i][j] = PlotSeriesRenderer.Build(panel.Sources[j], request.Options, panel.Viewport);
+                result[i][j] = PlotSeriesRenderer.Build(panel.Sources[j], request.Options, panel.Viewport, cancellationToken: token);
             }
         }
         token.ThrowIfCancellationRequested();

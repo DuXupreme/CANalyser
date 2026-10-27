@@ -138,7 +138,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LoadAndDecodeCommand = new AsyncRelayCommand(LoadAndDecodeAsync, CanLoadAndDecode);
         ImportActuatorCsvCommand = new AsyncRelayCommand(ImportActuatorCsvAsync, () => !IsAnyBusy);
         RepairPartialImportCommand = new AsyncRelayCommand(RepairPartialImportAsync, () => HasRepairablePartialImport && !IsAnyBusy);
-        CancelCommand = new RelayCommand(CancelLoad, () => IsBusy);
+        CancelCommand = new RelayCommand(CancelLoad, () => IsBusy || Analysis.IsBusy);
         ExportDecodedCsvCommand = new AsyncRelayCommand(ExportDecodedCsvAsync, CanExportDecodedCsv);
         ExportAnalysesCommand = new AsyncRelayCommand(ExportAnalysesAsync, () => CanExportDecodedCsv() && !Analysis.ActiveUsage.IsBusy);
         ExportLayoutCommand = new AsyncRelayCommand(ExportLayoutAsync);
@@ -807,6 +807,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void CancelLoad()
     {
         _loadCts?.Cancel();
+        Analysis.CancelPlotBuilds();
     }
 
     private async Task ExportAnalysesAsync()

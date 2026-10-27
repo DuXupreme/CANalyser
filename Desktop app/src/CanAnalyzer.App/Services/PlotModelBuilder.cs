@@ -35,7 +35,12 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         IReadOnlyList<PlotGroup> plotGroups,
         PlotViewOptions viewOptions,
         IReadOnlyList<PlotViewport?>? viewports = null)
+        => Build(dataset, plotGroups, viewOptions, viewports, CancellationToken.None);
+
+    public IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> plotGroups,
+        PlotViewOptions viewOptions, IReadOnlyList<PlotViewport?>? viewports, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var panels = new List<PlotPanelModel>();
         var controller = CreateInteractionController();
         uint? frameIdFilter = null;
@@ -53,12 +58,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
 
         foreach (var (group, index) in plotGroups.Select((value, idx) => (value, idx)))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (group.Signals.Count == 0)
             {
                 continue;
             }
 
             var renderedSeries = new List<RenderedSeriesData>();
+
             var viewport = viewports is not null && index < viewports.Count ? viewports[index] : null;
             var title = string.IsNullOrWhiteSpace(group.Title) ? $"Plot {index + 1}" : group.Title.Trim();
             var model = new PlotModel
@@ -93,17 +100,6 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 MinorGridlineColor = OxyColor.FromAColor(20, OxyColors.Gray)
             };
             model.Axes.Add(xAxis);
-            foreach (var gap in dataset.ImportReport?.Gaps ?? [])
-            {
-                if (gap.EndSeconds - gap.StartSeconds < 1) continue;
-                model.Annotations.Add(new OxyPlot.Annotations.RectangleAnnotation
-                {
-                    MinimumX = gap.StartSeconds, MaximumX = gap.EndSeconds,
-                    Fill = OxyColor.FromAColor(35, OxyColors.Gray),
-                    Text = $"Geen data: {gap.EndSeconds - gap.StartSeconds:0.###} s",
-                    Layer = OxyPlot.Annotations.AnnotationLayer.BelowSeries
-                });
-            }
 
             var primaryYAxis = new ViewportAxis
             {
@@ -123,6 +119,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             var colorIndex = 0;
             for (var signalIndex = 0; signalIndex < group.Signals.Count; signalIndex++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var label = group.Signals[signalIndex];
                 if (frameIdFilter.HasValue && !label.Contains($"[0x{frameIdFilter.Value:X}]", StringComparison.OrdinalIgnoreCase))
                 {
@@ -134,7 +131,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                     continue;
                 }
 
-                var filtered = FilterAndTransformSeries(signalSeries, group, label, viewOptions);
+                var filtered = FilterAndTransformSeries(signalSeries, group, label, viewOptions, cancellationToken);
                 var yAxisKey = "Y1";
                 if (!group.LockYAxis && signalIndex > 0)
                 {
@@ -162,14 +159,16 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 var seriesColor = ColorCycle[colorIndex % ColorCycle.Length];
                 // Source buffers are immutable. Reuse the range index when only display options change.
                 var values = _indices.GetValue(filtered.X, static _ => new());
-                var rangeIndex = values.GetValue(filtered.Y, y => new(filtered.X, y));
+                var rangeIndex = values.GetValue(filtered.Y, y => new(filtered.X, y, cancellationToken));
                 var source = new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor)
                 { Gaps = dataset.ImportReport?.Gaps ?? [], RangeIndex = rangeIndex };
                 renderedSeries.Add(source);
-                model.Series.Add(PlotSeriesRenderer.Build(source, viewOptions, viewport));
+
+                model.Series.Add(PlotSeriesRenderer.Build(source, viewOptions, viewport, cancellationToken));
                 colorIndex++;
             }
 
+            AddGapAnnotations(model, dataset.ImportReport, cancellationToken);
             if (viewport is { IsValid: true } range)
                 xAxis.Zoom(range.Minimum, range.Maximum);
             ViewportSampling.Attach(model, renderedSeries, viewOptions.UseDownsampling, viewOptions.MaxPointsPerTrace, viewport);
@@ -182,27 +181,56 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             });
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return panels;
     }
 
+    private static void AddGapAnnotations(PlotModel model, ImportReport? report, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (report is null) return;
+        var collected = new List<MeasurementGap>();
+        foreach (var gap in report.Gaps)
+        {
+            if ((collected.Count & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+            collected.Add(gap);
+        }
+        var gaps = CancellableArrayOperations.ToArray(collected, cancellationToken);
+        CancellableArrayOperations.Sort(gaps, static (left, right) => left.StartSeconds.CompareTo(right.StartSeconds), cancellationToken);
+        foreach (var gap in gaps)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (gap.EndSeconds - gap.StartSeconds < 1) continue;
+            model.Annotations.Add(new OxyPlot.Annotations.RectangleAnnotation
+            {
+                MinimumX = gap.StartSeconds, MaximumX = gap.EndSeconds,
+                Fill = OxyColor.FromAColor(35, OxyColors.Gray),
+                Text = $"Geen data: {gap.EndSeconds - gap.StartSeconds:0.###} s",
+                Layer = OxyPlot.Annotations.AnnotationLayer.BelowSeries
+            });
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+    }
     private static (double[] X, double[] Y) FilterAndTransformSeries(
         SignalSeries source,
         PlotGroup group,
         string label,
-        PlotViewOptions options)
+        PlotViewOptions options, CancellationToken cancellationToken)
     {
+        var data = source.GetData(cancellationToken);
         var hasOffset = group.Offsets.TryGetValue(label, out var offset);
         // SignalSeries exposes immutable source buffers. Styling does not require a data copy.
         if (!options.TimeStart.HasValue && !options.TimeEnd.HasValue &&
             (!hasOffset || offset == 0) && !options.NormalizeSignals)
-            return (source.Time, source.Value);
+            return (data.Time, data.Value);
 
-        var xOut = new List<double>(source.Time.Length);
-        var yOut = new List<double>(source.Value.Length);
+        var xOut = new List<double>(data.Time.Length);
+        var yOut = new List<double>(data.Value.Length);
 
-        for (var i = 0; i < source.Time.Length; i++)
+        for (var i = 0; i < data.Time.Length; i++)
         {
-            var x = source.Time[i];
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var x = data.Time[i];
             if (options.TimeStart.HasValue && x < options.TimeStart.Value)
             {
                 continue;
@@ -213,7 +241,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 continue;
             }
 
-            var y = source.Value[i];
+            var y = data.Value[i];
             if (hasOffset)
             {
                 y += offset;
@@ -225,12 +253,19 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
 
         if (options.NormalizeSignals && yOut.Count > 0)
         {
-            var min = yOut.Min();
-            var max = yOut.Max();
+            var min = double.PositiveInfinity;
+            var max = double.NegativeInfinity;
+            for (var i = 0; i < yOut.Count; i++)
+            {
+                if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                min = Math.Min(min, yOut[i]);
+                max = Math.Max(max, yOut[i]);
+            }
             if (Math.Abs(max - min) < 1e-12)
             {
                 for (var i = 0; i < yOut.Count; i++)
                 {
+                    if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                     yOut[i] = 0;
                 }
             }
@@ -239,12 +274,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 var range = max - min;
                 for (var i = 0; i < yOut.Count; i++)
                 {
+                    if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                     yOut[i] = (yOut[i] - min) / range;
                 }
             }
         }
 
-        return (xOut.ToArray(), yOut.ToArray());
+        cancellationToken.ThrowIfCancellationRequested();
+        return (CancellableArrayOperations.ToArray(xOut, cancellationToken), CancellableArrayOperations.ToArray(yOut, cancellationToken));
     }
 
     private static IPlotController CreateInteractionController()

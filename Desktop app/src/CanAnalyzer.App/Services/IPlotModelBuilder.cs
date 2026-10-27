@@ -13,4 +13,11 @@ public interface IPlotModelBuilder
         IReadOnlyList<PlotGroup> plotGroups,
         PlotViewOptions viewOptions,
         IReadOnlyList<PlotViewport?>? viewports = null);
+
+    IReadOnlyList<PlotPanelModel> Build(CanDataset dataset, IReadOnlyList<PlotGroup> plotGroups,
+        PlotViewOptions viewOptions, IReadOnlyList<PlotViewport?>? viewports, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Build(dataset, plotGroups, viewOptions, viewports);
+    }
 }

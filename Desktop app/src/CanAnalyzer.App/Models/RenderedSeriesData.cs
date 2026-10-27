@@ -16,7 +16,17 @@ public sealed record RenderedSeriesData(
     private CanAnalyzer.Core.Analysis.SignalRangeIndex? _rangeIndex;
     public CanAnalyzer.Core.Analysis.SignalRangeIndex RangeIndex
     {
-        get => _rangeIndex ??= new(Time, Value);
+        get => GetRangeIndex();
         init => _rangeIndex = value;
+    }
+
+    public CanAnalyzer.Core.Analysis.SignalRangeIndex GetRangeIndex(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var existing = Volatile.Read(ref _rangeIndex);
+        if (existing is not null) return existing;
+        var created = new CanAnalyzer.Core.Analysis.SignalRangeIndex(Time, Value, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Interlocked.CompareExchange(ref _rangeIndex, created, null) ?? created;
     }
 }

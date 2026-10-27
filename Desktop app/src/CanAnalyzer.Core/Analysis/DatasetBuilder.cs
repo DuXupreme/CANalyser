@@ -1,6 +1,7 @@
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
 using CanAnalyzer.Core.Storage;
+using CanAnalyzer.Core.Utilities;
 
 namespace CanAnalyzer.Core.Analysis;
 
@@ -39,7 +40,7 @@ public sealed class DatasetBuilder : IDatasetBuilder
             var series = new SignalSeries(
                 identity,
                 expectedCount,
-                () => LoadSeries(decodedSamples, identity, expectedCount),
+                cancellationToken => LoadSeries(decodedSamples, identity, expectedCount, cancellationToken),
                 maximumPoints => LoadSampledSeries(decodedSamples, identity, expectedCount, maximumPoints));
             seriesByIdentity.Add(pair.Key, series);
             seriesByLabel.Add(series.Label, series);
@@ -74,21 +75,30 @@ public sealed class DatasetBuilder : IDatasetBuilder
     private static (long[] Timestamps, double[] Values) LoadSeries(
         IReadOnlyList<DecodedSignalSample> decodedSamples,
         SignalIdentity identity,
-        int expectedCount)
+        int expectedCount, CancellationToken cancellationToken = default)
     {
-        var buffer = new SeriesBuffer(expectedCount);
+        cancellationToken.ThrowIfCancellationRequested();
+        var buffer = new SeriesBuffer(expectedCount, cancellationToken);
+        var visited = 0;
         if (decodedSamples is ISignalSampleLookup lookup)
         {
-            foreach (var point in lookup.ReadSignalSeries(identity)) buffer.Append(point);
+            foreach (var point in lookup.ReadSignalSeries(identity))
+            {
+                if ((visited++ & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                buffer.Append(point);
+            }
         }
         else
         {
             foreach (var sample in decodedSamples)
+            {
+                if ((visited++ & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                 if (sample.Identity == identity)
                     buffer.Append(new SignalSeriesPoint(sample.TimestampNanoseconds, sample.FrameIndex, sample.Value));
+            }
         }
 
-        return buffer.Complete();
+        return buffer.Complete(cancellationToken);
     }
 
     private static (long[] Timestamps, double[] Values) LoadSampledSeries(
@@ -133,10 +143,13 @@ public sealed class DatasetBuilder : IDatasetBuilder
         private readonly double[] _values;
         private int _index;
 
-        public SeriesBuffer(int count)
+        public SeriesBuffer(int count, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _timestamps = new long[count];
+            cancellationToken.ThrowIfCancellationRequested();
             _frameIndices = new long[count];
+            cancellationToken.ThrowIfCancellationRequested();
             _values = new double[count];
         }
 
@@ -148,35 +161,46 @@ public sealed class DatasetBuilder : IDatasetBuilder
             _index++;
         }
 
-        public (long[] Timestamps, double[] Values) Complete()
+        public (long[] Timestamps, double[] Values) Complete(CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             for (var i = 1; i < _timestamps.Length; i++)
             {
+                if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                 if (_timestamps[i] > _timestamps[i - 1] ||
                     (_timestamps[i] == _timestamps[i - 1] && _frameIndices[i] >= _frameIndices[i - 1]))
                 {
                     continue;
                 }
 
-                var order = Enumerable.Range(0, _timestamps.Length).ToArray();
-                Array.Sort(order, (left, right) =>
+                var order = new int[_timestamps.Length];
+                for (var index = 0; index < order.Length; index++)
+                {
+                    if ((index & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    order[index] = index;
+                }
+                CancellableArrayOperations.Sort(order, (left, right) =>
                 {
                     var timestampOrder = _timestamps[left].CompareTo(_timestamps[right]);
                     if (timestampOrder != 0) return timestampOrder;
                     var frameOrder = _frameIndices[left].CompareTo(_frameIndices[right]);
                     return frameOrder != 0 ? frameOrder : left.CompareTo(right);
-                });
+                }, cancellationToken);
                 var sortedTimestamps = new long[_timestamps.Length];
+                cancellationToken.ThrowIfCancellationRequested();
                 var sortedValues = new double[_values.Length];
                 for (var target = 0; target < order.Length; target++)
                 {
+                    if ((target & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                     sortedTimestamps[target] = _timestamps[order[target]];
                     sortedValues[target] = _values[order[target]];
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
                 return (sortedTimestamps, sortedValues);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             return (_timestamps, _values);
         }
     }

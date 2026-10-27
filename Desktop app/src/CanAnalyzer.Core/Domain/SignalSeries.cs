@@ -3,8 +3,8 @@ namespace CanAnalyzer.Core.Domain;
 /// <summary>Cached exact timestamps and double-precision values for one signal.</summary>
 public sealed class SignalSeries
 {
-    private readonly object _loadLock = new();
-    private Func<(long[] Timestamps, double[] Values)>? _loader;
+    private readonly SemaphoreSlim _loadGate = new(1, 1);
+    private Func<CancellationToken, (long[] Timestamps, double[] Values)>? _loader;
     private readonly Func<int, (long[] Timestamps, double[] Values)>? _sampledLoader;
     private long[]? _timestampNanoseconds;
     private double[]? _value;
@@ -34,6 +34,9 @@ public sealed class SignalSeries
     }
 
     public SignalSeries(SignalIdentity identity, Func<(long[] Timestamps, double[] Values)> loader)
+        : this(identity, WrapLoader(loader)) { }
+
+    public SignalSeries(SignalIdentity identity, Func<CancellationToken, (long[] Timestamps, double[] Values)> loader)
     {
         Identity = identity;
         _loader = loader ?? throw new ArgumentNullException(nameof(loader));
@@ -43,6 +46,13 @@ public sealed class SignalSeries
         SignalIdentity identity,
         int sampleCount,
         Func<(long[] Timestamps, double[] Values)> loader,
+        Func<int, (long[] Timestamps, double[] Values)> sampledLoader)
+        : this(identity, sampleCount, WrapLoader(loader), sampledLoader) { }
+
+    public SignalSeries(
+        SignalIdentity identity,
+        int sampleCount,
+        Func<CancellationToken, (long[] Timestamps, double[] Values)> loader,
         Func<int, (long[] Timestamps, double[] Values)> sampledLoader)
     {
         if (sampleCount < 0) throw new ArgumentOutOfRangeException(nameof(sampleCount));
@@ -65,20 +75,59 @@ public sealed class SignalSeries
     public SignalIdentity Identity { get; }
     public long[] TimestampNanoseconds
     {
-        get { EnsureLoaded(); return _timestampNanoseconds!; }
+        get => GetTimestampNanoseconds();
     }
 
     public double[] Value
     {
-        get { EnsureLoaded(); return _value!; }
+        get => GetValues();
     }
     public string Label => LabelOverride ?? Identity.DisplayLabel;
     private string? LabelOverride { get; }
 
     /// <summary>Read-only projection for plotting/numerical algorithms.</summary>
-    public double[] Time => _timeSeconds ??= TimestampNanoseconds.Select(static value => value / 1_000_000_000d).ToArray();
+    public double[] Time => GetTime();
 
-    public bool IsMaterialized => _loader is null;
+    public bool IsMaterialized => Volatile.Read(ref _loader) is null;
+
+    public long[] GetTimestampNanoseconds(CancellationToken cancellationToken = default)
+    {
+        EnsureLoaded(cancellationToken);
+        return _timestampNanoseconds!;
+    }
+
+    public double[] GetValues(CancellationToken cancellationToken = default)
+    {
+        EnsureLoaded(cancellationToken);
+        return _value!;
+    }
+
+    public double[] GetTime(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Volatile.Read(ref _timeSeconds) is { } existing) return existing;
+        EnsureLoaded(cancellationToken);
+        _loadGate.Wait(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_timeSeconds is not null) return _timeSeconds;
+            var timestamps = _timestampNanoseconds!;
+            var time = new double[timestamps.Length];
+            for (var i = 0; i < time.Length; i++)
+            {
+                if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                time[i] = timestamps[i] / 1_000_000_000d;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref _timeSeconds, time);
+            return time;
+        }
+        finally { _loadGate.Release(); }
+    }
+
+    public (double[] Time, double[] Value) GetData(CancellationToken cancellationToken = default)
+        => (GetTime(cancellationToken), GetValues(cancellationToken));
 
     /// <summary>The exact number of source samples when known without loading the arrays.</summary>
     public int? SampleCount { get; }
@@ -98,19 +147,32 @@ public sealed class SignalSeries
         return new SignalSeries(Identity, sampled.Timestamps, sampled.Values, Label);
     }
 
-    private void EnsureLoaded()
+    private static Func<CancellationToken, (long[] Timestamps, double[] Values)> WrapLoader(
+        Func<(long[] Timestamps, double[] Values)> loader)
     {
-        if (_loader is null) return;
-        lock (_loadLock)
+        ArgumentNullException.ThrowIfNull(loader);
+        // Compatibility callbacks cannot be interrupted internally; production loaders accept a token.
+        return _ => loader();
+    }
+
+    private void EnsureLoaded(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Volatile.Read(ref _loader) is null) return;
+        _loadGate.Wait(cancellationToken);
+        try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_loader is null) return;
-            var loaded = _loader();
+            var loaded = _loader(cancellationToken);
             if (loaded.Timestamps.Length != loaded.Values.Length)
                 throw new InvalidDataException("Lazy signal series returned unequal timestamp and value counts.");
+            cancellationToken.ThrowIfCancellationRequested();
             _timestampNanoseconds = loaded.Timestamps;
             _value = loaded.Values;
-            _loader = null;
+            Volatile.Write(ref _loader, null);
         }
+        finally { _loadGate.Release(); }
     }
 
     private static long ToNanoseconds(double seconds) =>

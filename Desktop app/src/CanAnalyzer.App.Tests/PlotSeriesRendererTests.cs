@@ -189,6 +189,62 @@ public sealed class PlotSeriesRendererTests
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CancelledBuild_DoesNotPublishSeriesOrChangeSource(bool markers)
+    {
+        double[] x = [0, 1, 1, 2];
+        double[] y = [10, -4, 7, 20];
+        var source = new RenderedSeriesData("test", x, y, "Y1", OxyColors.Blue);
+        var options = new PlotViewOptions { MarkersOnly = markers };
+        Assert.Throws<OperationCanceledException>(() => PlotSeriesRenderer.Build(source, options,
+            cancellationToken: new CancellationToken(true)));
+
+        var rebuilt = PlotSeriesRenderer.Build(source, options, new(0, 2));
+        Assert.Equal(x, Points(rebuilt).Select(p => p.X));
+        Assert.Equal(y, Points(rebuilt).Select(p => p.Y));
+        Assert.Equal(new[] { 10d, -4, 7, 20 }, y);
+    }
+
+    [Fact]
+    public void CancellationDuringGapIndexing_StopsEarlyAndDoesNotCachePartialIndex()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var gaps = new CancellingGaps(cancellation);
+        double[] x = [0, 1, 2];
+        var source = new RenderedSeriesData("test", x, x, "Y1", OxyColors.Blue) { Gaps = gaps };
+        var options = new PlotViewOptions { UseDownsampling = true };
+
+        Assert.Throws<OperationCanceledException>(() => PlotSeriesRenderer.Build(source, options,
+            cancellationToken: cancellation.Token));
+        Assert.InRange(gaps.Visited, 8, 4097);
+
+        var rebuilt = PlotSeriesRenderer.Build(source, options);
+        Assert.Equal(x, Points(rebuilt).Select(p => p.X));
+        Assert.Equal(2, gaps.EnumerationCount);
+        Assert.Equal(gaps.Count, gaps.Visited);
+    }
+
+    private sealed class CancellingGaps(CancellationTokenSource cancellation) : IReadOnlyList<MeasurementGap>
+    {
+        public int Visited { get; private set; }
+        public int EnumerationCount { get; private set; }
+        public int Count => 10_000;
+        public MeasurementGap this[int index] => new(10_000 + index * 2, 10_001 + index * 2);
+        public IEnumerator<MeasurementGap> GetEnumerator()
+        {
+            EnumerationCount++; Visited = 0;
+            for (var i = 0; i < Count; i++)
+            {
+                Visited++;
+                if (Visited == 8) cancellation.Cancel();
+                yield return this[i];
+            }
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private static RenderedSeriesData Source()
     {
         var x = Enumerable.Range(0, 100_000).Select(i => i / 1000d).ToArray();

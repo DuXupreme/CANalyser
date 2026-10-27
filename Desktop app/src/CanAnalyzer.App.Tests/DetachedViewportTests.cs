@@ -31,7 +31,7 @@ public sealed class DetachedViewportTests
             Assert.True(window.IsBusy);
             Assert.Same(previous, Assert.Single(model.Series));
             await WaitForBuild(window);
-            var raw = Assert.IsType<LineSeries>(Assert.Single(model.Series));
+            var raw = Assert.IsAssignableFrom<LineSeries>(Assert.Single(model.Series));
             Assert.NotSame(previous, raw);
             Assert.InRange(raw.Points.Count, 51, 53);
             Assert.Contains(raw.Points, point => point.X == 10.025);
@@ -44,7 +44,7 @@ public sealed class DetachedViewportTests
             window.StepPlot = true;
             Assert.True(window.IsBusy);
             await WaitForBuild(window);
-            Assert.IsType<StairStepSeries>(Assert.Single(model.Series));
+            Assert.IsAssignableFrom<StairStepSeries>(Assert.Single(model.Series));
             Assert.False(limits.UseDownsampling);
             Assert.Equal(string.Empty, window.PlotStatus);
         }
@@ -71,7 +71,7 @@ public sealed class DetachedViewportTests
             window.MarkersOnly = true;
             await WaitForBuild(window);
             ((IPlotModel)model).Update(true);
-            var sampled = Assert.IsType<ScatterSeries>(Assert.Single(model.Series));
+            var sampled = Assert.IsAssignableFrom<ScatterSeries>(Assert.Single(model.Series));
             Assert.InRange(sampled.Points.Count, 1, 200);
             Assert.Equal(70, model.Axes[0].ActualMinimum);
             Assert.Equal(72, model.Axes[0].ActualMaximum);

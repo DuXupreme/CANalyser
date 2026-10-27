@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CanAnalyzer.App.Models;
 using CanAnalyzer.App.Services;
+using CanAnalyzer.App.Views;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
 using CanAnalyzer.Core.Utilities;
@@ -21,7 +22,7 @@ namespace CanAnalyzer.App.ViewModels;
 /// <summary>
 /// Analysis tab view model: signal selection, plot groups, plotting, summaries, presets.
 /// </summary>
-public sealed partial class AnalysisViewModel : ObservableObject
+public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
 {
     private readonly IPlotModelBuilder _plotModelBuilder;
     private readonly IFileDialogService _fileDialogService;
@@ -36,6 +37,9 @@ public sealed partial class AnalysisViewModel : ObservableObject
     private readonly LatestWorkQueue<PlotBuildRequest, IReadOnlyList<PlotPanelModel>> _plotBuilds;
     private readonly List<Axis> _navigationAxes = [];
     private bool _displayLimitsOnlyBuild;
+    private CancellationTokenSource? _detachedOpenCancellation;
+    private bool _disposed;
+    private long _plotBuildVersion;
     private sealed record PlotBuildRequest(CanDataset? Dataset, IReadOnlyList<PlotGroup> Groups,
         PlotViewOptions Options, IReadOnlyList<PanelViewSnapshot>? Snapshots, IReadOnlyList<PlotViewport?>? Viewports);
 
@@ -140,7 +144,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         _logger = logger;
         DisplayLimits = displayLimits;
         DisplayLimits.PropertyChanged += OnDisplayLimitsChanged;
-        _plotBuilds = new(BuildPlotsInBackgroundAsync, PublishPlots, running => IsBusy = running || _openingDetached, ex =>
+        _plotBuilds = new(BuildPlotsInBackgroundAsync, PublishPlots, running => IsBusy = !_disposed && (running || _openingDetached), ex =>
         {
             _logger.LogError(ex, "Plot rebuild failed.");
             PresetStatus = $"Grafieken bijwerken mislukt: {ex.Message}";
@@ -232,6 +236,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnShowLegendChanged(bool value)
     {
+        CancelDetachedOpening();
         foreach (var panel in PlotPanels)
         {
             panel.PlotModel.IsLegendVisible = value;
@@ -241,11 +246,13 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     partial void OnLinkXAxisAcrossPanelsChanged(bool value)
     {
+        CancelDetachedOpening();
         ApplyAxisSyncConfiguration();
     }
 
     partial void OnLinkYAxisAcrossPanelsChanged(bool value)
     {
+        CancelDetachedOpening();
         ApplyAxisSyncConfiguration();
     }
 
@@ -253,6 +260,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
     {
         if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
+            CancelDetachedOpening();
             OnPropertyChanged(e.PropertyName);
             if (UseDownsampling)
                 foreach (var panel in PlotPanels) ViewportSampling.ResumeDownsampling(panel.PlotModel, MaxPointsPerTrace);
@@ -272,9 +280,21 @@ public sealed partial class AnalysisViewModel : ObservableObject
         }
     }
 
-    partial void OnTimeStartChanged(double? value) => ActiveUsage.SetTimeWindow(value, TimeEnd);
+    partial void OnFrameIdFilterChanged(string? value) => CancelDetachedOpening();
 
-    partial void OnTimeEndChanged(double? value) => ActiveUsage.SetTimeWindow(TimeStart, value);
+    partial void OnSubplotHeightChanged(int value) => CancelDetachedOpening();
+
+    partial void OnTimeStartChanged(double? value)
+    {
+        CancelDetachedOpening();
+        ActiveUsage.SetTimeWindow(value, TimeEnd);
+    }
+
+    partial void OnTimeEndChanged(double? value)
+    {
+        CancelDetachedOpening();
+        ActiveUsage.SetTimeWindow(TimeStart, value);
+    }
 
     partial void OnIsBusyChanged(bool value)
     {
@@ -289,6 +309,8 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public void LoadDataset(CanDataset dataset)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelPlotBuilds();
         _dataset = dataset;
         ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
@@ -323,6 +345,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public void ApplyViewOptions(PlotViewOptions options)
     {
+        CancelDetachedOpening();
         _suppressAutoRebuild = true;
         try
         {
@@ -405,6 +428,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     public void LoadPlotGroups(IReadOnlyList<PlotGroup> plotGroups)
     {
+        CancelDetachedOpening();
         PlotGroups.Clear();
         foreach (var group in plotGroups)
         {
@@ -560,6 +584,9 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private Task RequestPlotBuild(bool preserveView, bool displayLimitsOnly)
     {
+        if (_disposed) return Task.CompletedTask;
+        _plotBuildVersion++;
+        CancelDetachedOpening();
         _displayLimitsOnlyBuild = displayLimitsOnly && (!_plotBuilds.IsRunning || _displayLimitsOnlyBuild);
         var groups = CapturePlotGroups().Where(group => group.Signals.Count > 0).ToList();
         // Full precision is a temporary inspection of an existing viewport. A fresh plot
@@ -585,14 +612,14 @@ public sealed partial class AnalysisViewModel : ObservableObject
             using (lease)
             {
                 token.ThrowIfCancellationRequested();
-                return _plotModelBuilder.Build(request.Dataset, request.Groups, request.Options, request.Viewports);
+                return _plotModelBuilder.Build(request.Dataset, request.Groups, request.Options, request.Viewports, token);
             }
         });
     }
 
     private void PublishPlots(PlotBuildRequest request, IReadOnlyList<PlotPanelModel> panels)
     {
-        if (!ReferenceEquals(request.Dataset, _dataset)) return;
+        if (_disposed || !ReferenceEquals(request.Dataset, _dataset)) return;
         using var activity = CanAnalyzer.App.Infrastructure.UiActivityDiagnostics.Begin(
             CanAnalyzer.App.Infrastructure.UiActivity.PlotModelPublish);
         // The user may have continued navigating while the worker was building.
@@ -907,11 +934,36 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
     private bool _openingDetached;
 
-    private async Task OpenPlotsInWindowAsync()
+    /// <summary>Cancel work without releasing a dataset that a worker is still reading.</summary>
+    public void CancelPlotBuilds()
     {
-        if (_openingDetached) return;
+        _plotBuildVersion++;
+        _plotBuilds.CancelPending();
+        CancelDetachedOpening();
+    }
+
+    private void CancelDetachedOpening() => _detachedOpenCancellation?.Cancel();
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CancelPlotBuilds();
+        DisplayLimits.PropertyChanged -= OnDisplayLimitsChanged;
+        UnbindPlotNavigation();
+        _xAxisSyncService.Bind([]);
+        IsBusy = false;
+        // The operation owns its CTS and reader until its awaited worker has exited.
+    }
+
+    private async Task OpenPlotsInWindowAsync(CancellationToken cancellationToken = default)
+    {
+        if (_openingDetached || _disposed) return;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _detachedOpenCancellation = cancellation;
         try
         {
+            cancellation.Token.ThrowIfCancellationRequested();
             if (_dataset is null)
             {
                 PresetStatus = "Geen dataset geladen om in apart venster te tonen.";
@@ -936,9 +988,16 @@ public sealed partial class AnalysisViewModel : ObservableObject
             BusyLabel = "Apart grafiekvenster voorbereiden...";
             var detachedPanels = await Task.Run(() =>
             {
-                using (reader) return _plotModelBuilder.Build(dataset, groups, options, viewports);
+                // Do not pass the token to Task.Run: even an already-cancelled request
+                // must enter this delegate to release its acquired dataset read lease.
+                using (reader)
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    return _plotModelBuilder.Build(dataset, groups, options, viewports, cancellation.Token);
+                }
             });
-            if (!ReferenceEquals(dataset, _dataset)) return;
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (_disposed || !ReferenceEquals(dataset, _dataset)) return;
             _plotWindowService.ShowPlots(
                 detachedPanels,
                 options,
@@ -957,17 +1016,27 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 ["link_y_axis"] = LinkYAxisAcrossPanels
             });
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            if (cancellation.IsCancellationRequested || _disposed) return;
             _logger.LogError(ex, "Opening detached plot window failed.");
             PresetStatus = $"Apart plotvenster openen mislukt: {ex.Message}";
         }
-        finally { _openingDetached = false; IsBusy = _plotBuilds.IsRunning; }
+        finally
+        {
+            _detachedOpenCancellation = null;
+            _openingDetached = false;
+            IsBusy = !_disposed && _plotBuilds.IsRunning;
+        }
     }
 
     private async Task ApplyGroupsFromUiAsync()
     {
-        await RebuildPlotsAsync();
+        var build = RebuildPlotsAsync();
+        var version = _plotBuildVersion;
+        await build;
+        if (_disposed || version != _plotBuildVersion) return;
         var groups = CapturePlotGroups()
             .Where(static group => group.Signals.Count > 0)
             .ToList();
@@ -1319,19 +1388,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
         foreach (var panel in PlotPanels)
         {
             var model = panel.PlotModel;
-            var removable = model.Annotations
-                .Where(annotation =>
-                    string.Equals(annotation.Tag as string, "cursor-main", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-a", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-b", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-value-point", StringComparison.Ordinal) ||
-                    string.Equals(annotation.Tag as string, "cursor-value-text", StringComparison.Ordinal))
-                .ToList();
-
-            foreach (var annotation in removable)
-            {
-                model.Annotations.Remove(annotation);
-            }
+            var annotations = new List<Annotation>();
 
             if (CursorTime.HasValue)
             {
@@ -1341,7 +1398,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                     .Select(series => series.Title)
                     .ToHashSet(StringComparer.Ordinal);
 
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-main",
                     Type = LineAnnotationType.Vertical,
@@ -1388,7 +1445,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                     var y = series.Value[index];
                     var label = $"{ShortSignalLabel(series.Label)}={y.ToString("G17", CultureInfo.InvariantCulture)}";
 
-                    model.Annotations.Add(new PointAnnotation
+                    annotations.Add(new PointAnnotation
                     {
                         Tag = "cursor-value-point",
                         X = x,
@@ -1401,7 +1458,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                         Size = 3.5
                     });
 
-                    model.Annotations.Add(new TextAnnotation
+                    annotations.Add(new TextAnnotation
                     {
                         Tag = "cursor-value-text",
                         Text = label,
@@ -1419,7 +1476,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
             if (FlagATime.HasValue)
             {
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-a",
                     Type = LineAnnotationType.Vertical,
@@ -1434,7 +1491,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
 
             if (FlagBTime.HasValue)
             {
-                model.Annotations.Add(new LineAnnotation
+                annotations.Add(new LineAnnotation
                 {
                     Tag = "cursor-b",
                     Type = LineAnnotationType.Vertical,
@@ -1447,7 +1504,7 @@ public sealed partial class AnalysisViewModel : ObservableObject
                 });
             }
 
-            model.InvalidatePlot(false);
+            PlotCursorAnnotations.Set(model, annotations);
         }
     }
 }

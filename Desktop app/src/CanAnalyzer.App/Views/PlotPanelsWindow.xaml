@@ -106,11 +106,14 @@
                                 <TextBlock Text="{Binding Title}"
                                            FontWeight="SemiBold"
                                            Margin="0,0,0,4" />
+                                <Grid>
                                 <views:CachedPlotView Model="{Binding PlotModel}"
                                               Controller="{Binding PlotController}"
                                               PreviewMouseDown="OnPlotPreviewMouseDown"
                                               MouseMove="OnPlotMouseMove"
                                               Height="{Binding DataContext.SubplotHeight, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <views:PlotCursorOverlay Model="{Binding PlotModel}" />
+                                </Grid>
                             </StackPanel>
                         </Border>
                     </DataTemplate>

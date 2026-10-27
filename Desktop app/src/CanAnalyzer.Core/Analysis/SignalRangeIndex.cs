@@ -14,8 +14,9 @@ public sealed class SignalRangeIndex
     private readonly int _leaves;
     public bool SupportsRangeQueries { get; private set; } = true;
 
-    public SignalRangeIndex(double[] x, double[] y)
+    public SignalRangeIndex(double[] x, double[] y, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (x.Length != y.Length) throw new ArgumentException("X and Y arrays must have the same length.");
         _x = x; _y = y;
         _leaves = 1;
@@ -24,6 +25,7 @@ public sealed class SignalRangeIndex
         Array.Fill(_min, -1); Array.Fill(_max, -1);
         for (var i = 0; i < y.Length; i++)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             if (!double.IsFinite(x[i]) || !double.IsFinite(y[i]) || (i > 0 && x[i] < x[i - 1]))
                 SupportsRangeQueries = false;
             var node = _leaves + i / BlockSize;
@@ -32,13 +34,17 @@ public sealed class SignalRangeIndex
         }
         for (var node = _leaves - 1; node > 0; node--)
         {
+            if ((node & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             _min[node] = Minimum(_min[node * 2], _min[node * 2 + 1]);
             _max[node] = Maximum(_max[node * 2], _max[node * 2 + 1]);
         }
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
-    public (double[] X, double[] Y) Select(double? minimum, double? maximum, int maximumPoints)
+    public (double[] X, double[] Y) Select(double? minimum, double? maximum, int maximumPoints,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_x.Length == 0) return ([], []);
         var first = minimum is { } lo && double.IsFinite(lo) ? LowerBound(lo, false) : 0;
         var end = maximum is { } hi && double.IsFinite(hi) ? LowerBound(hi, true) : _x.Length;
@@ -48,12 +54,13 @@ public sealed class SignalRangeIndex
         end = Math.Min(_x.Length, end + 1);
         var count = end - first;
         if (count <= maximumPoints || maximumPoints < 8)
-            return first == 0 && end == _x.Length ? (_x, _y) : (_x[first..end], _y[first..end]);
+            return CopyRange(first, end, cancellationToken);
 
         var indices = new List<int>(maximumPoints) { first };
         var buckets = (maximumPoints - 2) / 2;
         for (var i = 0; i < buckets; i++)
         {
+            if ((i & 63) == 0) cancellationToken.ThrowIfCancellationRequested();
             var start = first + 1 + (int)((long)i * (count - 2) / buckets);
             var stop = first + 1 + (int)((long)(i + 1) * (count - 2) / buckets);
             var (min, max) = Extrema(start, stop);
@@ -62,8 +69,77 @@ public sealed class SignalRangeIndex
             if (min != max) indices.Add(Math.Max(min, max));
         }
         indices.Add(end - 1);
+        return CopySelected(indices, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reduces a viewport with power-of-two buckets anchored to the source index. Panning at
+    /// one density keeps extrema in complete interior buckets unchanged; only clipped edge
+    /// buckets and the adjacent samples change. Source samples are never averaged or mutated.
+    /// </summary>
+    public (double[] X, double[] Y) SelectStable(double? minimum, double? maximum, int maximumPoints,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_x.Length == 0) return ([], []);
+        var first = minimum is { } lo && double.IsFinite(lo) ? LowerBound(lo, false) : 0;
+        var end = maximum is { } hi && double.IsFinite(hi) ? LowerBound(hi, true) : _x.Length;
+        if (first == _x.Length || end == 0 || first > end) return ([], []);
+        first = Math.Max(0, first - 1);
+        end = Math.Min(_x.Length, end + 1);
+        var count = end - first;
+        if (count <= maximumPoints || maximumPoints < 8)
+            return CopyRange(first, end, cancellationToken);
+
+        // Reserve the two boundary samples and a possible extra bucket at either phase of
+        // a pan. The density depends on sample count, not on where a bucket boundary falls.
+        long bucketSize = 1;
+        while (2 + 2 * (((long)count - 2 + bucketSize - 1) / bucketSize + 1) > maximumPoints)
+            bucketSize *= 2;
+        var indices = new List<int>(maximumPoints) { first };
+        var interiorEnd = end - 1;
+        for (var start = first + 1; start < interiorEnd;)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var stop = (int)Math.Min(interiorEnd, ((long)start / bucketSize + 1) * bucketSize);
+            var (min, max) = Extrema(start, stop);
+            if (min >= 0)
+            {
+                indices.Add(Math.Min(min, max));
+                if (min != max) indices.Add(Math.Max(min, max));
+            }
+            start = stop;
+        }
+        indices.Add(end - 1);
+        return CopySelected(indices, cancellationToken);
+    }
+
+    private (double[] X, double[] Y) CopyRange(int first, int end, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (first == 0 && end == _x.Length) return (_x, _y);
+        var count = end - first;
+        var xs = new double[count]; var ys = new double[count];
+        for (var offset = 0; offset < count; offset += 4096)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var length = Math.Min(4096, count - offset);
+            Array.Copy(_x, first + offset, xs, offset, length);
+            Array.Copy(_y, first + offset, ys, offset, length);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return (xs, ys);
+    }
+
+    private (double[] X, double[] Y) CopySelected(List<int> indices, CancellationToken cancellationToken)
+    {
         var xs = new double[indices.Count]; var ys = new double[indices.Count];
-        for (var i = 0; i < indices.Count; i++) { xs[i] = _x[indices[i]]; ys[i] = _y[indices[i]]; }
+        for (var i = 0; i < indices.Count; i++)
+        {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+            xs[i] = _x[indices[i]]; ys[i] = _y[indices[i]];
+        }
+        cancellationToken.ThrowIfCancellationRequested();
         return (xs, ys);
     }
 

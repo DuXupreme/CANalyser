@@ -219,7 +219,7 @@ public sealed class VisiblePlotRebuildTests
 
         await WaitForIdle(vm);
         var current = Assert.Single(vm.PlotPanels);
-        Assert.IsType<StairStepSeries>(Assert.Single(current.PlotModel.Series));
+        Assert.IsAssignableFrom<StairStepSeries>(Assert.Single(current.PlotModel.Series));
         Assert.Equal(70, XAxis(current).ActualMinimum);
         Assert.Equal(70.006, XAxis(current).ActualMaximum);
         Assert.True(vm.UseDownsampling);

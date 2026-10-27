@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using OxyPlot;
 using OxyPlot.Wpf;
+using CanAnalyzer.App.Services;
 
 namespace CanAnalyzer.App.Views;
 
@@ -50,6 +51,7 @@ public sealed class CachedPlotView : PlotView, IPlotView
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (ActualModel is { } model) ViewportSampling.Resume(model);
         for (DependencyObject? parent = VisualTreeHelper.GetParent(this); parent is not null;
              parent = VisualTreeHelper.GetParent(parent))
         {
@@ -64,11 +66,24 @@ public sealed class CachedPlotView : PlotView, IPlotView
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        if (ActualModel is { } model) ViewportSampling.Suspend(model, this);
         if (_scrollViewer is not null) _scrollViewer.ScrollChanged -= OnScrollChanged;
         if (_window is not null) _window.StateChanged -= OnWindowStateChanged;
         _scrollViewer = null; _viewport = null; _window = null;
         // Keep the dirty state: a tab/control can be loaded again at a newer range.
         PlotRenderScheduler.For(Dispatcher).Remove(this);
+    }
+
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.Property != ModelProperty) return;
+        if (e.OldValue is PlotModel oldModel) ViewportSampling.Suspend(oldModel, this);
+        if (e.NewValue is PlotModel newModel)
+        {
+            if (IsLoaded) ViewportSampling.Resume(newModel);
+            else ViewportSampling.Suspend(newModel, this);
+        }
     }
 
     private void OnScrollChanged(object sender, ScrollChangedEventArgs e) => ScheduleIfVisible();
@@ -98,6 +113,7 @@ public sealed class CachedPlotView : PlotView, IPlotView
         using var activity = CanAnalyzer.App.Infrastructure.UiActivityDiagnostics.Begin(
             CanAnalyzer.App.Infrastructure.UiActivity.PlotRender);
         base.InvalidatePlot(updateData);
+        PlotCursorAnnotations.PlotRendered(ActualModel);
     }
 
     protected override IRenderContext CreateRenderContext() => new CachedCanvasRenderContext(Canvas);
@@ -105,7 +121,7 @@ public sealed class CachedPlotView : PlotView, IPlotView
 
 /// <summary>
 /// Bounded text caches around the standard renderer. Cache misses use OxyPlot's original WPF
-/// text path, including Unicode shaping, rotation and clipping. Geometry remains unchanged.
+/// text path, including Unicode shaping, rotation and clipping. All marker positions are retained.
 /// </summary>
 public sealed class CachedCanvasRenderContext : CanvasRenderContext
 {
@@ -121,6 +137,31 @@ public sealed class CachedCanvasRenderContext : CanvasRenderContext
     private readonly record struct TextKey(MeasureKey Measure, ScreenPoint Position, OxyColor Color,
         double Rotation, OxyPlot.HorizontalAlignment Horizontal, OxyPlot.VerticalAlignment Vertical,
         OxySize? Maximum, OxyRect? Clip, Point Offset, string? Tooltip);
+
+    public override void DrawEllipses(IList<OxyRect> rectangles, OxyColor fill, OxyColor stroke,
+        double thickness, EdgeRenderingMode edgeRenderingMode)
+    {
+        // Dense overlapping stroked ellipses in one path can monopolize WPF's render
+        // thread, including during Window.Close. Sixteen bounds that geometry work.
+        // Keep alpha, different stroke colors and antialiasing on the original path:
+        // their compositing depends on grouping. Opaque aliased batches preserve all
+        // ellipses, with only subpixel contour rounding differences when rasterized.
+        const int batchSize = 16;
+        if (rectangles.Count <= batchSize || fill.A != 255 ||
+            (stroke != fill && !stroke.IsUndefined() && thickness > 0) ||
+            edgeRenderingMode != EdgeRenderingMode.PreferSpeed)
+        {
+            base.DrawEllipses(rectangles, fill, stroke, thickness, edgeRenderingMode);
+            return;
+        }
+        var batch = new List<OxyRect>(batchSize);
+        for (var start = 0; start < rectangles.Count; start += batchSize)
+        {
+            batch.Clear();
+            for (var i = start; i < Math.Min(start + batchSize, rectangles.Count); i++) batch.Add(rectangles[i]);
+            base.DrawEllipses(batch, fill, stroke, thickness, edgeRenderingMode);
+        }
+    }
 
     public override OxySize MeasureText(string text, string fontFamily, double fontSize, double fontWeight)
     {
