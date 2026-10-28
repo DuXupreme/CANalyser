@@ -22,6 +22,8 @@ public sealed partial class BusmasterViewModel
     [ObservableProperty] private bool _watchLatestValues;
     [ObservableProperty] private bool _onlyWatchedSignals;
     [ObservableProperty] private string _watchCursorText = "Cursor: nog niet ingesteld";
+    [ObservableProperty] private IReadOnlyList<BusmasterSignalWatchRow> _watchedSignalRows = [];
+    [ObservableProperty] private string _floatingWatchStatus = "Geen opname geladen.";
 
     public void ApplySignalWatchOptions(SignalWatchOptions? options)
     {
@@ -54,6 +56,7 @@ public sealed partial class BusmasterViewModel
             row.PropertyChanged += WatchRowChanged;
         }
         _applyingWatch = false;
+        RefreshWatchedSignalProjection();
         RefreshWatchValues();
         ApplySignalWatchFilter();
     }
@@ -67,8 +70,34 @@ public sealed partial class BusmasterViewModel
             _watched.Add(row.Identity);
         }
         else _watched.Remove(row.Identity);
+        RefreshWatchedSignalProjection();
         RefreshWatchValues();
         ApplySignalWatchFilter();
+    }
+
+    private void RefreshWatchedSignalProjection()
+    {
+        // Reuse the live rows: floating and main views receive the same value notifications.
+        // Search, message filters and OnlyWatchedSignals affect only the main table.
+        WatchedSignalRows = _dataset is null ? [] : _allSignalWatchRows.Where(row => row.IsWatched).ToArray();
+        if (_dataset is null)
+        {
+            FloatingWatchStatus = "Geen opname geladen.";
+            return;
+        }
+        if (_watched.Count == 0)
+        {
+            FloatingWatchStatus = "Geen signalen gekozen. Gebruik ‘Signalen kiezen…’ om een volglijst te maken.";
+            return;
+        }
+
+        var count = WatchedSignalRows.Count;
+        var missing = _watched.Count - count;
+        FloatingWatchStatus = count == 1 ? "1 signaal gevolgd." : $"{count:N0} signalen gevolgd.";
+        if (missing > 0)
+            FloatingWatchStatus += missing == 1
+                ? " 1 gekozen signaal ontbreekt in deze opname."
+                : $" {missing:N0} gekozen signalen ontbreken in deze opname.";
     }
 
     partial void OnWatchLatestValuesChanged(bool value) => RefreshWatchValues();

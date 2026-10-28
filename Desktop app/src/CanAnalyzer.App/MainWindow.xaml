@@ -28,6 +28,9 @@
                 <Separator />
                 <MenuItem Header="A_fsluiten" Click="OnExitClick" />
             </MenuItem>
+            <MenuItem Header="_Venster">
+                <MenuItem Header="Losse _Signal Watch" Command="{x:Static views:SignalWatchWindow.OpenCommand}" />
+            </MenuItem>
             <MenuItem Header="_Info" Click="OnAboutClick" />
         </Menu>
 
@@ -53,6 +56,8 @@
                 <Separator />
                 <Button Content="Laden/Decoderen" Command="{Binding LoadAndDecodeCommand}" />
                 <Button Content="Annuleren" Command="{Binding CancelCommand}" />
+                <Button Content="Signal Watch" Command="{x:Static views:SignalWatchWindow.OpenCommand}"
+                        ToolTip="Open de gevolgde signalen in een klein los venster dat boven je grafieken kan blijven staan." />
                 <Separator />
                 <Button Content="Export CSV" Command="{Binding ExportDecodedCsvCommand}" />
                 <Button Content="Machine-analyse exporteren" Command="{Binding ExportAnalysesCommand}"
@@ -147,7 +152,7 @@
                 <views:RawFramesView DataContext="{Binding RawFrames}" />
             </TabItem>
             <TabItem Header="Busmaster">
-                <views:BusmasterView DataContext="{Binding Busmaster}" />
+                <views:BusmasterView x:Name="BusmasterPanel" DataContext="{Binding Busmaster}" />
             </TabItem>
             <TabItem Header="Database (DBC)">
                 <views:DbcEditorView DataContext="{Binding DbcEditor}" />

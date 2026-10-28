@@ -19,7 +19,8 @@ public sealed class PlotRegressionTests
         public IReadOnlyList<PlotPanelModel>? Panels;
         public int Thread;
         public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, PlotViewOptions renderedOptions, DisplayLimits displayLimits,
-            bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc)
+            bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc,
+            Action<double>? cursorChanged = null)
         { Panels = panels; Thread = Environment.CurrentManagedThreadId; }
     }
 

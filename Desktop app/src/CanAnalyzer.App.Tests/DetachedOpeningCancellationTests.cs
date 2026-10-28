@@ -239,7 +239,8 @@ public sealed class DetachedOpeningCancellationTests
         public int OpenCount { get; private set; }
         public int ThreadId { get; private set; }
         public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, PlotViewOptions renderedOptions,
-            DisplayLimits displayLimits, bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc)
+            DisplayLimits displayLimits, bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc,
+            Action<double>? cursorChanged = null)
         {
             Assert.Single(panels);
             OpenCount++;

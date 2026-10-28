@@ -11,4 +11,6 @@ public partial class BusmasterView : UserControl
     {
         InitializeComponent();
     }
+
+    public void ShowSignalWatch() => DetailsTabs.SelectedIndex = 1;
 }

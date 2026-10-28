@@ -14,7 +14,8 @@ public sealed class PlotWindowService : IPlotWindowService
         DisplayLimits displayLimits,
         bool linkXAxisAcrossPanels,
         bool linkYAxisAcrossPanels,
-        DateTimeOffset? startTimeUtc)
+        DateTimeOffset? startTimeUtc,
+        Action<double>? cursorChanged = null)
     {
         if (panels.Count == 0)
         {
@@ -27,7 +28,8 @@ public sealed class PlotWindowService : IPlotWindowService
             displayLimits,
             linkXAxisAcrossPanels,
             linkYAxisAcrossPanels,
-            startTimeUtc);
+            startTimeUtc,
+            cursorChanged);
         window.Show();
         window.Activate();
     }

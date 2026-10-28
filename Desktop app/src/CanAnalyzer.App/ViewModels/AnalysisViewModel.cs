@@ -1050,7 +1050,20 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
                 DisplayLimits,
                 LinkXAxisAcrossPanels,
                 LinkYAxisAcrossPanels,
-                dataset.StartTimeUtc);
+                dataset.StartTimeUtc,
+                time =>
+                {
+                    // Detached windows may still show an older recording after a
+                    // replacement. Their cursor must never query the new dataset.
+                    if (!_disposed && ReferenceEquals(dataset, _dataset) && double.IsFinite(time))
+                    {
+                        // Signal Watch can also follow a time-plot or message-list
+                        // cursor directly. Re-entering this unchanged local time
+                        // must therefore notify the shared cursor consumer again.
+                        if (CursorTime == time) OnPropertyChanged(nameof(CursorTime));
+                        else CursorTime = time;
+                    }
+                });
 
             _ = _telemetryService.TrackEventAsync("analysis_open_detached_plots", new Dictionary<string, object?>
             {

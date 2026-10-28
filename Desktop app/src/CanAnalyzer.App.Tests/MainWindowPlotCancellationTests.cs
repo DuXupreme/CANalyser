@@ -180,7 +180,8 @@ public sealed class MainWindowPlotCancellationTests
     private sealed class NoWindow : IPlotWindowService
     {
         public void ShowPlots(IReadOnlyList<PlotPanelModel> panels, PlotViewOptions renderedOptions,
-            DisplayLimits displayLimits, bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc)
+            DisplayLimits displayLimits, bool linkXAxisAcrossPanels, bool linkYAxisAcrossPanels, DateTimeOffset? startTimeUtc,
+            Action<double>? cursorChanged = null)
             => throw new InvalidOperationException("Cancelled work must not open a window.");
     }
 }

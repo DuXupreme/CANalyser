@@ -42,6 +42,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private bool _useDownsampling = true;
     private string _plotStatus = string.Empty;
     private PlotPanelModel? _activeCursorPanel;
+    private Action<double>? _cursorChanged;
 
     public PlotPanelsWindow(
         IReadOnlyList<PlotPanelModel> panels,
@@ -49,7 +50,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         DisplayLimits displayLimits,
         bool linkXAxisAcrossPanels,
         bool linkYAxisAcrossPanels,
-        DateTimeOffset? startTimeUtc)
+        DateTimeOffset? startTimeUtc,
+        Action<double>? cursorChanged = null)
     {
         InitializeComponent();
         var history = new PlotInteractionHistory(this, () => Panels.Select(p => p.PlotModel));
@@ -74,6 +76,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         _linkXAxisAcrossPanels = linkXAxisAcrossPanels;
         _linkYAxisAcrossPanels = linkYAxisAcrossPanels;
         _startTimeUtc = startTimeUtc;
+        _cursorChanged = cursorChanged;
 
         foreach (var panel in panels)
         {
@@ -247,6 +250,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private void OnClosed(object? sender, EventArgs e)
     {
         _isClosed = true;
+        _cursorChanged = null;
         _windowLifetime.Cancel();
         _windowLifetime.Dispose();
         _displayLimits.PropertyChanged -= OnDisplayLimitsChanged;
@@ -405,6 +409,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     private void SetCursorAt(double requestedTime, PlotPanelModel? panel)
     {
+        if (_isClosed || !double.IsFinite(requestedTime)) return;
         _activeCursorPanel = panel ?? _activeCursorPanel;
         var snappedTime = SnapTimeToNearestData(panel, requestedTime, out var nearestLabel, out var nearestValue);
         var newValueText = nearestLabel is null
@@ -415,6 +420,9 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
             Math.Abs(_cursorTime.Value - snappedTime) < 1e-6 &&
             string.Equals(CursorValueText.Text, newValueText, StringComparison.Ordinal))
         {
+            // Another plot window may have moved the shared cursor since our
+            // last local redraw. Forward this interaction even without redrawing.
+            _cursorChanged?.Invoke(snappedTime);
             return;
         }
 
@@ -422,24 +430,31 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         CursorValueText.Text = newValueText;
         UpdateCursorInfo();
         RefreshCursorAnnotations();
+        _cursorChanged?.Invoke(snappedTime);
     }
 
     private void SetFlagAAt(double requestedTime, PlotPanelModel? panel)
     {
+        if (_isClosed || !double.IsFinite(requestedTime)) return;
         _activeCursorPanel = panel ?? _activeCursorPanel;
-        _flagATime = SnapTimeToNearestData(panel, requestedTime, out _, out _);
-        _cursorTime = _flagATime;
+        var snappedTime = SnapTimeToNearestData(panel, requestedTime, out _, out _);
+        _flagATime = snappedTime;
+        _cursorTime = snappedTime;
         UpdateCursorInfo();
         RefreshCursorAnnotations();
+        _cursorChanged?.Invoke(snappedTime);
     }
 
     private void SetFlagBAt(double requestedTime, PlotPanelModel? panel)
     {
+        if (_isClosed || !double.IsFinite(requestedTime)) return;
         _activeCursorPanel = panel ?? _activeCursorPanel;
-        _flagBTime = SnapTimeToNearestData(panel, requestedTime, out _, out _);
-        _cursorTime = _flagBTime;
+        var snappedTime = SnapTimeToNearestData(panel, requestedTime, out _, out _);
+        _flagBTime = snappedTime;
+        _cursorTime = snappedTime;
         UpdateCursorInfo();
         RefreshCursorAnnotations();
+        _cursorChanged?.Invoke(snappedTime);
     }
 
     private void ResetAllPlots()

@@ -88,6 +88,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
         foreach (var row in _allSignalWatchRows) row.PropertyChanged -= WatchRowChanged;
         _allSignalWatchRows = []; SignalWatchRows = [];
         _dataset = dataset;
+        RefreshWatchedSignalProjection();
         _sampleLookup = dataset.DecodedSamples as IFrameSampleLookup;
         _watchLookup = new SignalWatchLookup(dataset);
         _watchCursor = null;
@@ -178,6 +179,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
             _allSignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchRows = Array.Empty<BusmasterSignalWatchRow>();
             SignalWatchStatistics = "Geen dataset geladen.";
+            RefreshWatchedSignalProjection();
             PreviousPageCommand.NotifyCanExecuteChanged();
             NextPageCommand.NotifyCanExecuteChanged();
             return;

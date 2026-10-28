@@ -13,6 +13,41 @@ public sealed class AppSettingsStoreTests : IDisposable
     private AppSettingsStore CreateStore() => new(Path.Combine(_directory, "settings.json"));
 
     [Fact]
+    public async Task FloatingSignalWatchPlacementAndPinRoundTripIndependentlyOfSignalSelection()
+    {
+        var signal = new SignalIdentity("2", CanFrameFormat.Classic, false, 42, "Actuator", "Position");
+        await CreateStore().SaveAsync(new AppSettings
+        {
+            SignalWatch = new() { Signals = [signal], LatestValues = true },
+            SignalWatchWindow = new() { AlwaysOnTop = false, Left = -1500, Top = 125, Width = 590, Height = 300 }
+        }, CancellationToken.None);
+
+        var reopened = CreateStore().Load();
+        Assert.False(reopened.SignalWatchWindow.AlwaysOnTop);
+        Assert.Equal(-1500, reopened.SignalWatchWindow.Left);
+        Assert.Equal(125, reopened.SignalWatchWindow.Top);
+        Assert.Equal(590, reopened.SignalWatchWindow.Width);
+        Assert.Equal(300, reopened.SignalWatchWindow.Height);
+        Assert.Equal(signal, Assert.Single(reopened.SignalWatch.Signals));
+        Assert.True(reopened.SignalWatch.LatestValues);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"signalWatchWindow\":null}")]
+    public void MissingOrNullFloatingSignalWatchSettingsUsePinnedCompactDefaults(string json)
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(CreateStore().SettingsPath, json);
+        var options = CreateStore().Load().SignalWatchWindow;
+        Assert.True(options.AlwaysOnTop);
+        Assert.Equal(640, options.Width);
+        Assert.Equal(340, options.Height);
+        Assert.Null(options.Left);
+        Assert.Null(options.Top);
+    }
+
+    [Fact]
     public async Task ConcurrentSavesCannotPublishAnOlderProfileAfterTheNewerProfile()
     {
         var path = Path.Combine(_directory, "settings.json");

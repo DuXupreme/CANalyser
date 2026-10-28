@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Input;
 using CanAnalyzer.App.Infrastructure;
 using CanAnalyzer.App.ViewModels;
 using CanAnalyzer.App.Views;
@@ -9,6 +10,7 @@ namespace CanAnalyzer.App;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private readonly SignalWatchWindowHost _signalWatchWindow;
     private bool _isShuttingDown;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -16,6 +18,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = _viewModel;
+        _signalWatchWindow = new SignalWatchWindowHost(this, _viewModel.Busmaster,
+            _viewModel.LoadedSettings.SignalWatchWindow ??= new(), () =>
+            {
+                _viewModel.SelectedMainTabIndex = 3;
+                BusmasterPanel.ShowSignalWatch();
+                _viewModel.Busmaster.OnlyWatchedSignals = false;
+                _viewModel.Busmaster.SignalWatchSearchText = null;
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Activate();
+            });
+        CommandBindings.Add(new CommandBinding(SignalWatchWindow.OpenCommand,
+            (_, _) => _signalWatchWindow.Show(), (_, e) => e.CanExecute = !_isShuttingDown));
         AddHandler(TimePlotView.CursorMovedEvent, new EventHandler<TimePlotCursorEventArgs>((_, args) =>
             _viewModel.Busmaster.SetWatchCursorAt(args.TimeSeconds)));
 
@@ -56,6 +70,7 @@ public partial class MainWindow : Window
 
         try
         {
+            _signalWatchWindow.CapturePlacement();
             await _viewModel.PersistWindowStateAsync(width, height, left, top, isMaximized, CancellationToken.None);
         }
         catch

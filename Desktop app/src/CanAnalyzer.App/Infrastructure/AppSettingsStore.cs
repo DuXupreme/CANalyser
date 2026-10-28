@@ -51,6 +51,7 @@ public sealed class AppSettingsStore : IAppSettingsStore
             settings.AnalysisProfiles ??= [];
             settings.SignalWatch ??= new();
             settings.SignalWatch.Signals ??= [];
+            settings.SignalWatchWindow ??= new();
             settings.RecentLogFiles ??= [];
             settings.LastPlotViewOptions ??= new CanAnalyzer.Core.Domain.PlotViewOptions();
             settings.LastPlotViewOptions.UseDownsampling = true;

@@ -1,0 +1,109 @@
+<Window x:Class="CanAnalyzer.App.Views.SignalWatchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Signal Watch — CANalyser" Width="640" Height="340"
+        MinWidth="420" MinHeight="220" WindowStyle="ToolWindow"
+        ResizeMode="CanResizeWithGrip" ShowInTaskbar="False"
+        Background="#F5F7FA">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <WrapPanel Margin="0,0,0,8">
+            <CheckBox x:Name="AlwaysOnTopToggle" Content="Altijd bovenop"
+                      IsChecked="{Binding Topmost, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                      VerticalAlignment="Center" Margin="0,0,16,4"
+                      ToolTip="Houd dit venster boven de grafieken en andere vensters. Je kunt het blijven verplaatsen en verkleinen." />
+            <Button x:Name="ChooseSignalsButton" Content="Signalen kiezen…" Click="OnChooseSignals"
+                    Padding="8,3" Margin="0,0,0,4"
+                    ToolTip="Ga naar Signal Watch in Busmaster om signalen aan de gedeelde volglijst toe te voegen of te verwijderen." />
+        </WrapPanel>
+        <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+            <CheckBox Content="Laatste opnamewaarden" IsChecked="{Binding WatchLatestValues}"
+                      Margin="0,0,14,4"
+                      ToolTip="Uit: volg de cursor in de grafiek. Aan: toon de laatste ontvangen sample per signaal uit de opname; dit is geen live-CAN." />
+            <TextBlock Margin="0,0,0,4" TextTrimming="CharacterEllipsis">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Text" Value="{Binding WatchCursorText}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding WatchLatestValues}" Value="True">
+                                <Setter Property="Text" Value="Laatste samples uit de opname" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </WrapPanel>
+        <DataGrid x:Name="WatchGrid" Grid.Row="2" ItemsSource="{Binding WatchedSignalRows}"
+                  AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                  CanUserDeleteRows="False" HeadersVisibility="Column" SelectionMode="Single"
+                  EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                  GridLinesVisibility="Horizontal" BorderBrush="#D6DEE8"
+                  HorizontalGridLinesBrush="#E5EAF0" Background="White"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Signaal" Width="2*" MinWidth="110">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="4,4">
+                                <StackPanel.ToolTip>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding MessageName}" />
+                                        <TextBlock><Run Text="Kanaal " /><Run Text="{Binding Channel, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding FrameIdHex, Mode=OneWay}" /></TextBlock>
+                                        <TextBlock><Run Text="Raw: " /><Run Text="{Binding RawValue, Mode=OneWay}" /></TextBlock>
+                                        <TextBlock><Run Text="Sampletijd: " /><Run Text="{Binding LastTimeSeconds, Mode=OneWay}" /><Run Text=" s" /></TextBlock>
+                                    </StackPanel>
+                                </StackPanel.ToolTip>
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" />
+                                <TextBlock Foreground="#596579" FontSize="11" TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding MessageName, Mode=OneWay}" /><Run Text=" · kanaal " /><Run Text="{Binding Channel, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Waarde" Width="*" MinWidth="65">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding PhysicalValue}" ToolTip="{Binding PhysicalValue}"
+                                       FontWeight="SemiBold" Margin="4,6" TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Eenheid" Binding="{Binding Unit}" Width="55" MinWidth="55" />
+                <DataGridTemplateColumn Header="Status / ouderdom" Width="1.4*" MinWidth="105">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="4,4">
+                                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+                                <TextBlock Foreground="#596579" FontSize="11">
+                                    <Run Text="Leeftijd: " /><Run Text="{Binding Age, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+        <TextBlock Grid.Row="2" Text="{Binding FloatingWatchStatus}" TextWrapping="Wrap" Margin="20,40,20,15"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding WatchedSignalRows.Count}" Value="0">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TextBlock Grid.Row="3" Text="{Binding FloatingWatchStatus}" Foreground="#596579"
+                   TextWrapping="Wrap" Margin="0,7,12,0" />
+    </Grid>
+</Window>

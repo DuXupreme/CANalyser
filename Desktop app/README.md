@@ -2,11 +2,11 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.5.0 (.NET 8 WPF)
+# CANalyser 2.5.1 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.5.0` voegt automatische inzichten en analyseprofielen, volledige schema-3-machine-export, pakketvergelijking, SignalWatch en beheerde analyseopslag toe. Reactieanalyse behoudt geldige gebeurtenissen buiten meetgaten; online markeringen bewaren expliciete uitsluitingen. Automatische weergavedownsampling staat standaard aan, ook in losse plotvensters. Zie [release notes 2.5.0](RELEASE_NOTES_2.5.0.md).
+> Versie `2.5.1` voegt een compact los Signal Watch-venster toe met **Altijd bovenop**, dezelfde volglijst en cursorwaarden uit gewone en losse grafieken. Formaat en positie worden onthouden. Zie [release notes 2.5.1](RELEASE_NOTES_2.5.1.md) en de [vernieuwingen in 2.5.0](RELEASE_NOTES_2.5.0.md).
 > Versie `2.4.16` verplaatste grafiekvoorbereiding naar de achtergrond, annuleert achterhaalde verzoeken en verbetert cursor- en markerweergave. Exacte weergave blijft beperkt tot het zichtbare tijdvak; verschuiven, zoomen en resetten herstellen automatische downsampling.
 > Versie `2.4.12` herstelt toegang tot beveiligde online logs met een aanmeldvenster. Inloggegevens kunnen optioneel maximaal 30 dagen versleuteld worden onthouden; Afmelden verwijdert ze.
 > Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.
@@ -65,6 +65,7 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 - Machine-analyse exporteren gebruikt altijd de volledige geladen opname en het passende opgeslagen profiel. Schema 3 bewaart analyses, alle signaalstatistieken, minuuttrends, bronidentiteit en ontbrekende dekking. Samples staan standaard uit; de exportmap wordt onthouden.
 - Vergelijken opent meerdere analysepakketten voor cijfers en signaaltrends. Alleen verenigbare resultaten met voldoende bron- en tijdsbewijs worden samengevoegd; gedeeltelijke bronoverlap blokkeert samenvoegen. Onbevestigde klokken geven geen automatische UTC-uitlijning.
 - SignalWatch toont gekozen signalen met sampletijd, ouderdom en meetgatstatus bij een cursor of de laatste sample.
+- De knop **Signal Watch** in de werkbalk (of **Los venster** in Busmaster) opent een compacte volglijst naast de grafieken. **Altijd bovenop** staat standaard aan en kan uit; positie, formaat en die keuze worden onthouden. Het venster deelt de gekozen signalen en cursorwaarden met Busmaster, onafhankelijk van de zoekfilters daar. Ook cursors en A/B-acties in losse grafiekvensters werken door, zolang ze bij de huidige opname horen. **Signalen kiezen…** opent de volglijst in Busmaster. Sluiten van het kleine venster behoudt de volglijst.
 - Actief gebruik en batterijduur in CAN Analyse: instelbare detectie op motor-RPM,
   BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
   SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.

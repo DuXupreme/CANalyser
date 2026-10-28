@@ -14,5 +14,6 @@ public interface IPlotWindowService
         DisplayLimits displayLimits,
         bool linkXAxisAcrossPanels,
         bool linkYAxisAcrossPanels,
-        DateTimeOffset? startTimeUtc);
+        DateTimeOffset? startTimeUtc,
+        Action<double>? cursorChanged = null);
 }
