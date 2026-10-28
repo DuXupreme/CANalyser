@@ -2,11 +2,11 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.5.1 (.NET 8 WPF)
+# CANalyser 2.5.2 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.5.1` voegt een compact los Signal Watch-venster toe met **Altijd bovenop**, dezelfde volglijst en cursorwaarden uit gewone en losse grafieken. Formaat en positie worden onthouden. Zie [release notes 2.5.1](RELEASE_NOTES_2.5.1.md) en de [vernieuwingen in 2.5.0](RELEASE_NOTES_2.5.0.md).
+> Versie `2.5.2` corrigeert de vensterfocus van de losse Signal Watch: activeren en verplaatsen brengt het hoofdvenster niet meer voor een losse subplot. Zie [release notes 2.5.2](RELEASE_NOTES_2.5.2.md), [Signal Watch in 2.5.1](RELEASE_NOTES_2.5.1.md) en de [vernieuwingen in 2.5.0](RELEASE_NOTES_2.5.0.md).
 > Versie `2.4.16` verplaatste grafiekvoorbereiding naar de achtergrond, annuleert achterhaalde verzoeken en verbetert cursor- en markerweergave. Exacte weergave blijft beperkt tot het zichtbare tijdvak; verschuiven, zoomen en resetten herstellen automatische downsampling.
 > Versie `2.4.12` herstelt toegang tot beveiligde online logs met een aanmeldvenster. Inloggegevens kunnen optioneel maximaal 30 dagen versleuteld worden onthouden; Afmelden verwijdert ze.
 > Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.

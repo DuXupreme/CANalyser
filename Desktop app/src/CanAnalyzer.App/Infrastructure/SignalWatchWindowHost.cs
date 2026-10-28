@@ -26,7 +26,10 @@ public sealed class SignalWatchWindowHost : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_window is null)
         {
-            _window = new SignalWatchWindow(_viewModel, _options) { Owner = _owner };
+            // Ownership groups the watch with the main window in native z-order:
+            // activating/dragging it can bring main above a detached plot.
+            // Keep lifetime management here, and use main only for initial placement.
+            _window = new SignalWatchWindow(_viewModel, _options, _owner);
             _window.ChooseSignalsRequested += OnChooseSignals;
             _window.Closed += OnWindowClosed;
             _window.Show();

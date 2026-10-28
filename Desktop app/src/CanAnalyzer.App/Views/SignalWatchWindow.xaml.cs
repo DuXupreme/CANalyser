@@ -10,9 +10,10 @@ public partial class SignalWatchWindow : Window
 {
     public static RoutedUICommand OpenCommand { get; } = new("Signal Watch openen", nameof(OpenCommand), typeof(SignalWatchWindow));
     private readonly SignalWatchWindowOptions _options;
+    private readonly Point _initialPosition;
     public event EventHandler? ChooseSignalsRequested;
 
-    public SignalWatchWindow(BusmasterViewModel viewModel, SignalWatchWindowOptions options)
+    public SignalWatchWindow(BusmasterViewModel viewModel, SignalWatchWindowOptions options, Window? placementReference = null)
     {
         InitializeComponent();
         DataContext = viewModel;
@@ -20,6 +21,10 @@ public partial class SignalWatchWindow : Window
         Topmost = options.AlwaysOnTop;
         Width = double.IsFinite(options.Width) && options.Width > 0 ? Math.Clamp(options.Width, MinWidth, 1600) : 640;
         Height = double.IsFinite(options.Height) && options.Height > 0 ? Math.Clamp(options.Height, MinHeight, 1200) : 340;
+        // Copy coordinates only; do not establish WPF/native ownership.
+        _initialPosition = new Point(
+            (placementReference?.Left ?? 0) + Math.Max(0, (placementReference?.ActualWidth ?? Width) - Width - 24),
+            (placementReference?.Top ?? 0) + 100);
         Loaded += OnLoaded;
         Closing += (_, _) => CapturePlacement();
         Closed += (_, _) =>
@@ -31,8 +36,8 @@ public partial class SignalWatchWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        var left = _options.Left ?? ((Owner?.Left ?? 0) + Math.Max(0, (Owner?.ActualWidth ?? Width) - Width - 24));
-        var top = _options.Top ?? ((Owner?.Top ?? 0) + 100);
+        var left = _options.Left ?? _initialPosition.X;
+        var top = _options.Top ?? _initialPosition.Y;
         WindowPlacement.Restore(this, left, top, Width, Height);
     }
 

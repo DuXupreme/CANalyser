@@ -1,10 +1,12 @@
 using System.Collections;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CanAnalyzer.App.Infrastructure;
@@ -22,6 +24,64 @@ public sealed class SignalWatchWindowTests
 {
     private static readonly SignalIdentity Position = new("1", CanFrameFormat.Classic, false, 42, "Actuator Front", "Gemeten positie");
     private static readonly SignalIdentity Soc = new("2", CanFrameFormat.Classic, false, 81, "BMS", "SOC");
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task ActivatingAndMovingWatchKeepsDetachedPlotAboveMain(bool pinned) => PlotRegressionTests.OnDispatcher(async () =>
+    {
+        using var data = Dataset();
+        var vm = ViewModel(data);
+        var main = Owner();
+        var plot = new PlotPanelsWindow([], new(), new(), false, false, null) { ShowActivated = false };
+        using var host = new SignalWatchWindowHost(main, vm, new() { AlwaysOnTop = pinned }, () => main.Activate());
+        try
+        {
+            await vm.WaitForWatchValuesAsync();
+            var watch = host.Show();
+            plot.Show();
+            await Settle();
+            var mainHandle = new WindowInteropHelper(main).Handle;
+            var plotHandle = new WindowInteropHelper(plot).Handle;
+            var watchHandle = new WindowInteropHelper(watch).Handle;
+            Assert.Null(watch.Owner);
+            Assert.DoesNotContain(watch, main.OwnedWindows.Cast<Window>());
+            Assert.NotEqual(mainHandle, GetWindow(watchHandle, 4)); // GW_OWNER (WPF may use a hidden taskbar helper).
+
+            // Establish the two independent chart/main windows in known native
+            // order without relying on permission to steal foreground focus in CI.
+            Assert.True(SetWindowPos(mainHandle, IntPtr.Zero, 0, 0, 0, 0, 0x0013)); // NOSIZE|NOMOVE|NOACTIVATE
+            Assert.True(SetWindowPos(plotHandle, IntPtr.Zero, 0, 0, 0, 0, 0x0013));
+            AssertAbove(plotHandle, mainHandle);
+            for (var repeat = 0; repeat < 3; repeat++)
+            {
+                watch.Activate();
+                watch.Left += 10;
+                watch.Top += 5;
+                await Settle();
+                AssertAbove(plotHandle, mainHandle);
+            }
+            watch.Close();
+            await Settle();
+            AssertAbove(plotHandle, mainHandle);
+        }
+        finally { host.Dispose(); plot.Close(); main.Close(); await vm.CancelAndWaitAsync(); vm.ClearDataset(); }
+    });
+
+    private static void AssertAbove(IntPtr upper, IntPtr lower)
+    {
+        // Enumerate only z-order; no external window is changed.
+        var seen = new HashSet<IntPtr>();
+        for (var cursor = upper; cursor != IntPtr.Zero && seen.Add(cursor); cursor = GetWindow(cursor, 2)) // GW_HWNDNEXT
+            if (cursor == lower) return;
+        Assert.Fail("Activating/moving Signal Watch raised main above the detached plot.");
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
 
     [Fact]
     public Task HostReusesWindowAndLiveRowsAndBindsPinAndChooseSignals() => PlotRegressionTests.OnDispatcher(async () =>
