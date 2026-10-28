@@ -100,6 +100,40 @@ public sealed class SignalWatchTests
         finally { oldStore.Release.Set(); await vm.CancelAndWaitAsync(); oldStore.Release.Dispose(); }
     }
 
+    [Fact]
+    public async Task RetirementDetachesRowsImmediatelyButWaitsForTheActiveReaderBeforeDisposal()
+    {
+        var store = new BlockingLookup(Sample(0, 0, A, 1));
+        using var dataset = Dataset(store);
+        var vm = new BusmasterViewModel(new DisplayLimits());
+        vm.ApplySignalWatchOptions(new() { Signals = [A], LatestValues = true, OnlyWatched = true });
+        vm.LoadDataset(dataset);
+        try
+        {
+            await store.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            vm.ClearDataset();
+            dataset.Dispose();
+            Assert.Empty(vm.Messages);
+            Assert.Empty(vm.SignalWatchRows);
+            Assert.Null(vm.SelectedMessage);
+            Assert.False(store.Disposed);
+
+            var drained = vm.CancelAndWaitAsync();
+            Assert.False(drained.IsCompleted);
+            store.Release.Set();
+            await drained.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(store.Disposed);
+            Assert.Empty(vm.SignalWatchRows); // The retired result must not reappear.
+            Assert.Throws<ObjectDisposedException>(() => dataset.AcquireReadLease());
+        }
+        finally
+        {
+            store.Release.Set();
+            await vm.CancelAndWaitAsync();
+            store.Release.Dispose();
+        }
+    }
+
     private sealed class BlockingLookup(DecodedSignalSample sample) : IReadOnlyList<DecodedSignalSample>, ISignalSampleLookup, IFrameSampleLookup, IDisposable
     {
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

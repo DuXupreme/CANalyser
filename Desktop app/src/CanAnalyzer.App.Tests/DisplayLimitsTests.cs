@@ -134,7 +134,7 @@ public sealed class DisplayLimitsTests
     }
 
     [Fact]
-    public void RowLimit_AfterRetiringDiskBackedDataset_KeepsTablesEmptyAndCanLoadReplacement()
+    public async Task RowLimit_AfterRetiringDiskBackedDataset_KeepsTablesEmptyAndCanLoadReplacement()
     {
         var limits = new DisplayLimits { RawRowsPerPage = 2 };
         var raw = new RawFramesViewModel(new RawFrameFilterService(), limits);
@@ -158,6 +158,9 @@ public sealed class DisplayLimitsTests
 
         // Retire the previous log before an import that may fail or be cancelled.
         raw.ClearDataset(); bus.ClearDataset(); dataset.Dispose();
+        // Selecting a message can start a Signal Watch reader. Retirement detaches
+        // the tables immediately, but storage remains alive until that lease ends.
+        await bus.CancelAndWaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Throws<ObjectDisposedException>(() => { _ = store[0]; });
         Assert.Empty(raw.FilteredFrames); Assert.Empty(bus.Messages);
         Assert.Null(bus.SelectedMessage); Assert.Empty(bus.SelectedSignals);
@@ -185,5 +188,6 @@ public sealed class DisplayLimitsTests
         Assert.Equal(2u, Assert.Single(raw.FilteredFrames).Source.Id);
         Assert.Equal(2u, Assert.Single(bus.Messages).Source.Id);
         Assert.Equal(3, raw.MaxRows); Assert.Equal(3, bus.MaxRows);
+        await bus.CancelAndWaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
     }
 }
