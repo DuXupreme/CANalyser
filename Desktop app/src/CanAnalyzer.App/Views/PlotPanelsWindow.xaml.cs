@@ -39,6 +39,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
     private bool _restoringView;
     private bool _isClosed;
     private bool _isBusy;
+    private bool _useDownsampling = true;
     private string _plotStatus = string.Empty;
     private PlotPanelModel? _activeCursorPanel;
 
@@ -55,6 +56,7 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         Panels.CollectionChanged += (_, _) => history.Clear();
         _subplotHeight = Math.Clamp(renderedOptions.SubplotHeight, 160, 1300);
         _displayLimits = displayLimits;
+        _useDownsampling = renderedOptions.UseDownsampling;
         _visualBuilds = new(
             (request, cancellation) => Task.Run(() => BuildVisualSeries(request, cancellation), cancellation),
             PublishVisualSeries,
@@ -119,12 +121,25 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
 
     public bool UseDownsampling
     {
-        get => _displayLimits.UseDownsampling;
-        set => _displayLimits.UseDownsampling = value;
+        get => _useDownsampling;
+        set
+        {
+            if (!SetField(ref _useDownsampling, value)) return;
+            OnPropertyChanged(nameof(SamplingStatus));
+            OnDisplayLimitsChanged(this, new PropertyChangedEventArgs(nameof(DisplayLimits.UseDownsampling)));
+        }
     }
+
+    public string SamplingStatus => UseDownsampling ? "Overzicht: weergave aangepast aan het zichtbare tijdvak."
+        : "Exact detail in dit venster; navigeren herstelt overzicht.";
 
     private void OnDisplayLimitsChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (ReferenceEquals(sender, _displayLimits) && e.PropertyName == nameof(DisplayLimits.UseDownsampling))
+        {
+            _useDownsampling = _displayLimits.UseDownsampling;
+            OnPropertyChanged(nameof(SamplingStatus));
+        }
         if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
             OnPropertyChanged(e.PropertyName);
@@ -289,6 +304,8 @@ public partial class PlotPanelsWindow : Window, INotifyPropertyChanged
         _lastCursorUpdateUtc = now;
         SetCursorAt(time, panel);
     }
+
+    private void OnShowAllPointsInViewportClick(object sender, RoutedEventArgs e) => UseDownsampling = false;
 
     private void OnPlotPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {

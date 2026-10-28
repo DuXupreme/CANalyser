@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Windows;
+using CanAnalyzer.App.Infrastructure;
 using CanAnalyzer.App.ViewModels;
+using CanAnalyzer.App.Views;
 
 namespace CanAnalyzer.App;
 
@@ -14,6 +16,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = _viewModel;
+        AddHandler(TimePlotView.CursorMovedEvent, new EventHandler<TimePlotCursorEventArgs>((_, args) =>
+            _viewModel.Busmaster.SetWatchCursorAt(args.TimeSeconds)));
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -21,10 +25,8 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        Width = Math.Max(1000, _viewModel.LoadedSettings.WindowWidth);
-        Height = Math.Max(700, _viewModel.LoadedSettings.WindowHeight);
-        Left = _viewModel.LoadedSettings.WindowLeft;
-        Top = _viewModel.LoadedSettings.WindowTop;
+        var settings = _viewModel.LoadedSettings;
+        WindowPlacement.Restore(this, settings.WindowLeft, settings.WindowTop, settings.WindowWidth, settings.WindowHeight);
 
         if (_viewModel.LoadedSettings.WindowMaximized)
         {

@@ -1,0 +1,414 @@
+Onderzoek grafiekinteractie en vastlopers in CANalyser 2.4.13
+13 oktober 2026 — broncode, gerichte WPF-tests en synthetische metingen
+
+De grootste aantoonbare problemen zitten in hoeveel werk een muisbeweging op de
+UI-thread veroorzaakt. Er is geen onderbouwing om hiervoor het programma in een
+andere taal te herschrijven. De huidige OxyPlot-WPF-renderer kan wel de volgende
+grens vormen nadat onnodig werk is verwijderd. Een andere renderer binnen C# is
+daarom een betere eerste vergelijking dan een volledige platformmigratie.
+
+Meerdere concrete problemen zijn in deze werkmap gerepareerd. De specifieke
+vastloper bij de collega is niet gereproduceerd; er is geen procesdump of trace
+van dat incident beschikbaar. Deze reparaties bewijzen dus niet dat die ene
+oorzaak is gevonden. Ze verminderen bekende blokkades en zorgen dat een volgende
+langdurige UI-blokkade wel apart wordt vastgelegd.
+
+Dit is lokaal ontwikkelwerk op basis van commit 8a481f3, release 2.4.13. Er is geen
+nieuwe versie gepubliceerd en de telemetry-Worker is niet uitgerold. De collega
+die 2.4.13 gebruikt, heeft deze wijzigingen nog niet.
+
+1. Wat gebeurt er tijdens slepen en zoomen?
+
+De applicatie gebruikt C#/.NET 8, WPF en OxyPlot.Wpf/Core 2.1.2. Het belangrijkste
+pad is: muisinvoer -> aswijziging -> synchronisatie van gekoppelde assen ->
+modelupdate -> selectie van zichtbare punten -> WPF-geometrie en tekst -> layout.
+
+In OxyPlot 2.1.2 doet InvalidatePlot op de UI-thread meteen een modelupdate en
+render. De methode met de naam BeginInvoke voert daar de actie direct uit als
+de aanroeper de Dispatcher al bezit. Een aanroep is dus geen goedkope afspraak
+om later een keer te tekenen. Dit is gecontroleerd in de gebruikte bronversie:
+https://raw.githubusercontent.com/oxyplot/oxyplot/v2.1.2/Source/OxyPlot.Wpf.Shared/PlotViewBase.cs
+
+Onze XAxisSyncService tekende gekoppelde grafieken opnieuw bij iedere aswijziging.
+Een pan waarbij zowel X als Y wijzigt, kan bij P gekoppelde grafieken daardoor
+2(P-1)+1 tekenaanroepen veroorzaken: bij acht grafieken vijftien. Alleen X
+wijzigen heeft een gunstiger pad. Dit getal volgt uit de aanroepketen; het is
+geen gemeten framerate of algemene bovengrens voor alle soorten interactie.
+
+Verder gevonden in onze code:
+- ViewportSampling selecteert tijdens navigatie de zichtbare punten synchroon
+  op de UI-thread. De brondata staat dan normaal al in het geheugen.
+- Voor iedere update worden overzichtspunten teruggezet voor correcte volledige
+  asgrenzen, waarna de zichtbare punten weer worden ingevuld. Dit kopieerwerk is
+  nog niet geheel weggenomen.
+- Iedere lijnsectie controleerde alle meetgaten met Gaps.Any. Veel punten plus
+  veel gaten gaf daardoor een product van beide aantallen aan vergelijkingen.
+- Verborgen signalen werden ook opnieuw gesampled.
+- Grafieken buiten het scrollvenster werden eveneens geïnvalideerd en getekend.
+  Het ItemsControl maakt alle grafieken aan; er is geen volledige virtualisatie.
+- Rechthoekzoom deed eerst de standaardzoom en daarna onze eigen zoom. Dat gaf
+  extra werk en tijdelijk een tussenbereik.
+- De bestaande tekstcache helpt bij labels, maar bewaart geen volledige lijn-
+  geometrie. OxyPlot WPF bouwt Canvas-inhoud opnieuw op.
+- De meetcursor heeft afzonderlijke limieten van 60 ms in het hoofdvenster en
+  70 ms in losse vensters. Dat komt overeen met ongeveer 17 en 14 updates per
+  seconde. Tijdens een ingedrukte muisknop wordt dit cursorpad overgeslagen;
+  het verklaart dus niet alle haperingen tijdens slepen.
+
+Belangrijke bronbestanden in src/CanAnalyzer.App:
+Services/XAxisSyncService.cs, Services/ViewportSampling.cs,
+Services/PlotSeriesRenderer.cs, Services/ReverseZoomRectangleManipulator.cs,
+Views/CachedPlotView.cs, ViewModels/AnalysisViewModel.cs.
+
+2. Hoe is het werk over threads verdeeld?
+
+Onderdeel                  Plaats / relevante beperking
+Muis, assen, binding,       WPF UI-thread. Deze moet tussen werkstukken terugkeren
+WPF-geometrie en layout     naar de Dispatcher om invoer te kunnen afhandelen.
+WPF-presentatie            Eigen WPF-renderthread; dit verplaatst onze sampling,
+                           OxyPlot-modelupdates en Canvas-opbouw niet automatisch.
+Import en decoderen        Achtergrondtaken; niet opnieuw nodig bij normaal
+                           slepen in reeds geladen data.
+Volledige plotopbouw       LatestWorkQueue met Task.Run, maximaal één actief werk
+                           en een meest recente wachtende opdracht per queue.
+                           Annuleren onderbreekt niet iedere interne bouwlus.
+Viewportselectie bij pan   Nog synchroon tijdens de modelupdate op de UI-thread.
+Losse grafiekvensters      Hebben eigen opbouwqueues, maar delen de UI-Dispatcher.
+Nieuwe vastloopdetectie    Eén eigen achtergrondthread met maximaal één wachtende
+                           heartbeat in de UI-Dispatcher.
+Telemetry-netwerk          Asynchrone achtergrondverzending met tijdslimieten.
+
+Meer Task.Run-aanroepen rond bestaande gedeelde PlotModels zijn geen correcte
+oplossing: WPF-objecten hebben threadgebonden toegang en bron-/rendergegevens
+moeten consistent blijven. De passende volgende stap is een onveranderlijke
+snapshot van bereik en data op een worker laten verwerken, verouderde resultaten
+weggooien en alleen het nieuwste resultaat kort op de UI-thread publiceren.
+Er moet een bovengrens blijven op het aantal gelijktijdige opdrachten.
+
+Microsofts uitleg van WPF-threading en hardwareversnelling:
+https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/threading-model
+https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/optimizing-performance-taking-advantage-of-hardware
+
+3. Welke reparaties zijn nu uitgevoerd?
+
+- Een gedeelde tekenwachtrij per UI-Dispatcher voegt herhaalde aanvragen voor
+  dezelfde grafiek samen. updateData=true blijft behouden als een van de
+  samengevoegde aanvragen dat nodig heeft.
+- De wachtrij werkt op lagere prioriteit dan invoer, met een interval rond 16 ms
+  en ongeveer 8 ms werk per ronde. Na een dure grafiek krijgen invoer en andere
+  Dispatcher-taken weer gelegenheid. Dit is geen harde deadline: één render
+  kan nog steeds langer duren en kan niet tussentijds worden afgebroken.
+- Niet-zichtbare, geminimaliseerde en buiten het scrollvenster gelegen grafieken
+  wachten met dit tekenpad. Bij terugkomen wordt het meest recente bereik
+  getekend. De OxyPlot-paden voor initiële modelkoppeling en layout kunnen nog
+  zelfstandig synchroon tekenen.
+- Verborgen signalen worden tijdens normale viewportupdates niet gesampled.
+  Opnieuw tonen ververst ook als het asbereik ondertussen gelijk bleef.
+- Meetgaten krijgen een herbruikbare zoekindex. Een lijnsectie zoekt daarmee
+  logaritmisch in plaats van iedere keer alle gaten door te lopen. Bij data
+  zonder gaten wordt direct een puntenarray gevuld, zonder extra lijstkopie.
+- Rechthoekzoom past alleen het uiteindelijke bereik toe.
+- Uitgesteld tekenen maakte een extra correctie noodzakelijk: astransformaties
+  moeten direct bij een aswijziging worden bijgewerkt. Anders verschuift bij
+  opeenvolgende wiel-events het zoomanker. Dit is gerepareerd en vergeleken met
+  gewone OxyPlot-assen die na ieder event direct tekenen.
+
+De nieuwe scheduler staat in Views/PlotRenderScheduler.cs, de transformatie-
+correctie in Models/ViewportAxis.cs. Er is niet overgestapt op een andere
+grafiekbibliotheek of programmeertaal.
+
+4. Waarom was de vastloper niet zichtbaar in telemetry?
+
+De bestaande detectie reageerde op exceptions en onjuist afsluiten. Een proces
+kan nog bestaan terwijl de UI-thread geen berichten meer afhandelt, zonder een
+exception te gooien. Een onverwachte afsluiting kon pas bij een volgende start
+worden verstuurd; de bestaande timestamp daarvoor is de oude sessiestart, niet
+het tijdstip waarop de UI vastliep. Gewoon pan/renderwerk had geen eigen marker.
+
+De nieuwe DispatcherWatchdog bewaakt vanaf het tonen van het hoofdvenster of
+de UI reageert. Na de opstartmarge van 30 seconden wordt een blokkade vanaf
+15 seconden als app_ui_unresponsive geregistreerd. Herstel geeft een afzonderlijk
+app_ui_responsive_again-event. Slaap/ontwaken, grote observatiegaten en een actieve
+debugger worden onderdrukt; er zijn maximaal acht incidenten per sessie.
+
+De detectie draait buiten de UI-thread. Een gebeurtenis wordt eerst duurzaam
+lokaal opgeslagen, zodat geforceerd afsluiten na registratie niet automatisch
+het bewijs weggooit. Verzendfouten bewaren het bestand voor een volgende poging
+of start. De wachtrij is begrensd op 32 events en accepteert maximaal 16 KiB per
+payload. Volle/corrupte wachtrijen en gelijktijdige lezers/schrijvers zijn getest.
+
+Bij ingeschakelde telemetry bevat een event onder meer de gemeten blokkadeduur,
+geheugengebruik en eventueel de actieve stap: plot_render, viewport_sampling of
+plot_model_publish. Het bevat geen CAN-meetwaarden, bestandspaden, stacktrace of
+procesdump. Dit lokaliseert een deel van het werk, maar is geen volledige
+deadlockanalyse en herstelt de UI niet automatisch. Een proces dat eerder wordt
+beëindigd, tijdens de opstartmarge hangt of de hele machine blokkeert, kan nog
+steeds zonder dit event eindigen.
+
+De telemetry-Worker accepteert alleen bekende eventnamen. Daarom zijn ook de
+eventcatalogus, foutfiltering en dashboardweergave aangepast. Bij uitrol moet de
+Worker deze namen eerst accepteren, daarna volgt de nieuwe desktopversie.
+Zonder die serverupdate kan het nieuwe desktopprogramma de events lokaal
+bewaren, maar verschijnt er nog geen correcte nieuwe melding in het dashboard.
+
+Tijdens de eerste beoordeling konden de actuele events niet worden ingezien:
+de browsersessie was niet ingelogd en de beschikbare Cloudflare-aanmelding was
+toen niet vernieuwd. Op 15 oktober is die bestaande aanmelding met Wrangler wel
+succesvol vernieuwd en zijn de gebeurtenissen gelezen. De nieuwe bevindingen
+staan in de aanvulling onderaan. De eerdere afwezigheid van zichtbare gegevens
+was geen bewijs dat het incident zonder telemetry was gebleven.
+
+5. Is OxyPlot de beste keuze, en wat zijn de alternatieven?
+
+Voor dit programma is geen eerlijke praktijkvergelijking uitgevoerd met andere
+engines. Er kan dus geen winnaar op basis van gemeten CANalyser-prestaties worden
+aangewezen. Onderstaande selectie is gebaseerd op primaire documentatie en
+broncode, niet op het overnemen van marketingbenchmarks.
+
+OxyPlot WPF behouden
+  Kleinste risico voor bestaande assen, selectie, export en bediening. De
+  huidige versie is 2.1.2; de onderzochte stabiele upstreamversie is 2.2.0.
+  Een versie-upgrade alleen verhelpt onze dubbele tekenaanroepen niet. Bestaande
+  lifecycle-events worden door onze sampling gebruikt, dus een upgrade vraagt
+  gerichte compatibiliteitscontrole. Licentie: MIT.
+  https://github.com/oxyplot/oxyplot/releases
+
+OxyPlot.SkiaSharp.Wpf
+  Interessante eerste proef omdat veel modellen/assen kunnen blijven. De
+  onderzochte OxySKElement-implementatie rendert via een raster-SKSurface naar
+  een WriteableBitmap. Dit is geen automatische overstap naar GPU-rendering.
+  Mogelijk minder WPF-geometrieobjecten; winst moet worden gemeten. Licentie: MIT.
+  https://raw.githubusercontent.com/oxyplot/oxyplot/v2.2.0/Source/OxyPlot.SkiaSharp.Wpf/OxySKElement.cs
+
+ScottPlot 5.1
+  Belangrijke open-source kandidaat voor veel tijdreekspunten. SignalXY past bij
+  oplopende maar ongelijk verdeelde tijdstippen; Signal veronderstelt regelmatige
+  intervallen. WpfPlotGL is een expliciete OpenGL-control, naast de gewone
+  WpfPlot. Askoppeling is beschikbaar. Migratie van bediening, cursors, historie,
+  export en uitzonderlijke timestamps blijft nodig. Meetgaten, dubbele/onordelijke
+  tijdstippen en staplijnen moeten inhoudelijk worden vergeleken. Licentie: MIT.
+  https://scottplot.net/cookbook/5/SignalXY/
+  https://raw.githubusercontent.com/ScottPlot/ScottPlot/main/src/ScottPlot5/ScottPlot5%20Controls/ScottPlot.WPF/WpfPlotGL.cs
+  https://www.scottplot.net/faq/shared-axes/
+  https://scottplot.net/faq/async/
+
+SciChart WPF
+  Belangrijke commerciële kandidaat: DirectX-rendering, native resampling en
+  ondersteuning voor gekoppelde grafieken, bruikbaar vanuit C#/WPF. Een andere
+  taal voor de applicatie is daarvoor niet nodig. Hardware, drivers, Remote
+  Desktop en fallback moeten op doelcomputers worden beproefd. Licentiekosten en
+  migratiewerk afwegen tegen de gemeten winst; leveranciersclaims zijn geen
+  CANalyser-benchmark.
+  https://www.scichart.com/documentation/win/current/Rendering%20Performance%20Tips.html
+  https://www.scichart.com/documentation/win/current/The%20Extreme%20Resamplers%20API.html
+  https://www.scichart.com/documentation/win/current/Synchronizing%20Multiple%20Charts.html
+  https://www.scichart.com/licensing-scichart-wpf/
+
+LiveCharts2
+  Skia-gebaseerd, met animatie/visuele mogelijkheden en GPU-opties. De basis is
+  MIT, met aanvullende commerciële uitbreidingen. Waardevolle kandidaat bij
+  een breder UI-redesign, maar op grond van dit onderzoek geen eerste keuze
+  boven ScottPlot/SciChart voor de specifieke grote CAN-tijdreeksen.
+  https://livecharts.dev/docs/wpf/2.0.0/overview.installation
+  https://github.com/Live-Charts/LiveCharts2/releases
+
+LightningChart .NET
+  Tweede commerciële DirectX-kandidaat. Vergelijk dezelfde signalen en volledige
+  bediening, en neem licentie- en integratiekosten mee.
+  https://lightningchart.com/net-charts/docs/beginners%20guide/chart-render-options/
+  https://lightningchart.com/net-charts/pricing/
+
+C++/Qt, Rust of webtechnologie
+  Deze routes veranderen veel meer dan alleen de renderer. C++/Qt kan een
+  GPU-scenegraph gebruiken, maar daarvoor moet een aanzienlijk deel van de UI
+  en integratie opnieuw worden gebouwd. Qt Charts is vanaf Qt 6.10 deprecated;
+  Qt Graphs is de relevante nieuwere route met eigen licentievoorwaarden.
+  https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html
+  https://doc.qt.io/qt-6/qtcharts-index.html
+  https://doc.qt.io/qt-6/qtgraphs-index.html
+
+  Rust/egui_plot neemt dubbel werk of onbeperkte tekenbelasting niet vanzelf weg.
+  WebView2 met Canvas/WebGL kan werken, maar voegt een UI-/databrug en migratie toe.
+  uPlot is bijvoorbeeld een Canvas-bibliotheek; de README noemt ook ontbrekende
+  ingebouwde functies zoals drag-panning en data-aggregatie. Oude demoresultaten
+  zijn geen bewijs voor deze applicatie.
+  https://github.com/emilk/egui_plot
+  https://raw.githubusercontent.com/leeoniya/uPlot/master/README.md
+
+Mijn voorkeur: C# behouden, eerst het huidige werk begrenzen en meten, vervolgens
+een kleine OxyPlot-Skia-proef en een gelijke vergelijking van ScottPlot en
+SciChart. Alleen een bewezen CPU-hotspot die daarna resteert rechtvaardigt
+eventueel een afzonderlijke native component. Geen volledige taalwissel op
+basis van het huidige bewijs.
+
+6. Wat is daadwerkelijk gemeten en getest?
+
+De synthetische harness gebruikt de echte projectcode met een miljoen samples
+per signaal, 1/4/8 panelen, maximaal vier signalen per paneel, 1200x280 DIP,
+een schuivend venster van 100 s over 1000 s data en een overzichtslimiet van
+5000 punten. Per scenario zijn er 15 opwarmrondes en 60 meetrondes. De proeven
+bevatten geen echte bedrijfsdata.
+
+Er zijn aparte metingen voor modelupdates en voor modelupdate plus het bouwen
+en meten/plaatsen van WPF-Canvas-inhoud. Dit gebruikt geen echte PlotView,
+muis-events, gekoppelde vensters, scheduler, DWM-presentatie of beeldscherm-
+framerate. Het meet dus niet het effect van minder volledige redraws per
+muisevent. Ook aantallen pixels of volledige GPU-framekosten worden niet gemeten.
+
+Enkele resultaten van modelupdates (voor -> na):
+- Vier panelen x vier signalen, geen gaten: 765.632 -> 531.232 gealloceerde
+  bytes per ronde, ongeveer 31% minder tijdelijke allocatie.
+- Acht panelen x vier signalen, geen gaten: 1.531.264 -> 1.062.464 bytes.
+- Vier panelen x vier verborgen signalen: 758.240 -> 4.416 bytes.
+- De kunstmatige stresstest met 1000 meetgaten ging in deze runs van ongeveer
+  304 naar 11 ms mediane modelupdatetijd. Dit is geen algemene snelheidsfactor
+  voor slepen: het benadrukt specifiek de vervangen herhaalde gatenscan.
+
+De tijdmetingen varieerden sterk. Bij vier panelen zonder gaten was de mediane
+update-plus-Canvas-tijd 61 -> 75 ms; bij acht panelen 43 -> 153 ms. Deze resultaten
+zijn dus niet allemaal gunstiger. Ze onderbouwen geen algemene FPS-winst en mogen
+niet als bewijs voor soepel 60 Hz worden gebruikt. WPF-geometrie/layout blijft
+zichtbaar duur. Een onafhankelijke review vond concrete meetbeperkingen: vaste
+scenariovolgorde, gedeelde proces-/WPF-toestand, korte warmup en geen Dispatcher-
+pump. Het gapscenario heeft bovendien synthetische gapmetadata terwijl de bron
+zelf op alle tijdstippen samples bevat. Het is een algoritmestresstest.
+
+Daarom is aanvullend één scenario in verse processen A-B-B-A gemeten, zonder
+gelijktijdige builds of tests: acht panelen x vier signalen, geen gaten, steeds
+50 vaste opwarmrondes en 40 meetrondes, identieke harness/runtime-instellingen.
+A is de oorspronkelijke binary, B de aangepaste. De mediane componenttijden:
+  A1: 129,97 ms    B1: 141,92 ms    B2: 135,08 ms    A2: 134,57 ms.
+De process-CPU/walltijdverhouding lag op ongeveer 0,99-1,01. Totale tijdelijke
+allocatie per ronde was ongeveer 6,28 MB bij A en 5,81 MB bij B. Alle panelen
+hadden dezelfde punten-/Canvas-aantallen. Dit reproduceert de eerder schijnbaar
+zeer grote vertraging niet, maar bewijst evenmin snellere geometrieopbouw. De
+nieuwe code is in deze componentmeting vergelijkbaar tot iets trager; het
+belangrijkste voordeel van minder renders per muisevent zit buiten deze harness.
+
+Voor bruikbare gebruikersmetingen blijft een echte interactieve trace nodig.
+De allocatieverschillen en de gerichte regressietests leveren hier sterker
+bewijs dan een algemene snelheidsclaim uit losse wandkloktijden.
+
+Op deze machine: Intel Core i7-10510U, acht logische processors, .NET 8.0.17.
+De vergeleken binaries, bron van de harness en volledige JSON-resultaten staan in
+Desktop app/artifacts/graph-research-20261013/ (lokaal, genegeerd door Git):
+Program.cs, comparison-binary-hashes.json, results-baseline-optimized.json,
+results-after-optimized.json. Beide gemeten builds houden de versie 2.4.13.0;
+de hashes onderscheiden de oorspronkelijke en aangepaste code.
+De seriële herhaling staat in abba/Program.cs en abba/Run-Abba.ps1, met ruwe
+iteraties, instellingen, CPU/walltijden en assemblyhashes in
+abba/results-20261013-120254/A1.json, B1.json, B2.json en A2.json.
+
+Geautomatiseerde validatie:
+- Volledige gewone .NET-suite: 238 coretests en 118 WPF/apptests geslaagd.
+  Alleen de expliciete Category=Benchmark-importtests zijn uit deze run gefilterd.
+- Daarna drie extra lifecycle-/wachtrijtests toegevoegd. Alle zeven scheduler-
+  tests slaagden in de gerichte herhaling; totaal 359 verschillende .NET-tests.
+- Zes telemetry-Worker/dashboardtests geslaagd.
+- Gerichte WPF-tests bewijzen onder meer samenvoegen van 100 aanvragen,
+  gekoppelde X/Y-updates, uitstellen buiten het scrollvenster, invoer tussen
+  dure grafieken, stabiel wiel-/pananker en juiste rechthoekzoom. Ook unload/
+  reload, modelvervanging met wachtend werk en eerlijk herinvoegen zijn getest.
+- De watchdog is ook getest tegen een echt geblokkeerde test-Dispatcher,
+  inclusief herstel, beëindigen zonder UI-wacht en duurzaam opslaan.
+- git diff --check geeft geen whitespacefouten.
+
+Deze tests vervangen geen praktijktest op de computer van de collega en bewijzen
+niet dat zijn specifieke vastloper is opgelost.
+
+7. Wat levert een volgende optimalisatieronde het meeste op?
+
+Eerst een echte pan-/zoomtrace op een representatieve grote geladen dataset.
+Meet input-tot-beeldvertraging, p95/p99 frametijden, UI-thread CPU, tijdelijke
+allocaties/GC en aantallen renders per invoeractie. Houd schermresolutie, DPI,
+aantal zichtbare grafieken, accu/netvoeding en Remote Desktop gelijk. Voor
+60 Hz is er 16,7 ms voor het volledige frame, niet per afzonderlijke grafiek.
+
+Daarna de volgende opties in deze volgorde beoordelen:
+1) Zichtbare punten op een begrensde worker laten voorbereiden; alleen het
+   nieuwste resultaat publiceren. In lange bouwlussen annulering toevoegen.
+2) Puntenbuffers hergebruiken en overzicht/zichtbare data niet telkens volledig
+   heen en weer kopiëren. Volledige asgrenzen afzonderlijk behouden.
+3) Een kleine marge buiten het zichtbare bereik en stabiele databuckets gebruiken,
+   zodat kleine panstappen niet steeds een nieuwe selectie vergen of de lijn
+   visueel laten verspringen. Pieken en meetgaten moeten behouden blijven.
+4) De cursorlijn en eenvoudige markeringen in een aparte overlay tekenen. Dan
+   hoeft een cursorbeweging niet alle lijnen/assen opnieuw te renderen; labels
+   kunnen eventueel minder vaak vernieuwen dan de lijn zelf.
+5) Bij blijvend hoge renderkosten de engineproeven uitvoeren. Gebruik dezelfde
+   1/4/8 grafieken, onregelmatige/gelijke/ongeldige tijdstippen, pieken, gaten,
+   staplijnen, twee Y-assen, gekoppelde navigatie, cursorwaarden, zoomhistorie
+   en export. Controleer ook hoge DPI, meerdere schermen en Remote Desktop.
+
+Voor een terugkerende harde vastloper is een procesdump of threadtrace tijdens
+het incident nodig om een specifieke deadlock of oneindige bewerking aan te
+wijzen. De nieuwe gebeurtenis en actieve stap helpen bepalen waar te zoeken.
+Een dump is niet automatisch verzameld of verstuurd.
+
+Relevante officiële profilerinformatie:
+https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace
+https://learn.microsoft.com/en-us/visualstudio/profiling/application-timeline?view=visualstudio
+
+8. Aanvulling 15 oktober: daadwerkelijke telemetry opnieuw beoordeeld
+
+De bestaande telemetry is uitsluitend read-only onderzocht. Voor versie 2.4.13
+zijn bij één installatie twee analytics_recompute_failed-gebeurtenissen gevonden
+met analysis_stage=Latency en exception_type=ArgumentException, plus een
+app_unexpected_exit met reason=unclean_shutdown. Installatie- en eventidentiteiten
+en exacte gebruikstijden zijn uit deze openbare samenvatting weggelaten.
+
+De marker van onverwacht afsluiten verwijst naar de eerdere sessie. De
+timestamp_utc van die marker is de sessiestart, niet het tijdstip waarop het
+programma vastliep of werd beëindigd. De marker is bij de volgende start verstuurd.
+
+De eerste Latency-fout volgt kort na succesvol laden. Daarna volgen in dezelfde
+sessie nog grafiekgroepwijzigingen en het openen van een los grafiekvenster.
+Na de tweede Latency-fout zijn nog BUSMASTER-filteracties geregistreerd.
+Die volgorde ondersteunt niet dat de Latency-fout onmiddellijk de hele UI
+permanent blokkeerde; een later vastlopen wordt daarmee niet uitgesloten.
+
+Bij de tweede laadpoging bestaat vrijwel de gehele gemelde duur uit
+confirmation_duration_ms. Die duur is dus hoofdzakelijk wachten op een
+bevestiging, geen bewijs voor langdurig rekenwerk of een geblokkeerde UI-thread.
+
+De melding had dus wél meegenomen moeten worden als afzonderlijke aanwijzing.
+De eerder gewijzigde grafiekcode repareert deze Latency-fout niet: de relevante
+JoystickAnalyticsViewModel en JoystickAnalyticsService waren niet aangepast.
+
+Broncontrole van versie 2.4.13:
+- De eigenschap analysis_stage=Latency wordt vastgelegd door de catch in
+  RunAnalysisSafelyAsync. Deze vangt ArgumentException op, toont de uitleg bij
+  'Niet berekend', wist de oude resultaten en vervangt de twee Latency-grafieken
+  door lege modellen. Daarna gaat de analysepipeline verder; IsBusy wordt in
+  finally teruggezet. Dit is een opgevangen deelanalysefout.
+- Mogelijke expliciete afwijzingen zijn een meetgat in de gekozen periode of
+  niet-eindige waarden / niet strikt oplopende tijden. Ook het gekozen tijdvenster
+  moet geldig zijn. Het opgeslagen type alleen onderscheidt deze oorzaken niet.
+- Telemetry bevat geen exceptionbericht of stacktrace. Daarom is niet bewezen
+  welke invoervoorwaarde of andere ArgumentException precies optrad. Het zou
+  onjuist zijn de gegevensvalidatie te versoepelen of één hypothese als de
+  bewezen oorzaak van de volledige vastloper te presenteren.
+
+Voorafgaand aan de upgrade staat bovendien een afzonderlijke
+update_apply_failed met AcquireLockFailedException, source=manual, op versie
+2.4.11. Rond die tijd waren zowel een automatische als een handmatige updatecheck
+actief. Vervolgens startte 2.4.13 wel. Dit is een aparte foutmelding; de telemetry
+bewijst niet welke concurrerende updatebewerking de lock bezat.
+
+Conclusie van deze aanvulling: er was wel bestaande telemetry. De concrete
+Latency-fout en onverwachte afsluiting waren nog niet in de eerste beoordeling
+betrokken. Ze geven nieuwe richting, maar leveren nog geen bewezen oorzaak van
+de later gemelde volledige UI-blokkade. De ontbrekende specifieke hangdetectie
+en de eerder aangetoonde grafiekknelpunten blijven aparte bevindingen.
+
+Vier aanvullende WPF-regressietests zijn op 15 oktober geslaagd. Ze bootsen een
+meetgat, dubbele tijd, teruglopende tijd en een niet-eindige waarde na met de
+echte viewmodel/service. In alle vier gevallen verschijnt exact de gevonden
+Latency/ArgumentException-telemetry, wordt de volgende CAN-analyse uitgevoerd,
+verdwijnt IsBusy, reageert de Dispatcher en slaagt een volgende geldige analyse.
+Dit bewijst afhandeling voor deze synthetische gevallen; het identificeert de
+onbekende invoer of volledige vastloper van de collega niet.
+Tests: src/CanAnalyzer.App.Tests/LatencyTelemetryRegressionTests.cs.
+Resultaat: artifacts/telemetry-check-20261015/test-results/
+telemetry-latency-review_net8.0_20261015094108.trx (4 geslaagd, 0 mislukt).
+Tijdens deze herbeoordeling is geen productiecode gewijzigd of release uitgerold.

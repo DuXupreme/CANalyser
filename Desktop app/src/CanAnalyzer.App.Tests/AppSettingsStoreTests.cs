@@ -13,6 +13,41 @@ public sealed class AppSettingsStoreTests : IDisposable
     private AppSettingsStore CreateStore() => new(Path.Combine(_directory, "settings.json"));
 
     [Fact]
+    public async Task ConcurrentSavesCannotPublishAnOlderProfileAfterTheNewerProfile()
+    {
+        var path = Path.Combine(_directory, "settings.json");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var newerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        AppSettingsStore WithWriter(Func<string, string, CancellationToken, Task> writer) =>
+            (AppSettingsStore)Activator.CreateInstance(typeof(AppSettingsStore),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                binder: null, args: [path, writer], culture: null)!;
+        var older = WithWriter(async (file, json, token) =>
+        {
+            entered.SetResult();
+            await release.Task.WaitAsync(token);
+            await File.WriteAllTextAsync(file, json, token);
+        });
+        var newer = WithWriter(async (file, json, token) =>
+        {
+            newerEntered.SetResult();
+            await File.WriteAllTextAsync(file, json, token);
+        });
+        var first = older.SaveAsync(new AppSettings { AnalysisProfiles = [new() { Id = "machine", Version = 1 }] }, default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = newer.SaveAsync(new AppSettings { AnalysisProfiles = [new() { Id = "machine", Version = 2 }] }, default);
+        try
+        {
+            await Task.Delay(100);
+            Assert.False(newerEntered.Task.IsCompleted);
+        }
+        finally { release.TrySetResult(); await Task.WhenAll(first, second); }
+        Assert.Equal(2, Assert.Single(CreateStore().Load().AnalysisProfiles).Version);
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));
+    }
+
+    [Fact]
     public async Task SaveAsync_ReplacesFileWithoutChangingAnExistingReadersSnapshot()
     {
         var store = CreateStore();

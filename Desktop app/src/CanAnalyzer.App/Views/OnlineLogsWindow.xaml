@@ -1,6 +1,7 @@
 <Window x:Class="CanAnalyzer.App.Views.OnlineLogsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:CanAnalyzer.App.Controls"
         Title="Online CANedge-logs"
         Icon="pack://application:,,,/CanAnalyzer;component/Resources/Branding/canalyser-icon.ico"
         Width="1280" Height="680" MinWidth="1050" MinHeight="520"
@@ -21,9 +22,9 @@
                 <TextBlock Text="Online CANedge-logs" FontSize="22" FontWeight="SemiBold" />
             </DockPanel>
             <TextBlock Margin="0,5,0,3" Foreground="#5E6B75" TextWrapping="Wrap"
-                       Text="Kies een machine en meetperiode. De periode en kolom 'Log gestart' gebruiken het eerste meetrecord volgens de loggerklok, ook bij latere upload. Tijden staan lokaal met UTC-offset. CANalyser analyseert de geselecteerde MF4-delen met je laatst gekozen DBC." />
+                       Text="Zoek op loggerdatum of ontvangst op de server. Zonder bevestigde tijdbron kan de loggerdatum afwijken. Een verschil met ontvangst bewijst geen achterstand. Tijden staan lokaal met UTC-offset. Markeringen zijn gedeeld met het dashboard; gemarkeerde bestanden worden bij downloaden overgeslagen." />
             <TextBlock Margin="0,0,0,14" Foreground="#5E6B75" TextWrapping="Wrap"
-                       Text="Klik op een bestandsrij en kies Sessie toevoegen voor alle getoonde bestanden van die sessie. Meerdere sessies kunnen samen; onderbrekingen blijven zichtbaar. Binnen elke sessie moeten de delen opeenvolgend zijn. Een identieke selectie wordt uit de lokale cache hergebruikt; cachebestanden worden na 7 dagen verwijderd en de cache wordt tot circa 2 GB begrensd." />
+                       Text="Klik op een bestandsrij en kies Sessie toevoegen voor alle getoonde bestanden van die sessie. Binnen elke sessie moeten de delen opeenvolgend zijn. Downloads bewaren brongegevens en SHA-256 per bestand. De cache wordt vóór hergebruik gecontroleerd, na 7 dagen opgeruimd en tot circa 2 GB begrensd." />
         </StackPanel>
 
         <Grid Grid.Row="1" Margin="0,0,0,12">
@@ -38,7 +39,10 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="Machine" VerticalAlignment="Center" Margin="0,0,8,0" />
             <ComboBox x:Name="MachineBox" Grid.Column="1" DisplayMemberPath="Name" SelectedValuePath="MachineId" />
-            <TextBlock Grid.Column="2" Text="Meetstart van" VerticalAlignment="Center" Margin="18,0,8,0" />
+            <ComboBox x:Name="TimeBasisBox" Grid.Column="2" SelectedIndex="0" SelectedValuePath="Tag" Margin="12,0,8,0" MinWidth="145">
+                <ComboBoxItem Content="Loggerdatum vanaf" Tag="recording" />
+                <ComboBoxItem Content="Ontvangstdatum vanaf" Tag="uploaded" />
+            </ComboBox>
             <DatePicker x:Name="FromPicker" Grid.Column="3" />
             <TextBlock Grid.Column="4" Text="Tot en met" VerticalAlignment="Center" Margin="18,0,8,0" />
             <DatePicker x:Name="ToPicker" Grid.Column="5" />
@@ -65,11 +69,13 @@
                   ItemsSource="{Binding Rows}">
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Header="Kies" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="55" />
-                <DataGridTextColumn Header="Machine" Binding="{Binding Machine}" Width="150" IsReadOnly="True" />
+                <DataGridTextColumn Header="Machine volgens bron" Binding="{Binding MachineDisplay}" Width="210" IsReadOnly="True" />
                 <DataGridTextColumn Header="Sessie" Binding="{Binding Session}" Width="130" IsReadOnly="True" />
                 <DataGridTextColumn Header="Bestand" Binding="{Binding Name}" Width="*" MinWidth="230" IsReadOnly="True" />
-                <DataGridTextColumn Header="Log gestart" Binding="{Binding RecordedDisplay}" SortMemberPath="RecordedAt" Width="210" IsReadOnly="True" />
-                <DataGridTextColumn Header="Geüpload" Binding="{Binding UploadedDisplay}" SortMemberPath="UploadedAt" Width="210" IsReadOnly="True" />
+                <DataGridTextColumn Header="Gedeelde markering" Binding="{Binding AnnotationDisplay}" Width="220" IsReadOnly="True" />
+                <DataGridTextColumn Header="Log gestart (loggerklok)" Binding="{Binding RecordedDisplay}" SortMemberPath="RecordedAt" Width="210" IsReadOnly="True" />
+                <DataGridTextColumn Header="Tijdkwaliteit" Binding="{Binding ClockDisplay}" Width="185" IsReadOnly="True" />
+                <DataGridTextColumn Header="Ontvangen op server" Binding="{Binding UploadedDisplay}" SortMemberPath="UploadedAt" Width="210" IsReadOnly="True" />
                 <DataGridTextColumn Header="Grootte" Binding="{Binding SizeDisplay}" Width="90" IsReadOnly="True" />
             </DataGrid.Columns>
         </DataGrid>
@@ -86,6 +92,14 @@
                     <Button Content="Alles selecteren" Padding="10,4" Margin="0,0,8,0" Click="OnSelectAllClick" />
                     <Button Content="Niets selecteren" Padding="10,4" Click="OnSelectNoneClick" />
                 </StackPanel>
+                <WrapPanel Margin="0,8,0,0">
+                    <CheckBox x:Name="ShowExcludedBox" Content="Gemarkeerde bestanden tonen" VerticalAlignment="Center" Margin="0,0,12,0"
+                              Checked="OnShowExcludedChanged" Unchecked="OnShowExcludedChanged" />
+                    <TextBlock Text="Reden" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox x:Name="AnnotationReasonBox" Width="220" MaxLength="2000" ToolTip="Reden voor de markering van de gemarkeerde tabelrijen" Margin="0,0,8,0" />
+                    <Button x:Name="MarkExcludedButton" Content="Markeer als niet nuttig" Click="OnMarkExcludedClick" Padding="10,4" Margin="0,0,8,0" />
+                    <Button x:Name="UnmarkExcludedButton" Content="Markering verwijderen" Click="OnUnmarkExcludedClick" Padding="10,4" />
+                </WrapPanel>
                 <TextBlock x:Name="StatusText" Margin="0,8,0,0" Foreground="#5E6B75" TextWrapping="Wrap" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
@@ -93,5 +107,14 @@
                 <Button x:Name="DownloadButton" Content="Downloaden en analyseren" Padding="16,6" IsEnabled="False" Click="OnDownloadClick" />
             </StackPanel>
         </Grid>
+        <Border x:Name="LoadingPanel" Grid.RowSpan="5" Panel.ZIndex="10" Background="#F2FFFFFF" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="620">
+                <Image Source="pack://application:,,,/Resources/Branding/canalyser-lockup.png" Width="340" Height="95" Stretch="Uniform" />
+                <controls:TwistedWireLoader Width="210" Height="90" StrokeThickness="7" IsActive="True" Margin="0,20" />
+                <TextBlock x:Name="LoadingPhase" FontSize="22" TextAlignment="Center" TextWrapping="Wrap" />
+                <ProgressBar x:Name="LoadingProgress" Height="12" Margin="0,20" IsIndeterminate="True" Maximum="100" />
+                <Button Content="Annuleren" Click="OnCancelClick" HorizontalAlignment="Center" Padding="22,8" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

@@ -61,13 +61,29 @@
                       HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
 
+            <GroupBox Header="SD-inventaris en bewezen serverontvangst" Margin="0,0,0,12">
+                <StackPanel Margin="10">
+                    <Button Content="SD-inventaris openen" Command="{Binding OpenInventoryCommand}" HorizontalAlignment="Left" Padding="12,6" />
+                    <TextBlock Text="{Binding InventoryStatus}" TextWrapping="Wrap" Margin="0,8" />
+                    <Expander Header="Bestanden waarvan ontvangst niet is bevestigd">
+                        <DataGrid ItemsSource="{Binding UnconfirmedInventoryFiles}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="220">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Logger" Binding="{Binding LoggerId}" Width="*" />
+                                <DataGridTextColumn Header="Sessie" Binding="{Binding Session}" Width="*" />
+                                <DataGridTextColumn Header="Bestand" Binding="{Binding Name}" Width="2*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Expander>
+                </StackPanel>
+            </GroupBox>
+
 
             <GroupBox Header="Opslag CANalyser" Margin="0,0,0,8">
                 <StackPanel Margin="8">
                     <TextBlock Text="{Binding TotalCacheStatus}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6" />
                     <TextBlock Text="{Binding OnlineCacheStatus}" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding AnalysisCacheStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                    <TextBlock Text="Gedownloade ZIP-bestanden worden tijdelijk bewaard om herhaald downloaden te voorkomen. Na wissen worden ze zo nodig opnieuw gedownload. De logs op AWS blijven behouden. De analyseopslag hierboven telt ook actieve en achtergebleven tijdelijke bestanden mee. Deze worden normaal bij het sluiten van de dataset opgeruimd, maar kunnen na een crash achterblijven. Downloadcache wissen verwijdert deze analysebestanden niet."
+                    <TextBlock Text="Gedownloade ZIP-bestanden worden tijdelijk bewaard om herhaald downloaden te voorkomen. Na wissen worden ze zo nodig opnieuw gedownload. De analyseopslag bevat actieve en achtergebleven tijdelijke bestanden. Ongebruikte analyseopslag wissen behoudt actieve datasets en imports, ook in andere CANalyser-vensters. Oude opslag zonder eigenaarregistratie blijft bewaard. Bronlogs, databases, profielen, exports en logs op AWS blijven behouden."
                                TextWrapping="Wrap" Margin="0,6,0,8" />
                     <TextBlock Text="Opslaglocaties" FontWeight="SemiBold" Margin="0,6,0,4" />
                     <TextBlock Text="Downloadcache" />
@@ -79,6 +95,10 @@
                     <TextBlock Text="Tijdelijke MF4-conversie" Margin="0,6,0,0" />
                     <TextBox Text="{Binding ConversionCacheDirectory, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
                     <Button Content="Downloadcache wissen" Command="{Binding ClearOnlineCacheCommand}" />
+                    <Button Content="Ongebruikte analyseopslag wissen" Command="{Binding ClearUnusedAnalysisCacheCommand}" Margin="0,6,0,0" />
+                    <Button Content="Dataset sluiten en analyseopslag wissen" Command="{Binding CloseDatasetAndClearAnalysisCacheCommand}" Margin="0,6,0,0"
+                            ToolTip="Annuleert lopende analyses, sluit de huidige dataset en wist daarna ongebruikte analyseopslag. Actieve sessies in andere instanties blijven bewaard. Wacht eerst tot een import of export klaar is." />
+                    <TextBlock Text="{Binding AnalysisCleanupStatus}" TextWrapping="Wrap" Margin="0,6,0,0" />
                     <Button Content="Opslag vernieuwen" Command="{Binding RefreshOnlineCacheCommand}" Margin="0,6,0,0" />
                 </StackPanel>
             </GroupBox>
@@ -88,6 +108,18 @@
                     <TextBox Text="{Binding LogFilePath}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,8" />
                     <TextBlock Text="DBC/DBF-bestand" FontWeight="SemiBold" />
                     <TextBox Text="{Binding DbcFilePath}" IsReadOnly="True" TextWrapping="Wrap" Margin="0,2,0,0" />
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Vaste machine-export" Margin="0,0,0,8">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Elke export gebruikt de volledige opname en opgeslagen analyseprofielen, met unieke bestandsnamen." TextWrapping="Wrap" />
+                    <TextBox Text="{Binding MachineExportDirectory, UpdateSourceTrigger=PropertyChanged}" Margin="0,6,0,6" IsReadOnly="True" TextWrapping="Wrap" />
+                    <Button Content="Exportmap kiezen" Command="{Binding ChooseMachineExportDirectoryCommand}" />
+                    <Expander Header="Geavanceerde exportopties" Margin="0,8,0,0">
+                        <CheckBox Content="Volledige samples opnemen (grotere bestanden)" IsChecked="{Binding MachineExportIncludeSamples}" ToolTip="Statistieken en minuuttrends van alle gedecodeerde signalen zijn altijd opgenomen. Deze optie voegt ieder oorspronkelijk meetpunt toe." />
+                    </Expander>
+                    <Button Content="Instellingen toepassen en opslaan" Command="{Binding ApplyProgramSettingsCommand}" Margin="0,8,0,0" />
                 </StackPanel>
             </GroupBox>
 
@@ -128,9 +160,8 @@
                              IsEnabled="{Binding DefaultUseDownsampling}"
                              ToolTip="200–200.000 punten per signaal. Alleen actief bij downsampling."
                              Margin="0,2,0,6" />
-                    <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
-                              IsChecked="{Binding DefaultUseDownsampling}"
-                              Margin="0,0,0,6" />
+                    <TextBlock Text="Nieuwe tijdvakken gebruiken automatische puntweergave. Alle punten tonen kies je tijdelijk in het betreffende grafiekvenster."
+                               TextWrapping="Wrap" Margin="0,0,0,6" />
                     <TextBlock Text="Rijen per pagina (Raw Frames en Busmaster)" />
                     <TextBox Text="{Binding DefaultRawMaxRows, UpdateSourceTrigger=LostFocus}"
                              ToolTip="1–2.000.000 rijen per pagina. De overige frames blijven via de paginaknoppen beschikbaar."

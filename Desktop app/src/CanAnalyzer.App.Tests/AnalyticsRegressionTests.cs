@@ -99,18 +99,18 @@ public sealed class AnalyticsRegressionTests
     });
 
     [Fact]
-    public Task ActiveUsage_SampledDiskReadRunsOffDispatcherAndSettingsInvalidateResult() => PlotRegressionTests.OnDispatcher(async () =>
+    public Task ActiveUsage_ExactDiskReadRunsOffDispatcherAndSettingsInvalidateResult() => PlotRegressionTests.OnDispatcher(async () =>
     {
         var uiThread = Environment.CurrentManagedThreadId;
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
         var series = new SignalSeries(new SignalIdentity("1", CanFrameFormat.Classic, false, 1, "motor", "RPM"), 300_000,
-            () => throw new InvalidOperationException("Full materialization is not allowed"), count =>
+            () =>
             {
                 Assert.NotEqual(uiThread, Environment.CurrentManagedThreadId);
                 started.SetResult(); Assert.True(release.Wait(TimeSpan.FromSeconds(10)));
                 return ([0L, 1_000_000_000L, 2_000_000_000L], new[] { 200d, 200d, 0d });
-            });
+            }, _ => throw new InvalidOperationException("Numerical usage analysis must not downsample"));
         using var data = Dataset([series]);
         var vm = new ActiveUsageViewModel(new Telemetry()); vm.LoadDataset(data);
         var task = vm.CalculateCommand.ExecuteAsync(null);
@@ -118,5 +118,6 @@ public sealed class AnalyticsRegressionTests
         vm.Threshold = "500"; data.Dispose(); release.Set();
         await task;
         Assert.False(vm.IsBusy); Assert.False(vm.HasResult); Assert.Null(vm.ExportResult);
+        await vm.CancelAndWaitAsync(); vm.ClearDataset();
     });
 }

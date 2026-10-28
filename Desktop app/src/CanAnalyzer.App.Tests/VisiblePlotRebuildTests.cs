@@ -100,14 +100,15 @@ public sealed class VisiblePlotRebuildTests
     [InlineData("zoom")]
     [InlineData("reset")]
     [InlineData("y")]
-    public Task AxisNavigation_RestoresSharedDownsampling(string navigation) => PlotRegressionTests.OnDispatcher(async () =>
+    public Task AxisNavigation_RestoresLocalOverviewAndLeavesTheDefaultUnchanged(string navigation) => PlotRegressionTests.OnDispatcher(async () =>
     {
         using var data = PlotRegressionTests.Dataset(100_000);
         var vm = await CreatePlots(data);
         XAxis(Assert.Single(vm.PlotPanels)).Zoom(50, 50.004);
         vm.UseDownsampling = false;
         await WaitForIdle(vm);
-        Assert.False(vm.DisplayLimits.UseDownsampling);
+        Assert.False(vm.UseDownsampling);
+        Assert.True(vm.DisplayLimits.UseDownsampling);
 
         var panel = Assert.Single(vm.PlotPanels);
         switch (navigation)

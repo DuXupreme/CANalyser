@@ -25,7 +25,11 @@ public sealed class LargeOnlineSelectionTests
             var path = await service.DownloadArchiveAsync(Selection(371), null, default);
             Assert.Equal(new[] { 200, 171 }, handler.BatchSizes);
             Assert.Equal(371, handler.Downloads);
-            using (var zip = ZipFile.OpenRead(path)) Assert.Equal(371, zip.Entries.Count);
+            using (var zip = ZipFile.OpenRead(path))
+            {
+                Assert.Equal(371, zip.Entries.Count(entry => entry.FullName.EndsWith(".MF4", StringComparison.OrdinalIgnoreCase)));
+                Assert.NotNull(zip.GetEntry(OnlineLogArchiveManifestCodec.EntryName));
+            }
             var converter = new CompleteSelectionConverter();
             var parser = new Mdf4Parser(converter, new PeakTrcParser());
             var parsed = await parser.ParseAsync(path, ImportMode.Strict, null, default);

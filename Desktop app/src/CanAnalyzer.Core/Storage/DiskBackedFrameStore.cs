@@ -10,10 +10,11 @@ namespace CanAnalyzer.Core.Storage;
 /// </summary>
 public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposable
 {
-    private const int FormatVersion = 1;
+    private const int FormatVersion = 2;
     private static readonly byte[] Magic = "CANFRM2\0"u8.ToArray();
     private readonly string _dataPath;
     private readonly string _indexPath;
+    private readonly AnalysisCacheSession _cacheSession;
     private readonly object _readLock = new();
     private readonly HashSet<string> _channels = new(StringComparer.Ordinal);
     private FileStream? _dataWriterStream;
@@ -29,17 +30,21 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
 
     public DiskBackedFrameStore(string? cacheDirectory = null)
     {
-        var directory = cacheDirectory ?? Path.Combine(Path.GetTempPath(), "CANalyser", "frame-cache");
-        Directory.CreateDirectory(directory);
+        _cacheSession = AnalysisCacheStorage.CreateSession(cacheDirectory ?? Path.Combine(AnalysisCacheStorage.DefaultDirectory, "frame-cache"));
+        var directory = _cacheSession.DirectoryPath;
         var id = Guid.NewGuid().ToString("N");
         _dataPath = Path.Combine(directory, $"{id}.frames");
         _indexPath = Path.Combine(directory, $"{id}.index");
-        _dataWriterStream = new FileStream(_dataPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        _indexWriterStream = new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        _dataWriter = new BinaryWriter(_dataWriterStream, Encoding.UTF8, leaveOpen: true);
-        _indexWriter = new BinaryWriter(_indexWriterStream, Encoding.UTF8, leaveOpen: true);
-        _dataWriter.Write(Magic);
-        _dataWriter.Write(FormatVersion);
+        try
+        {
+            _dataWriterStream = new FileStream(_dataPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            _indexWriterStream = new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            _dataWriter = new BinaryWriter(_dataWriterStream, Encoding.UTF8, leaveOpen: true);
+            _indexWriter = new BinaryWriter(_indexWriterStream, Encoding.UTF8, leaveOpen: true);
+            _dataWriter.Write(Magic);
+            _dataWriter.Write(FormatVersion);
+        }
+        catch { Dispose(); throw; }
     }
 
     public int Count { get; private set; }
@@ -118,6 +123,7 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
         _indexReaderStream?.Dispose();
         TryDelete(_dataPath);
         TryDelete(_indexPath);
+        _cacheSession.Dispose();
     }
 
     private IEnumerable<RawCanFrame> Enumerate()
@@ -151,6 +157,8 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
         writer.Write(frame.Dlc);
         writer.Write(frame.FrameIndex);
         writer.Write(frame.SourceLineNumber);
+        writer.Write(frame.SourceFileIndex);
+        writer.Write(frame.SourceFrameIndex);
         writer.Write((byte)frame.FrameFormat);
         writer.Write((byte)frame.Direction);
         writer.Write((byte)frame.Kind);
@@ -169,6 +177,8 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
         var dlc = reader.ReadByte();
         var frameIndex = reader.ReadInt64();
         var line = reader.ReadInt64();
+        var sourceFileIndex = reader.ReadInt32();
+        var sourceFrameIndex = reader.ReadInt64();
         var format = (CanFrameFormat)reader.ReadByte();
         var direction = (CanFrameDirection)reader.ReadByte();
         var kind = (CanFrameKind)reader.ReadByte();
@@ -179,7 +189,8 @@ public sealed class DiskBackedFrameStore : IReadOnlyList<RawCanFrame>, IDisposab
         var data = reader.ReadBytes(length);
         if (data.Length != length) throw new EndOfStreamException("Truncated CANalyser frame store.");
         return new RawCanFrame(timestamp, id, dlc, data, type, channel, (flags & 1) != 0,
-            frameIndex, line, format, direction, kind, (flags & 2) != 0, (flags & 4) != 0);
+            frameIndex, line, format, direction, kind, (flags & 2) != 0, (flags & 4) != 0)
+        { SourceFileIndex = sourceFileIndex, SourceFrameIndex = sourceFrameIndex };
     }
 
     private static void TryDelete(string path)

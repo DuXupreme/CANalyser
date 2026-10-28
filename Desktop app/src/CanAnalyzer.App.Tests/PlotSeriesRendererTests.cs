@@ -98,7 +98,7 @@ public sealed class PlotSeriesRendererTests
     {
         double[] x = [1000, 1001, 10, 10.5, 11, 2000, 2001, double.NaN, 4000, 4001];
         var source = new RenderedSeriesData("test", x, x, "Y1", OxyColors.Blue);
-        var series = (LineSeries)PlotSeriesRenderer.Build(source, new PlotViewOptions(), new(10.25, 10.75));
+        var series = (LineSeries)PlotSeriesRenderer.Build(source, new PlotViewOptions { UseDownsampling = false }, new(10.25, 10.75));
         Assert.False(source.RangeIndex.SupportsRangeQueries);
         Assert.Equal(new[] { 1001d, 10, 10.5, 11 }, series.Points.Select(p => p.X));
     }
@@ -121,7 +121,7 @@ public sealed class PlotSeriesRendererTests
         double[] x = [0, 1, 2, 3, 7, 8, 9, 10];
         var source = new RenderedSeriesData("test", x, x, "Y1", OxyColors.Blue)
         { Gaps = [new MeasurementGap(3, 7)] };
-        var series = (LineSeries)PlotSeriesRenderer.Build(source, new PlotViewOptions(), new(2.5, 7.5));
+        var series = (LineSeries)PlotSeriesRenderer.Build(source, new PlotViewOptions { UseDownsampling = false }, new(2.5, 7.5));
         Assert.Equal(5, series.Points.Count);
         Assert.Equal(2, series.Points[0].X);
         Assert.True(double.IsNaN(series.Points[2].X));

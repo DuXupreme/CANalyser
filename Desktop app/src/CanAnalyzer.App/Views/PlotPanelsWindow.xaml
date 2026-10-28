@@ -55,10 +55,11 @@
                             <CheckBox Content="Legenda"
                                       IsChecked="{Binding ShowLegend, Mode=TwoWay}"
                                       Margin="0,0,8,0" />
-                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
+                            <CheckBox Content="Automatische puntweergave"
                                       IsChecked="{Binding UseDownsampling, Mode=TwoWay}"
                                       ToolTip="Uit: originele punten in het zichtbare tijdvak. Bij verschuiven of zoomen gaat downsampling weer aan."
                                       Margin="0,0,8,0" />
+                            <Button Content="Alle punten in dit tijdvak" Click="OnShowAllPointsInViewportClick" Margin="0,0,8,0" />
                             <CheckBox Content="Koppel X-assen"
                                       IsChecked="{Binding LinkXAxisAcrossPanels, Mode=TwoWay}"
                                       Margin="0,0,8,0" />
@@ -71,6 +72,7 @@
                     </StackPanel>
                 </WrapPanel>
                 <WrapPanel Margin="0,6,0,0">
+                    <TextBlock Text="{Binding SamplingStatus}" VerticalAlignment="Center" Margin="0,0,12,0" />
                     <Button Content="Flag A = cursor" Click="OnSetFlagAFromCursorClick" Margin="0,0,6,0" />
                     <Button Content="Flag B = cursor" Click="OnSetFlagBFromCursorClick" Margin="0,0,6,0" />
                     <Button Content="Volgende verandering (A→B)" Click="OnJumpFlagBToNextChangeClick" Margin="0,0,6,0" />

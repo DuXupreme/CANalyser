@@ -9,12 +9,12 @@ namespace CanAnalyzer.Tests;
 public sealed class CoreBehaviorTests
 {
     [Fact]
-    public void PlotViewOptions_DefaultsToFiveThousandDownsamplingPoints()
+    public void PlotViewOptions_DefaultsToAutomaticOverviewWithFiveThousandPoints()
     {
         var options = new PlotViewOptions();
 
         Assert.Equal(5000, options.MaxPointsPerTrace);
-        Assert.False(options.UseDownsampling);
+        Assert.True(options.UseDownsampling);
     }
 
     [Fact]

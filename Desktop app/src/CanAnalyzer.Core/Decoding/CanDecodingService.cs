@@ -82,6 +82,8 @@ public sealed class CanDecodingService : ICanDecodingService
                     progress?.Report(new LoadProgress($"DBC decode: frame {frameNumber:N0} / {rawFrames.Count:N0}", percent));
                 }
 
+                // Remote requests and error/status records contain no measured signal payload.
+                if (frame.Kind != CanFrameKind.Data) continue;
                 var rawFrameId = frame.Id;
                 uniqueRawIds.Add(rawFrameId);
                 var isExtended = frame.IsExtended || rawFrameId > 0x7FF;
@@ -204,7 +206,8 @@ public sealed class CanDecodingService : ICanDecodingService
                             Identity: new SignalIdentity(frame.Channel, frame.FrameFormat, isExtended, normalizedFrameId, decodedMessage.Name, pair.Key),
                             Value: pair.Value.PhysicalValue,
                             RawValue: pair.Value.RawValue,
-                            Unit: pair.Value.Unit));
+                            Unit: pair.Value.Unit)
+                        { SourceFileIndex = frame.SourceFileIndex, SourceFrameIndex = frame.SourceFrameIndex });
                 }
 
             }

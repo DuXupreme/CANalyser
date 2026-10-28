@@ -45,6 +45,12 @@ public sealed class OnlineLogRegressionTests
         var log = Assert.Single(result.Files);
         Assert.Equal(DateTimeOffset.Parse("2026-09-14T09:28:44.896Z"), log.RecordedAt);
         Assert.Equal(DateTimeOffset.Parse("2026-09-14T15:33:35Z"), log.UploadedAt);
+        Assert.Equal("unverified", log.ClockQuality);
+        Assert.Equal("unverified", log.MachineAssignmentQuality);
+        var selection = log.ToSelection();
+        Assert.Equal(log.RecordedAt, selection.RawRecordedAtUtc);
+        Assert.Equal(log.UploadedAt, selection.UploadedAtUtc);
+        Assert.Equal(log.Machine, selection.MachineName);
     }
 
     [Fact]

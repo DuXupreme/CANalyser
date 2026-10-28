@@ -12,178 +12,27 @@
     </UserControl.Resources>
     <Grid Margin="8">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0">
-            <TabItem Header="Latency / Delay analyse">
-                <Grid Margin="6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="1.15*" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                        <WrapPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Command / setpoint" />
-                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedCommandSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Response / feedback" />
-                                <ComboBox Width="330" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedResponseSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Max delay [s]" />
-                                <TextBox Width="85"
-                                         Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Reactiedrempel [%]" />
-                                <TextBox Width="85"
-                                         Text="{Binding ResponseThresholdPercent, Converter={StaticResource FlexibleDoubleConverter}, UpdateSourceTrigger=LostFocus}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Acties" />
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="Auto detect delay" Command="{Binding AutoDetectDelaySignalsCommand}" Margin="0,0,6,0" />
-                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
-                                </StackPanel>
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Overlay opties" />
-                                <WrapPanel>
-                                    <CheckBox Content="Normaliseer"
-                                              IsChecked="{Binding DelayOverlayNormalize, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Trapjes"
-                                              IsChecked="{Binding DelayOverlayStepPlot, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Markers"
-                                              IsChecked="{Binding DelayOverlaySampleMarkers, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Legenda"
-                                              IsChecked="{Binding DelayOverlayShowLegend, Mode=TwoWay}"
-                                              Margin="0,0,8,0" />
-                                    <CheckBox Content="Vormverandering-markers (indicatief)"
-                                              IsChecked="{Binding DelayOverlayShowDelayMarkers, Mode=TwoWay}" />
-                                </WrapPanel>
-                            </StackPanel>
-                            <TextBlock Margin="0,7,0,0"
-                                       Foreground="#555555"
-                                       Text="Tijd tot feedbackdrempel, geïnterpoleerd tussen samples. Dit is geen onafhankelijke meting van de fysieke bewegingsstart." />
-                        </WrapPanel>
-                    </Border>
-
-                    <Grid Grid.Row="1" Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="0.95*" />
-                            <ColumnDefinition Width="1.5*" />
-                        </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Delay metrics" Margin="0,0,6,0">
-                            <DataGrid ItemsSource="{Binding DelayMetrics}" AutoGenerateColumns="False" IsReadOnly="True" Margin="6" CanUserAddRows="False">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Metric" Binding="{Binding Name}" Width="*" />
-                                    <DataGridTemplateColumn Header="Waarde" Width="220"><DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Value}" TextWrapping="Wrap" ToolTip="{Binding Value}" Margin="3" /></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Dode tijd histogram (commando → eerste reactie)">
-                            <oxy:PlotView Model="{Binding DelayHistogramModel}" Margin="6" />
-                        </GroupBox>
-                    </Grid>
-
-                    <GroupBox Grid.Row="2" Header="Command/response overlay">
-                        <oxy:PlotView Model="{Binding DelayOverlayModel}"
-                                      Controller="{Binding DelayOverlayController}"
-                                      Margin="6" />
-                    </GroupBox>
-                </Grid>
+        <Border Grid.Row="0" Background="#FFF8E5" BorderBrush="#E7C66C" BorderThickness="1" Padding="10" Margin="0,0,0,8">
+            <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers><DataTrigger Binding="{Binding HasUnsavedProfileChanges}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+            </Style></Border.Style>
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Bevestig en bewaar profiel" Command="{Binding ConfirmProfileCommand}" Margin="12,0,0,0" Padding="12,6" />
+                <TextBlock Text="{Binding ProfileChangeStatus}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+        <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedAnalysisTabIndex}">
+            <TabItem Header="Overzicht"><views:AnalysisOverviewView /></TabItem>
+            <TabItem Header="Reactietijd &amp; actuatorvolging">
+                <views:ReactionAnalysisView />
             </TabItem>
-
-            <TabItem Header="Joystick gebruiksanalyse">
+            <TabItem Header="Joystickgebruik">
                 <views:JoystickUsageView />
-            </TabItem>
-
-            <TabItem Header="Actuatorvolging">
-                <Grid Margin="6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="1.2*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,6">
-                        <WrapPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Actuator Left" />
-                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorLeftSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Actuator Right" />
-                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorRightSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Actuator Front" />
-                                <ComboBox Width="250" ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedActuatorFrontSignal, Mode=TwoWay}" />
-                            </StackPanel>
-                            <StackPanel Margin="0,0,8,0">
-                                <TextBlock Text="Acties" />
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="Detecteer feedback" Command="{Binding AutoDetectActuatorPairCommand}" Margin="0,0,6,0" />
-                                    <Button Content="Herbereken" Command="{Binding RecomputeCommand}" />
-                                </StackPanel>
-                            </StackPanel>
-                            <TextBlock Margin="0,7,0,0"
-                                       Foreground="#555555"
-                                       Text="Vergelijk het werkelijke setpoint met de gemeten positie. Kies per actuator een setpoint bij de bereikinstellingen in Joystick gebruiksanalyse." />
-                            <TextBlock Margin="0,2,0,0"
-                                       Foreground="#555555"
-                                       Text="Tijdvenster en bedrijfsfilter volgen de gebruiksanalyse. Controleer eenheid en nulpunt; grafieken tonen de onbewerkte signalen binnen het tijdvenster." />
-                        </WrapPanel>
-                    </Border>
-
-                    <Grid Grid.Row="1" Margin="0,0,0,6">
-
-                        <GroupBox Grid.Column="0" Header="Volgafwijking per actuator" Margin="0,0,6,0">
-                            <DockPanel Margin="6">
-                                <TextBlock DockPanel.Dock="Bottom"
-                                           Text="{Binding ActuatorSummary}"
-                                           Foreground="#555555"
-                                           TextWrapping="Wrap"
-                                           Margin="0,6,0,0" />
-                                <DataGrid ItemsSource="{Binding ActuatorMatrix}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="90">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Metric" Binding="{Binding Metric}" Width="*" />
-                                        <DataGridTextColumn Header="Left" Binding="{Binding Left}" Width="150" />
-                                        <DataGridTextColumn Header="Right" Binding="{Binding Right}" Width="150" />
-                                        <DataGridTextColumn Header="Front" Binding="{Binding Front}" Width="150" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </DockPanel>
-                        </GroupBox>
-
-                    </Grid>
-
-                    <Grid Grid.Row="2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <GroupBox Grid.Column="0" Header="Links: setpoint / feedback" Margin="0,0,6,0">
-                            <oxy:PlotView Model="{Binding ActuatorLeftOverlayModel}" Margin="6" />
-                        </GroupBox>
-                        <GroupBox Grid.Column="1" Header="Rechts: setpoint / feedback" Margin="0,0,6,0">
-                            <oxy:PlotView Model="{Binding ActuatorRightOverlayModel}" Margin="6" />
-                        </GroupBox>
-                        <GroupBox Grid.Column="2" Header="Voor: setpoint / feedback">
-                            <oxy:PlotView Model="{Binding ActuatorFrontOverlayModel}" Margin="6" />
-                        </GroupBox>
-                    </Grid>
-                </Grid>
             </TabItem>
 
             <TabItem Header="CAN professioneel">
@@ -220,6 +69,9 @@
                             <TextBlock Margin="0,7,0,0"
                                        Foreground="#555555"
                                        Text="Professionele CAN-overzichten: bus load/throughput, top-ID verkeer, cyclustijd en jitter per bericht-ID." />
+                            <CheckBox Content="Deze bitrates zijn bevestigd voor alle machine-CAN-kanalen in dit profiel"
+                                      IsChecked="{Binding CanBitratesConfirmed}" Margin="0,8,12,0" />
+                            <Button Content="Profiel bevestigen en bewaren" Command="{Binding ConfirmProfileCommand}" Margin="0,8,0,0"/>
                         </WrapPanel>
                     </Border>
 
@@ -294,7 +146,7 @@
             </TabItem>
         </TabControl>
 
-        <TextBlock Grid.Row="1"
+        <TextBlock Grid.Row="2"
                    Margin="2,6,2,0"
                    Text="{Binding StatusText}"
                    Foreground="#444444" />

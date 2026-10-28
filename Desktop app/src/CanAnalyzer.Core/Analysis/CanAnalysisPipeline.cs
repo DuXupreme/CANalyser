@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using CanAnalyzer.Core.Domain;
 using CanAnalyzer.Core.Interfaces;
+using CanAnalyzer.Core.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace CanAnalyzer.Core.Analysis;
@@ -84,8 +85,11 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
                 : DatasetCompleteness.Complete;
             progress?.Report(new LoadProgress("Strikt decoderen...", 20));
             timer.Restart();
+            var machineFrames = parseResult.Report.InternalDiagnosticChannels.Count == 0
+                ? parseResult.Frames
+                : new MachineFrameView(parseResult.Frames, parseResult.Report.InternalDiagnosticChannels, cancellationToken);
             decodeResult = await Task.Run(
-                () => _decodingService.Decode(parseResult.Frames, database, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
+                () => _decodingService.Decode(machineFrames, database, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
             var decodeMs = timer.ElapsedMilliseconds;
 
             var decodeIssues = BuildDecodeIssues(decodeResult.Diagnostics);
@@ -117,16 +121,26 @@ public sealed class CanAnalysisPipeline : ICanAnalysisPipeline
                           ?? "2.1.0";
             if (forReview && !combinedReport.HasErrors)
                 combinedReport = combinedReport with { Mode = ImportMode.Strict };
+            var loggerDiagnostics = LoggerDiagnosticReader.Read(parseResult.Frames,
+                parseResult.Report.InternalDiagnosticChannels, cancellationToken);
             timer.Restart();
             var dataset = await Task.Run(() => _datasetBuilder.Build(
                 parseResult.Frames, decodeResult.Samples, decodeResult.MessageSummaries, decodeResult.Diagnostics,
                 combinedReport, completeness, logHashTask.Result, dbcHashTask.Result, version, parseResult.StartTimeUtc), cancellationToken).ConfigureAwait(false);
             dataset.OriginalParseResult = parseResult;
+            dataset.SignalDefinitionHashes = AnalysisProfileResolver.BuildDefinitionHashes(dataset, database);
             dataset.LoadTimings = new LoadTimings(parseMs, dbcMs, decodeMs, hashMs, timer.ElapsedMilliseconds);
             dataset.SourceLogPath = Path.GetFullPath(logFilePath);
             dataset.SourceDbcPath = Path.GetFullPath(dbcFilePath);
             dataset.SourceFiles = parseResult.SourceFiles.Count > 0
                 ? parseResult.SourceFiles : [SourceLogFile.FromLocalFile(dataset.SourceLogPath)];
+            if (dataset.SourceFiles.Count == 1 && !Path.GetExtension(logFilePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                dataset.SourceFiles = [dataset.SourceFiles[0] with
+                {
+                    Sha256 = logHashTask.Result,
+                    SizeBytes = new FileInfo(logFilePath).Length
+                }];
+            dataset.LoggerDiagnostics = loggerDiagnostics;
             _logger.LogInformation("Load phases (ms): parse={Parse}, dbc={Dbc}, decode={Decode}, hash={Hash}, dataset={Dataset}",
                 parseMs, dbcMs, decodeMs, hashMs, dataset.LoadTimings.DatasetMilliseconds);
             progress?.Report(new LoadProgress("Klaar.", 100));

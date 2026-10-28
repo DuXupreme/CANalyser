@@ -196,14 +196,17 @@
                                      IsEnabled="{Binding UseDownsampling}"
                                      ToolTip="200–200.000 punten per signaal. Dezelfde limiet geldt in alle plotvensters. Alleen actief bij downsampling."
                                      Text="{Binding MaxPointsPerTrace, UpdateSourceTrigger=LostFocus}" />
-                            <CheckBox views:DownsamplingConfirmation.Enabled="True" Content="Downsampling (alleen grafiek)"
+                            <CheckBox Content="Automatische puntweergave"
                                       IsChecked="{Binding UseDownsampling}"
                                       Margin="0,4,0,0" />
-                            <TextBlock Text="Gedeeld met Instellingen en alle losse plotvensters. Zonder downsampling: alle punten in het zichtbare tijdvak. Bij verschuiven, zoomen of resetten gaat downsampling weer aan. Analyse en CSV-export gebruiken de brondata."
+                            <Button Content="Alle punten in dit tijdvak" Command="{Binding ShowAllPointsInViewportCommand}"
+                                    HorizontalAlignment="Left" Margin="0,4,0,0" />
+                            <TextBlock Text="De puntenlimiet is gedeeld. Exact detail geldt alleen hier: alle punten in het zichtbare tijdvak. Navigeren herstelt overzicht; analyses en export behouden de brondata."
                                        Width="260"
                                        Margin="0,3,0,0"
                                        Foreground="#7A4A00"
                                        TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding SamplingStatus}" Width="260" TextWrapping="Wrap" FontWeight="SemiBold" />
                         </StackPanel>
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="Subplot hoogte [px]" />

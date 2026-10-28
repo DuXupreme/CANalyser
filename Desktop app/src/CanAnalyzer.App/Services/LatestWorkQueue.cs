@@ -36,6 +36,12 @@ public sealed class LatestWorkQueue<TRequest, TResult>(
         return completion.Task;
     }
 
+    public async Task CancelAndWaitAsync()
+    {
+        CancelPending();
+        if (_running is { } running) await running;
+    }
+
     private async Task DrainAsync(TaskCompletionSource completion)
     {
         try

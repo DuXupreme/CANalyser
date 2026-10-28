@@ -6,7 +6,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:views="clr-namespace:CanAnalyzer.App.Views"
         mc:Ignorable="d"
-        Title="CANalyser"
+        Title="{Binding WindowTitle}"
         Icon="pack://application:,,,/Resources/Branding/canalyser-icon.ico"
         MinWidth="1200"
         MinHeight="760">
@@ -14,15 +14,15 @@
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="_Bestand">
                 <MenuItem Header="_Online CANedge-logs..." Command="{Binding ImportOnlineLogsCommand}" />
-                <MenuItem Header="Open _CAN-log..." Command="{Binding BrowseLogFileCommand}" />
-                <MenuItem Header="Open _database..." Command="{Binding BrowseDbcFileCommand}" />
+                <MenuItem Header="_CAN-log kiezen..." Command="{Binding BrowseLogFileCommand}" />
+                <MenuItem Header="_Database kiezen..." Command="{Binding BrowseDbcFileCommand}" />
                 <MenuItem Header="_Actuator CSV..." Command="{Binding ImportActuatorCsvCommand}" />
                 <Separator />
                 <MenuItem Header="_Laden / Decoderen" Command="{Binding LoadAndDecodeCommand}" />
                 <MenuItem Header="_Annuleren" Command="{Binding CancelCommand}" />
                 <Separator />
                 <MenuItem Header="Export _CSV..." Command="{Binding ExportDecodedCsvCommand}" />
-                <MenuItem Header="Export _analyses..." Command="{Binding ExportAnalysesCommand}" />
+                <MenuItem Header="_Machine-analyse exporteren" Command="{Binding ExportAnalysesCommand}" />
                 <MenuItem Header="Export _Layout..." Command="{Binding ExportLayoutCommand}" />
                 <MenuItem Header="Import L_ayout..." Command="{Binding ImportLayoutCommand}" />
                 <Separator />
@@ -44,8 +44,10 @@
                 <Separator />
                 <Button Content="Online logs" Command="{Binding ImportOnlineLogsCommand}"
                         ToolTip="Kies CANedge-logs per machine en periode, download ze en start direct de analyse." />
-                <Button Content="Open Log" Command="{Binding BrowseLogFileCommand}" />
-                <Button Content="Open database" Command="{Binding BrowseDbcFileCommand}" />
+                <Button Content="Log kiezen" Command="{Binding BrowseLogFileCommand}"
+                        ToolTip="Kies een logbestand; Laden/Decoderen opent de gekozen log en DBC samen." />
+                <Button Content="DBC kiezen" Command="{Binding BrowseDbcFileCommand}"
+                        ToolTip="Kies de CAN-database voor de volgende import." />
                 <Button Content="Actuator CSV" Command="{Binding ImportActuatorCsvCommand}"
                         ToolTip="Selecteer meerdere Actuator Testbench CSV-logs; CANalyser lijnt hun eerste doelstap uit op t=0." />
                 <Separator />
@@ -53,11 +55,27 @@
                 <Button Content="Annuleren" Command="{Binding CancelCommand}" />
                 <Separator />
                 <Button Content="Export CSV" Command="{Binding ExportDecodedCsvCommand}" />
-                <Button Content="Export analyses" Command="{Binding ExportAnalysesCommand}" />
+                <Button Content="Machine-analyse exporteren" Command="{Binding ExportAnalysesCommand}"
+                        ToolTip="Exporteer de volledige opname met vaste analyses en minuuttrends, onafhankelijk van de huidige schermselectie." />
                 <Button Content="Export Layout" Command="{Binding ExportLayoutCommand}" />
                 <Button Content="Import Layout" Command="{Binding ImportLayoutCommand}" />
             </ToolBar>
         </ToolBarTray>
+
+        <StackPanel DockPanel.Dock="Top" Margin="8,2,8,6">
+            <TextBlock Text="{Binding LoadedSourceSummary}" TextTrimming="CharacterEllipsis" />
+            <Border Background="#FFFFF3CD" BorderBrush="#FFE4C35D" BorderThickness="1" Padding="8" Margin="0,4,0,0"
+                    Visibility="{Binding ShowSourceSelectionNotice, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Button Content="Laden/Decoderen" Command="{Binding LoadAndDecodeCommand}" Padding="10,4" />
+                        <Button Content="Huidige opname behouden" Command="{Binding KeepLoadedSourceSelectionCommand}" Padding="10,4" Margin="6,0,0,0"
+                                Visibility="{Binding HasPendingSourceSelection, Converter={StaticResource BoolToVisibilityConverter}}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding SourceSelectionNotice}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+        </StackPanel>
 
         <Grid>
             <Grid.RowDefinitions>
@@ -109,7 +127,7 @@
             </StatusBarItem>
         </StatusBar>
 
-        <TabControl>
+        <TabControl SelectedIndex="{Binding SelectedMainTabIndex}">
             <TabControl.Style>
                 <Style TargetType="TabControl">
                     <Style.Triggers>
@@ -122,7 +140,7 @@
             <TabItem Header="Analyse">
                 <views:AnalysisView DataContext="{Binding Analysis}" />
             </TabItem>
-            <TabItem Header="CAN Analyse">
+            <TabItem Header="Inzichten">
                 <views:JoystickAnalyticsView DataContext="{Binding JoystickAnalytics}" />
             </TabItem>
             <TabItem Header="Raw Frames (PCAN)">
@@ -134,10 +152,26 @@
             <TabItem Header="Database (DBC)">
                 <views:DbcEditorView DataContext="{Binding DbcEditor}" />
             </TabItem>
+            <TabItem Header="Vergelijken">
+                <views:ComparisonView DataContext="{Binding Comparison}" />
+            </TabItem>
             <TabItem Header="Instellingen / Diagnostics">
                 <views:SettingsDiagnosticsView DataContext="{Binding SettingsDiagnostics}" />
             </TabItem>
         </TabControl>
+        <Border Grid.RowSpan="3" Panel.ZIndex="10" Background="#EEFFFFFF"
+                Visibility="{Binding ShowDatasetLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="650">
+                <Image Source="pack://application:,,,/Resources/Branding/canalyser-lockup.png"
+                       Width="340" Height="95" Stretch="Uniform" Margin="0,0,0,18" />
+                <controls:TwistedWireLoader Width="210" Height="90" StrokeThickness="7"
+                                            IsActive="{Binding ShowDatasetLoading}" />
+                <TextBlock Text="{Binding ActiveProgressLabel}" FontSize="22" TextAlignment="Center" Margin="0,18,0,8" />
+                <TextBlock Text="{Binding LoadingSourceName}" TextAlignment="Center" TextWrapping="Wrap" />
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding ProgressValue}" Height="12" Margin="0,20,0,12" />
+                <Button Content="Annuleren" Command="{Binding CancelCommand}" HorizontalAlignment="Center" Padding="22,8" />
+            </StackPanel>
+        </Border>
         </Grid>
     </DockPanel>
 </Window>

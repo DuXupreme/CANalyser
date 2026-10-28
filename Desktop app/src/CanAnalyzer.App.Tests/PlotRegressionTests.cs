@@ -132,12 +132,14 @@ public sealed class PlotRegressionTests
         using var data = Dataset(100_000);
         var panel = Assert.Single(new PlotModelBuilder().Build(data,
             [new PlotGroup { Signals = data.SignalLabels.ToList() }], new PlotViewOptions { UseDownsampling = true }));
-        var window = (PlotPanelsWindow)RuntimeHelpers.GetUninitializedObject(typeof(PlotPanelsWindow));
-        typeof(PlotPanelsWindow).GetField("_displayLimits", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(window, new DisplayLimits { UseDownsampling = true });
-        var method = typeof(PlotPanelsWindow).GetMethod("BuildSeries", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var line = (LineSeries)method.Invoke(window, [panel.SeriesData[0], 10d, 11d])!;
-        Assert.Equal(0, line.Points[0].X); Assert.Equal(99.999, line.Points[^1].X, 6);
+        var window = new PlotPanelsWindow([panel], new PlotViewOptions { UseDownsampling = true }, new DisplayLimits(), false, false, null);
+        try
+        {
+            var method = typeof(PlotPanelsWindow).GetMethod("BuildSeries", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var line = (LineSeries)method.Invoke(window, [panel.SeriesData[0], 10d, 11d])!;
+            Assert.Equal(0, line.Points[0].X); Assert.Equal(99.999, line.Points[^1].X, 6);
+        }
+        finally { window.Close(); }
         return Task.CompletedTask;
     });
 

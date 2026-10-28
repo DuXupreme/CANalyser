@@ -30,6 +30,9 @@ public sealed class PeakTrcParser : ICanLogParser
         {
             var report = new ParseReportBuilder(Name);
             DateTimeOffset? startTimeUtc = null;
+            PeakTrcColumns? columns = null;
+            var coverage = new MeasurementCoverage([]);
+            long? previousTimestamp = null;
             await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream);
             var length = stream.Length;
@@ -42,6 +45,13 @@ public sealed class PeakTrcParser : ICanLogParser
                 if (lineNumber % 2000 == 0)
                     ParserUtilities.ReportFileProgress(stream, length, progress, "Parser: PEAK .trc...", 5, 10);
                 var trimmed = line.Trim();
+                if (trimmed.StartsWith(";$COLUMNS=", StringComparison.OrdinalIgnoreCase))
+                {
+                    report.NonData();
+                    try { columns = new PeakTrcColumns(trimmed[(trimmed.IndexOf('=') + 1)..]); }
+                    catch (FormatException ex) { throw new InvalidDataException(ex.Message, ex); }
+                    continue;
+                }
                 if (trimmed.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase))
                 {
                     report.NonData();
@@ -50,7 +60,10 @@ public sealed class PeakTrcParser : ICanLogParser
                     {
                         try
                         {
-                            startTimeUtc = new DateTimeOffset(DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Utc));
+                            var parsedStart = new DateTimeOffset(DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Utc));
+                            if (startTimeUtc is { } priorStart && priorStart != parsedStart)
+                                throw new InvalidDataException("De absolute starttijd verandert binnen één PEAK-bestand. Open de opnames afzonderlijk.");
+                            startTimeUtc = parsedStart;
                         }
                         catch (ArgumentException)
                         {
@@ -69,6 +82,21 @@ public sealed class PeakTrcParser : ICanLogParser
                     continue;
                 }
 
+                if (columns is not null)
+                {
+                    try
+                    {
+                        var frame = columns.Parse(trimmed, rows.Count, lineNumber);
+                        if (frame is null) { report.NonData(); continue; }
+                        Append(frame);
+                    }
+                    catch (Exception ex) when (ex is FormatException or OverflowException)
+                    {
+                        report.Reject(lineNumber, "PEAK_VALUE", ex.Message, line);
+                    }
+                    continue;
+                }
+
                 var match = ParserRegex.PeakTrcTsv().Match(trimmed);
                 var tsv = match.Success;
                 if (!tsv) match = ParserRegex.PeakTrcClassic().Match(trimmed);
@@ -80,18 +108,30 @@ public sealed class PeakTrcParser : ICanLogParser
 
                 try
                 {
-                    rows.Append(ParseMatch(match, tsv, rows.Count, lineNumber));
-                    report.Accepted();
+                    Append(ParseMatch(match, tsv, rows.Count, lineNumber));
                 }
                 catch (Exception ex) when (ex is FormatException or OverflowException)
                 {
                     report.Reject(lineNumber, "PEAK_VALUE", ex.Message, line);
                 }
+
+                void Append(RawCanFrame frame)
+                {
+                    if (previousTimestamp is { } previous && frame.TimestampNanoseconds < previous)
+                    {
+                        report.Reject(lineNumber, "CLOCK_REVERSAL", "De tijd loopt achteruit binnen één opname; samenvoegen zou de klokbreuk verbergen.", line);
+                        throw new ImportIntegrityException("De logtijd loopt achteruit. Open de ononderbroken delen afzonderlijk.", report.Build(mode));
+                    }
+                    previousTimestamp = frame.TimestampNanoseconds;
+                    rows.Append(frame);
+                    coverage.Add(frame);
+                    report.Accepted();
+                }
             }
 
             if (rows.Count == 0) { rows.Dispose(); return null; }
             rows.Complete();
-            var built = report.Build(mode);
+            var built = coverage.Apply(report.Build(mode));
             return new CanLogParseResult(rows, built, built.HasErrors ? DatasetCompleteness.Partial : DatasetCompleteness.Complete, startTimeUtc);
         }
         catch
@@ -112,7 +152,7 @@ public sealed class PeakTrcParser : ICanLogParser
         var fd = ContainsFlag(tail, "fd") || data.Length > 8;
         // PEAK TSV uses a standalone `x` flag for an extended frame. Do not search
         // for the character itself: the receive direction `Rx` also contains `x`.
-        var extended = id > 0x7FF || (tsv && ContainsFlag(tail, "x"));
+        var extended = id > 0x7FF || (!tsv && match.Groups["id"].Value.Length == 8) || (tsv && ContainsFlag(tail, "x"));
         if (!CanFrameValidation.TryNormalize(id, extended, declared, data.Length, fd, out var dlc, out var format, out var error))
             throw new FormatException(error);
         var direction = CanFrameValidation.ParseDirection(tail);

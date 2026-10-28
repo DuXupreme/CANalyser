@@ -1,0 +1,93 @@
+CANalyser: robuuste logverwerking, voorbereiding zonder SD-kaarten
+19 oktober 2026
+
+Status
+Deze wijzigingen staan in de lokale broncode. Er is geen nieuwe release
+gepubliceerd en de geinstalleerde app is hiermee niet automatisch vervangen.
+Loggerconfiguraties, MRS-firmware op de machines en productie-AWS zijn niet
+aangepast. Bestaande logbestanden zijn niet herschreven.
+
+Tijd en herkomst
+- De oorspronkelijke loggerklok en ontvangsttijd op de server blijven apart.
+- Zonder onderbouwde tijdbron is de klokkwaliteit 'unverified'. Een grote
+  afstand tussen loggerdatum en uploadtijd bewijst geen uploadachterstand.
+- Een teruglopende klok in een bestand of oplopende reeks sessies/delen
+  wordt afgewezen, zodat chronologisch sorteren die klokbreuk niet verbergt.
+- CANedge-headerinformatie bewaart logger, sessie, firmware/configuratie en
+  machine-, installatie- en configuratierevisie, indien aanwezig. Die identiteit
+  bewijst geen UTC.
+- Bij een tussen machines verplaatste logger geeft een onbevestigde klok geen
+  automatische machinetoewijzing. Bevestigde installatiegegevens blijven
+  behouden; strijdige headergegevens worden afgewezen. Historische logs blijven
+  intact.
+
+Grijze meetonderbrekingen
+- MF4-conversie bewaart CAN-kanaal, frameformaat en extended-ID.
+- Meer dan 1 seconde zonder dataframes vormt een waargenomen onderbreking.
+  Dit zegt op zichzelf niets over de oorzaak of eventuele pakketverliezen.
+- Onderbrekingen worden binnen bestanden, tussen bestanden en per kanaal
+  bepaald. De grijze gebieden volgen de getoonde kanalen en grafieklijnen
+  worden op het betreffende kanaal onderbroken.
+- Interne CANedge-berichten op kanaal 9 vullen geen gaten in machinegegevens.
+  Kanaal 9 uit een gewone TRC wordt niet automatisch als intern behandeld.
+- Interne frames blijven in de ruwe gegevens; machinedecodering sluit alleen
+  bewezen interne kanalen uit en behoudt oorspronkelijke frame-indexen.
+- Analyses en export gebruiken de meetdekking van hun betrokken kanalen.
+  Een gewone bestandsgrens zonder meetstilte introduceert geen grijs vlak.
+
+Downloads en export
+- Online ZIP-downloads bevatten canalyser-log-manifest.json met herkomst,
+  tijdkwaliteit, metadatarevisie, grootte en SHA-256 per MF4.
+- Downloadplan, ontvangen bestandsversie, grootte en beschikbare checksums
+  worden gecontroleerd. Onvolledige of gewijzigde bestanden worden afgewezen.
+- Cachehergebruik controleert opnieuw alle manifestbestanden en hun hashes.
+- Analysebundels bevatten sources.json, channel_gaps.json en
+  logger_diagnostics.json. CSV kan clock_quality naast de originele tijden
+  exporteren. Tijden worden niet stilzwijgend gecorrigeerd.
+
+Achterstand
+- Laatste serverontvangst is zichtbaar; dit is geen bewijs dat alles binnen is.
+- LogInventoryReconciler vergelijkt een bekende SD-inventaris met ontvangen
+  bestanden op logger, sessie, deelnummer, grootte en SHA-256. Dubbele ontvangst
+  telt niet dubbel. Zonder actuele kaartinformatie blijft de huidige wachtrij
+  onbekend, ook als alle bestanden van een oudere inventaris ontvangen zijn.
+
+Backendvoorbereiding
+De offline dashboardpatch staat in:
+C:\Dev\CANalyser\artifacts\robust-logging-dashboard-20261019
+Deze is gebaseerd op de bewaarde deployment van 15 oktober. Voor deployment
+moet de huidige live bronversie ermee worden vergeleken. Dit is geen bevestiging
+dat productie al is aangepast. Zie het begeleidende statusbestand in die map.
+
+Nog nodig met de SD-kaarten en machines
+1. Per logger een volledige backup en inventaris maken; niets formatteren.
+2. Werkelijke firmware/configuratie, logger-ID en machine controleren.
+3. Per installatie een vaste identiteit en configuratierevisie toekennen.
+4. Tijdbron, interne diagnostiek en voorgestelde bestandsgrenzen (50 MB of
+   120 seconden, wat eerst komt) tegen de echte configuratie valideren.
+5. SD-configuratie en eventuele online configuratie op elkaar afstemmen.
+6. Op de machine laden met sleutel uit testen: logger blijft gevoed en uploadt.
+7. Een gecontroleerde CAN-onderbreking en een echte loggerherstart opnemen.
+8. Nieuwe MF4-bestanden lokaal en online vergelijken: kanalen, tijdbron,
+   herkomst, hashes, grijze onderbrekingen en ontbreken van overbruggende lijnen.
+9. Kaartinventaris met serverontvangst vergelijken; daarna pas de gezamenlijke
+   logger/app/backendwijziging als op de machines gevalideerd beschouwen.
+
+Validatie op 19 oktober, aangevuld na gezamenlijke sessie-audit
+- Gecombineerde Release-build: Core 411 en App/WPF 203 tests geslaagd,
+  0 mislukt en 0 overgeslagen. Dit omvat ook de nieuwe delay-analyse.
+- Audit herstelde twee vals-positieve delaygevallen door losse meetpieken,
+  correlatie over meetgaten en extra werk per punt/CSV-rij bij veel bestanden.
+- Backendvoorbereiding: 32 Node-tests en TypeScript-typecontrole geslaagd.
+  De oude webdownloadroutes zijn nog niet op het nieuwe manifest aangesloten.
+- De optionele echte MF4-test is met een bestaand bestand daadwerkelijk
+  uitgevoerd via de meegeleverde converter (geen leeg overgeslagen testpad).
+- Kanaal 9 en meetgaten zijn getest met gecontroleerde TRC-gegevens. Een echte
+  MF4-opname met interne kanaal-9-berichten ontbreekt nog en is morgen nodig.
+- git diff --check heeft geen whitespacefouten gevonden.
+- Definitieve audit/resultaten/overdracht:
+  C:\Dev\CANalyser\artifacts\session-audit-20261019
+
+Een fysieke machineproef blijft nodig om de werkelijke voeding, wifi, tijdbron
+en uploadvoortgang te bevestigen. Automatische tests zijn geen garantie voor
+alle mogelijke loggerconfiguraties of een bewijs van fysieke machinewerking.

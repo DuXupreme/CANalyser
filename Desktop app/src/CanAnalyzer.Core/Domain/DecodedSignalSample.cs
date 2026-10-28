@@ -34,6 +34,8 @@ public sealed record DecodedSignalSample(
     string Unit = "",
     DecodeQuality Quality = DecodeQuality.Valid)
 {
+    public int SourceFileIndex { get; init; } = -1;
+    public long SourceFrameIndex { get; init; } = -1;
     public double TimeSeconds => TimestampNanoseconds / 1_000_000_000d;
     public uint FrameId => Identity.FrameId;
     public string Channel => Identity.Channel;

@@ -16,10 +16,8 @@ namespace CanAnalyzer.App.ViewModels;
 public sealed partial class ActiveUsageViewModel : ObservableObject
 {
     public ActiveUsageResult? ExportResult { get; private set; }
-    private const int MaximumAnalysisPointsPerSignal = 250_000;
     private const string NoSignal = "(geen — gebruik meetdekking als schatting)";
     private readonly ITelemetryService _telemetryService;
-    private Dictionary<string, SignalSeries> _analysisSeriesCache = new(StringComparer.Ordinal);
     private CanDataset? _dataset;
     private CancellationTokenSource? _calculation;
     private int _revision;
@@ -41,8 +39,16 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     [ObservableProperty] private string _socRateThreshold = "5";
     [ObservableProperty] private string _capacityKwh = "15";
     [ObservableProperty] private string _reserveSoc = "20";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UsesBatteryCountSignal))]
+    [NotifyPropertyChangedFor(nameof(UsesManualBatteryCount))]
+    private int _batteryCountSourceIndex;
+    [ObservableProperty] private string? _batteryCountSignal;
+    [ObservableProperty] private string _confirmedBatteryCount = string.Empty;
+    [ObservableProperty] private string _batteryCountSummary = "Accuaantal onbekend. Kies alleen een bron die het aantal actieve accupacks vastlegt.";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _hasResult;
+    [ObservableProperty] private ModuleResult<ActiveUsageResult>? _analysisResult;
     [ObservableProperty] private string _status = "Laad meetdata om actief gebruik en batterijduur te berekenen.";
     [ObservableProperty] private string _scope = "Hele meting; de tijdvelden bovenaan begrenzen de analyse.";
     [ObservableProperty] private string _notes = string.Empty;
@@ -60,6 +66,11 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     public ObservableCollection<MetricRow> TimeMetrics { get; } = [];
     public ObservableCollection<MetricRow> EnergyMetrics { get; } = [];
     public ObservableCollection<MetricRow> BatteryMetrics { get; } = [];
+    public ObservableCollection<MetricRow> BatteryConfigurationMetrics { get; } = [];
+    public ObservableCollection<BatteryCountInterval> BatteryCountIntervals { get; } = [];
+    public string[] BatteryCountSources { get; } = ["Onbekend", "CAN-signaal: actieve accupacks", "Handmatig bevestigd voor deze periode"];
+    public bool UsesBatteryCountSignal => BatteryCountSourceIndex == 1;
+    public bool UsesManualBatteryCount => BatteryCountSourceIndex == 2;
     public IAsyncRelayCommand CalculateCommand { get; }
 
     partial void OnIsBusyChanged(bool value) => CalculateCommand.NotifyCanExecuteChanged();
@@ -73,10 +84,16 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
+        if (!_loading && e.PropertyName is nameof(ActivitySignal) or nameof(SocSignal) or nameof(OnSignal) or nameof(UseSocSlope) or
+            nameof(Threshold) or nameof(OnThreshold) or nameof(BridgeSeconds) or nameof(MinimumSeconds) or nameof(MaxGapSeconds) or
+            nameof(SocWindow) or nameof(SocRateThreshold) or nameof(DirectionIndex)) ActivityThresholdConfirmed = false;
+        if (!_loading && e.PropertyName is nameof(CapacityKwh) or nameof(BatteryCountSourceIndex) or nameof(BatteryCountSignal) or nameof(ConfirmedBatteryCount))
+            CapacityConfirmed = false;
         if (!_loading && e.PropertyName is nameof(ActivitySignal) or nameof(SocSignal) or nameof(OnSignal) or
             nameof(UseSocSlope) or nameof(Threshold) or nameof(OnThreshold) or nameof(BridgeSeconds) or
             nameof(MinimumSeconds) or nameof(MaxGapSeconds) or nameof(SocWindow) or nameof(SocRateThreshold) or
-            nameof(CapacityKwh) or nameof(ReserveSoc) or nameof(DirectionIndex))
+            nameof(CapacityKwh) or nameof(ReserveSoc) or nameof(DirectionIndex) or nameof(BatteryCountSourceIndex) or
+            nameof(BatteryCountSignal) or nameof(ConfirmedBatteryCount) or nameof(ActivityThresholdConfirmed) or nameof(CapacityConfirmed))
             Invalidate();
     }
 
@@ -84,8 +101,6 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
     {
         Invalidate();
         _dataset = dataset;
-        // A running calculation owns its old cache until its dataset lease is released.
-        _analysisSeriesCache = new(StringComparer.Ordinal);
         _loading = true;
         try
         {
@@ -104,11 +119,17 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
             DirectionIndex = 0;
             // An enabled motor is not necessarily the machine's ignition/power state. Let the user choose.
             OnSignal = NoSignal;
+            // Names and the number of SOC channels do not prove how many packs are active.
+            BatteryCountSourceIndex = 0;
+            BatteryCountSignal = null;
+            ConfirmedBatteryCount = string.Empty;
+            ActivityThresholdConfirmed = CapacityConfirmed = false;
             UseSocSlope = ActivitySignal is null && SocSignal is not null;
         }
         finally { _loading = false; }
         CalculateCommand.NotifyCanExecuteChanged();
-        Status = "Signalen voorgeselecteerd. Controleer eenheden en grenswaarden; klik Bereken actief gebruik.";
+        Status = "Signalen voorgeselecteerd. Beschikbare gebruiksanalyse wordt automatisch berekend.";
+        ScheduleAutomaticUsage();
     }
 
     public void SetTimeWindow(double? start, double? end)
@@ -126,11 +147,16 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         _calculation?.Cancel();
         HasResult = false;
         ExportResult = null;
+        AnalysisResult = null;
         TimeMetrics.Clear();
         EnergyMetrics.Clear();
         BatteryMetrics.Clear();
+        BatteryConfigurationMetrics.Clear();
+        BatteryCountIntervals.Clear();
+        BatteryCountSummary = "Accuaantal onbekend of opnieuw te berekenen. De capaciteit blijft het handmatig ingevulde totaal.";
         Notes = string.Empty;
-        Status = "Instellingen gewijzigd. Klik Bereken actief gebruik voor actuele resultaten.";
+        Status = "Instellingen gewijzigd; gebruiksanalyse wordt automatisch bijgewerkt.";
+        ScheduleAutomaticUsage();
     }
 
     private async Task CalculateAsync()
@@ -143,18 +169,24 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         IsBusy = true;
         HasResult = false;
         ExportResult = null;
+        AnalysisResult = null;
         Status = "Actief gebruik geheugenveilig berekenen over de volledige meetperiode…";
         var operationId = _telemetryService.BeginCriticalOperation("active_usage_analysis", new Dictionary<string, object?>
         {
             ["decoded_sample_bucket"] = TelemetryBuckets.Count(dataset.DecodedSamples.Count),
-            ["maximum_points_per_signal"] = MaximumAnalysisPointsPerSignal
+            ["source_sample_analysis"] = true
         });
         try
         {
             var activityLabel = ActivitySignal;
             var socLabel = SocSignal;
             var onLabel = OnSignal;
-            var cache = _analysisSeriesCache;
+            if (!string.IsNullOrWhiteSpace(onLabel) && onLabel != NoSignal && !dataset.SignalSeriesByLabel.ContainsKey(onLabel))
+                throw new ArgumentException("Het ingestelde aan/uit-signaal ontbreekt of is gewijzigd. Kies en bevestig de koppeling opnieuw; meetdekking vervangt dit filter niet.");
+            var batteryCountLabel = UsesBatteryCountSignal ? BatteryCountSignal : null;
+            int? manualBatteryCount = UsesManualBatteryCount ? ParseCount(ConfirmedBatteryCount) : null;
+            if (UsesBatteryCountSignal && (batteryCountLabel is null || !dataset.SignalSeriesByLabel.ContainsKey(batteryCountLabel)))
+                throw new ArgumentException("Kies een gedocumenteerd signaal voor het aantal actieve accupacks.");
             var options = new ActiveUsageOptions
             {
                 Method = UseSocSlope ? ActivityDetectionMethod.SocSlope : ActivityDetectionMethod.SignalThreshold,
@@ -163,9 +195,24 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
                 BridgePauseSeconds = Parse(BridgeSeconds, "Korte pauze"), MinimumActivitySeconds = Parse(MinimumSeconds, "Minimum werkperiode"),
                 MaximumSampleGapSeconds = Parse(MaxGapSeconds, "Maximale sampleafstand"),
                 SocWindowSeconds = Parse(SocWindow, "SOC-venster"), SocDropPerHourThreshold = Parse(SocRateThreshold, "SOC-daling"),
-                BatteryCapacityKwh = Parse(CapacityKwh, "Accucapaciteit"), ReserveSocPercent = Parse(ReserveSoc, "Reserve"),
-                StartSeconds = _start ?? (dataset.RawCount > 0 ? dataset.RawFrames[0].TimeSeconds : null),
-                EndSeconds = _end ?? (dataset.RawCount > 0 ? dataset.RawFrames[^1].TimeSeconds : null)
+                BatteryCapacityKwh = Parse(CapacityKwh, "Accucapaciteit"), ReserveSocPercent = Parse(ReserveSoc, "Reserve")
+            };
+            var request = new AnalysisRunRequest
+            {
+                Scope = _start.HasValue || _end.HasValue ? "TimeWindow" : "FullDataset",
+                StartSeconds = _start, EndSeconds = _end,
+                Modules = AnalysisModules.ActiveUsage | AnalysisModules.Battery,
+                Profile = new AnalysisProfile
+                {
+                    Id = "expert-active-usage", DbcSha256 = dataset.DbcSha256,
+                    SourceLogSha256 = dataset.SourceLogSha256, MaximumGapSeconds = options.MaximumSampleGapSeconds,
+                    Usage = new UsageAnalysisProfile
+                    {
+                        Activity = Identity(activityLabel), Soc = Identity(socLabel), On = Identity(onLabel),
+                        Options = options, ThresholdConfirmed = ActivityThresholdConfirmed, CapacityConfirmed = CapacityConfirmed
+                    },
+                    Battery = new(Identity(batteryCountLabel), manualBatteryCount)
+                }
             };
             var reader = dataset.AcquireReadLease();
             var result = await Task.Run(() =>
@@ -173,15 +220,22 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
                 using (reader)
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
-                    var activity = Resolve(dataset, activityLabel, cache);
-                    var soc = Resolve(dataset, socLabel, cache);
-                    var on = Resolve(dataset, onLabel, cache);
-                    return new ActiveUsageAnalyzer().Analyze(activity, soc, on, options,
-                        dataset.ImportReport?.Gaps, cancellation.Token);
+                    return new AnalysisRunService().AnalyzeDetails(dataset, request, cancellation.Token).ActiveUsage;
                 }
             });
-            if (revision != _revision) return;
-            ShowResult(result, dataset.Completeness);
+            if (revision != _revision || !ReferenceEquals(dataset, _dataset)) return;
+            AnalysisResult = result;
+            if (result.Value is { } usage)
+            {
+                ShowResult(usage, dataset.Completeness);
+                Notes += "\n" + result.Explanation;
+            }
+            else
+            {
+                Timeline = new();
+                Status = "Actief gebruik niet berekend: " + result.Explanation;
+                Notes = result.Explanation;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -202,6 +256,7 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         TimeMetrics.Clear();
         EnergyMetrics.Clear();
         BatteryMetrics.Clear();
+        ShowBatteryConfiguration(r.BatteryConfiguration);
         Add(TimeMetrics, "Totale periode", Duration(r.EndSeconds - r.StartSeconds));
         Add(TimeMetrics, r.HasOnSignal ? "Gemeten aan-tijd" : "Aan-tijd (schatting meetdekking)", Duration(r.OnSeconds));
         Add(TimeMetrics, "Actief gebruik", Duration(r.ActiveSeconds));
@@ -217,19 +272,19 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         Add(EnergyMetrics, "SOC eerste → laatste geldige meting", r.StartSoc.HasValue ? $"{Number(r.StartSoc.Value)} → {Number(r.EndSoc!.Value)} %" : "niet beschikbaar");
         Add(EnergyMetrics, "Netto SOC begin → einde (incl. gaten)", Format(r.StartSoc - r.EndSoc, "procentpunt"));
         Add(EnergyMetrics, "Tijd met geldige SOC-dekking", Duration(total.CoveredSeconds));
-        Add(EnergyMetrics, "Netto energie binnen SOC-dekking", total.CoveredSeconds > 0 ? Format(total.NetKwh, "kWh") : "niet beschikbaar");
-        Add(EnergyMetrics, "Actief: SOC / energie", EnergyText(active));
-        Add(EnergyMetrics, "Aan zonder activiteit: SOC / energie", EnergyText(idle));
-        Add(EnergyMetrics, "Uit / onbekend: netto energie", total.CoveredSeconds > 0 ? Format(total.NetKwh - active.NetKwh - idle.NetKwh, "kWh") : "niet beschikbaar");
+        Add(EnergyMetrics, "Netto energie binnen SOC-dekking", !CapacityConfirmed ? "bevestig totale capaciteit" : total.CoveredSeconds > 0 ? Format(total.NetKwh, "kWh") : "niet beschikbaar");
+        Add(EnergyMetrics, "Actief: SOC / energie", CapacityConfirmed ? EnergyText(active) : Format(active.DischargeSocPoints - active.RiseSocPoints, "procentpunt; kWh onbevestigd"));
+        Add(EnergyMetrics, "Aan zonder activiteit: SOC / energie", CapacityConfirmed ? EnergyText(idle) : Format(idle.DischargeSocPoints - idle.RiseSocPoints, "procentpunt; kWh onbevestigd"));
+        Add(EnergyMetrics, "Uit / onbekend: netto energie", !CapacityConfirmed ? "bevestig totale capaciteit" : total.CoveredSeconds > 0 ? Format(total.NetKwh - active.NetKwh - idle.NetKwh, "kWh") : "niet beschikbaar");
         Add(EnergyMetrics, "SOC-stijging (laden / BMS-correctie)", total.CoveredSeconds > 0 ? Format(total.RiseSocPoints, "procentpunt") : "niet beschikbaar");
 
-        Add(BatteryMetrics, "Gemiddeld vermogen tijdens activiteit", Format(active.AverageKw, "kW"));
-        Add(BatteryMetrics, "Gemiddeld vermogen aan zonder activiteit", Format(idle.AverageKw, "kW"));
-        Add(BatteryMetrics, "Volle accu: continu actief (100 → 0%)", Hours(r.ActiveRuntimeHours));
-        Add(BatteryMetrics, "Volle accu: huidig gebruikspatroon", Hours(r.MixedRuntimeHours));
-        Add(BatteryMetrics, $"Huidig patroon: 100 → {Number(r.Options.ReserveSocPercent)}%", Hours(r.MixedRuntimeHours * (100 - r.Options.ReserveSocPercent) / 100));
-        Add(BatteryMetrics, $"Resterend: continu actief tot {Number(r.Options.ReserveSocPercent)}%", Hours(r.RemainingActiveHours));
-        Add(BatteryMetrics, $"Resterend: huidig patroon tot {Number(r.Options.ReserveSocPercent)}%", Hours(r.RemainingMixedHours));
+        Add(BatteryMetrics, "Gemiddeld vermogen tijdens activiteit", CapacityConfirmed ? Format(active.AverageKw, "kW") : "bevestig totale capaciteit");
+        Add(BatteryMetrics, "Gemiddeld vermogen aan zonder activiteit", CapacityConfirmed ? Format(idle.AverageKw, "kW") : "bevestig totale capaciteit");
+        Add(BatteryMetrics, "Volle accu: continu actief (100 → 0%)", Runtime(r.ActiveRuntimeHours));
+        Add(BatteryMetrics, "Volle accu: huidig gebruikspatroon", Runtime(r.MixedRuntimeHours));
+        Add(BatteryMetrics, $"Huidig patroon: 100 → {Number(r.Options.ReserveSocPercent)}%", Runtime(r.MixedRuntimeHours * (100 - r.Options.ReserveSocPercent) / 100));
+        Add(BatteryMetrics, $"Resterend: continu actief tot {Number(r.Options.ReserveSocPercent)}%", Runtime(r.RemainingActiveHours));
+        Add(BatteryMetrics, $"Resterend: huidig patroon tot {Number(r.Options.ReserveSocPercent)}%", Runtime(r.RemainingMixedHours));
         Add(BatteryMetrics, "SOC-dekking actief / inactief", $"{Coverage(active.CoveredSeconds, r.ActiveSeconds)} / {Coverage(idle.CoveredSeconds, r.IdleSeconds)}");
 
         var notes = new List<string>
@@ -239,15 +294,56 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
                 ? $"Activiteit afgeleid uit SOC-daling ≥ {Number(r.Options.SocDropPerHourThreshold)} procentpunt/uur in vensters van {Number(r.Options.SocWindowSeconds)} s. Controleer dit bij voorkeur met RPM of actuatorkracht."
                 : $"Activiteit: {(r.Options.Direction == ActivitySignalDirection.Absolute ? "|signaal|" : r.Options.Direction == ActivitySignalDirection.Negative ? "−signaal" : "signaal")} > {Number(r.Options.ActivityThreshold)} in de gedecodeerde eenheid. Bij BMS-stroom: kies het teken van ontladen om laadstroom uit te sluiten.",
             $"Korte bekende pauzes tot {Number(r.Options.BridgePauseSeconds)} s tellen mee binnen een werkperiode; minimumduur {Number(r.Options.MinimumActivitySeconds)} s. Datagaten worden nooit overbrugd.",
-            $"Energie is geschat uit SOC met {Number(r.Options.BatteryCapacityKwh)} kWh bruikbare capaciteit en een lineaire SOC-schaal. Vermogen gebruikt uitsluitend de bijbehorende tijd met SOC-dekking (1 kW = 1 kWh per uur).",
+            CapacityConfirmed ? $"Energie is geschat uit SOC met {Number(r.Options.BatteryCapacityKwh)} kWh bevestigde bruikbare capaciteit en een lineaire SOC-schaal. Vermogen gebruikt uitsluitend de bijbehorende tijd met SOC-dekking (1 kW = 1 kWh per uur)."
+                : "Totale bruikbare capaciteit is niet bevestigd: SOC blijft beschikbaar, kWh en kW worden niet als resultaat getoond.",
             "Batterijduur is een extrapolatie bij dezelfde belasting en verdeling actief/inactief. Minimaal 90% SOC-dekking is vereist per gebruikte toestand; een onbekende gebruiksverdeling krijgt geen voorspelling."
         };
-        if (!r.CanProject) notes.Add("SOC stijgt meer dan 0,5 procentpunt: batterijduur is niet voorspeld wegens mogelijk laden of BMS-correcties.");
+        if (r.TotalEnergy.RiseSocPoints > 0.5) notes.Add("SOC stijgt meer dan 0,5 procentpunt: batterijduur is niet voorspeld wegens mogelijk laden of BMS-correcties.");
+        if (r.BatteryConfiguration?.HasConfigurationChanges == true)
+            notes.Add("Het waargenomen aantal actieve accupacks verandert. Energie, vermogen en accuduurprognoses zijn voor deze hele periode niet beschikbaar; kies een deelperiode met dezelfde accuconfiguratie. De gemeten SOC-verandering blijft zichtbaar.");
+        notes.Add("Accuaantal verandert de ingevoerde totale kWh niet. Deze capaciteit is het totaal, niet per pack. Controleer dat het SOC-signaal bij diezelfde configuratie hoort. Communicerende of fysiek geplaatste packs zijn niet automatisch actieve packs.");
         if (completeness == DatasetCompleteness.Partial) notes.Add("PARTIAL-dataset: afgewezen of ontbrekende brondata kunnen de uitkomst beïnvloeden.");
         Notes = string.Join("\n", notes);
         Timeline = BuildTimeline(r);
         Status = $"Berekend over {Number(r.StartSeconds)}–{Number(r.EndSeconds)} s. {r.Intervals.Count(x => x.State == UsageState.Active)} werkperiodes gevonden.";
+        if (!ActivityThresholdConfirmed) Status += " Indicatief: bevestig activiteitssignaal en grens voor gebruiksramingen.";
+        string Runtime(double? hours) => !ActivityThresholdConfirmed ? "bevestig activiteitsdefinitie"
+            : AnalysisResult?.ReasonCodes.Contains("battery_configuration_unavailable") == true
+                ? "accuconfiguratie niet beschikbaar" : Hours(hours);
         HasResult = true;
+    }
+
+    private void ShowBatteryConfiguration(BatteryConfigurationResult? configuration)
+    {
+        BatteryConfigurationMetrics.Clear();
+        BatteryCountIntervals.Clear();
+        if (configuration is null) return;
+        var source = configuration.Source switch
+        {
+            BatteryCountSource.ActivePackCountSignal => "Gekozen CAN-signaal",
+            BatteryCountSource.ConfirmedManual => "Handmatig bevestigd (niet gemeten)",
+            _ => "Onbekend"
+        };
+        Add(BatteryConfigurationMetrics, "Bron accuaantal", source);
+        if (configuration.SignalLabel is not null) Add(BatteryConfigurationMetrics, "Signaal actieve packs", configuration.SignalLabel);
+        Add(BatteryConfigurationMetrics, "Actieve accupacks: minimum / maximum", configuration.MinimumCount.HasValue
+            ? $"{configuration.MinimumCount} / {configuration.MaximumCount}" : "onbekend");
+        Add(BatteryConfigurationMetrics, "Waargenomen aantalswisselingen", configuration.Source == BatteryCountSource.ActivePackCountSignal
+            ? configuration.ObservedChanges.ToString(CultureInfo.GetCultureInfo("nl-NL")) : "niet gemeten");
+        Add(BatteryConfigurationMetrics, configuration.Source == BatteryCountSource.ConfirmedManual ? "Handmatig bevestigde periode" : "Meetdekking accuaantal",
+            Format(configuration.CoveragePercent, "%"));
+        Add(BatteryConfigurationMetrics, "Totale bruikbare capaciteit (handmatig)", CapacityKwh + " kWh");
+        foreach (var interval in configuration.Intervals.Take(200)) BatteryCountIntervals.Add(interval);
+        BatteryCountSummary = configuration.Source == BatteryCountSource.Unknown
+            ? "Accuaantal onbekend. Er wordt geen aantal afgeleid uit spanning of het aantal SOC-signalen."
+            : configuration.HasConfigurationChanges
+                ? "Accuaantal verandert: accuduurprognose onderdrukt. Kies een periode met dezelfde accuconfiguratie."
+                : configuration.MinimumCount.HasValue
+                    ? configuration.Source == BatteryCountSource.ConfirmedManual
+                        ? $"{configuration.MinimumCount} actieve accupacks binnen de handmatig bevestigde periode."
+                        : $"{configuration.MinimumCount} actieve accupacks waargenomen; meetdekking {Number(configuration.CoveragePercent)}%."
+                    : "Het gekozen accuaantal-signaal bevat geen geldige, voldoende dicht opeenvolgende tellingen.";
+        if (configuration.Intervals.Count > 200) BatteryCountSummary += " Hieronder staan de eerste 200 periodes; de analyse-export bevat ze allemaal.";
     }
 
     private static PlotModel BuildTimeline(ActiveUsageResult r)
@@ -279,14 +375,6 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         return model;
     }
 
-    private static SignalSeries? Resolve(CanDataset dataset, string? label, Dictionary<string, SignalSeries> cache)
-    {
-        if (label is null || !dataset.SignalSeriesByLabel.TryGetValue(label, out var series)) return null;
-        if (cache.TryGetValue(label, out var cached)) return cached;
-        cached = series.ForAnalysis(MaximumAnalysisPointsPerSignal);
-        cache[label] = cached;
-        return cached;
-    }
     private static bool Contains(string text, string part) => text.Contains(part, StringComparison.OrdinalIgnoreCase);
     private static bool IsBmsCurrent(string label) => (Contains(label, "BMS") || Contains(label, "Battery") || Contains(label, "Pack")) &&
         Contains(label, "Current") && !Contains(label, "Limit") && !Contains(label, "Max") && !Contains(label, "Allowed") && !Contains(label, "Request");
@@ -294,6 +382,8 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         (Contains(label, "RPM") || Contains(label, "MotorSpeed") || Contains(label, "Motor_Speed") || Contains(label, "ActualVelocity") || Contains(label, "ActualSpeed"));
     private static double Parse(string text, string label) => double.TryParse(text.Replace(',', '.'), NumberStyles.Float,
         CultureInfo.InvariantCulture, out var value) && double.IsFinite(value) ? value : throw new ArgumentException($"{label}: voer een geldig getal in.");
+    private static int ParseCount(string text) => int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0
+        ? count : throw new ArgumentException("Bevestigd accuaantal: voer een positief geheel getal in.");
     private static void Add(ObservableCollection<MetricRow> rows, string label, string value) => rows.Add(new MetricRow(label, value));
     private static string Number(double value) => value.ToString("0.##", CultureInfo.GetCultureInfo("nl-NL"));
     private static string Format(double? value, string unit) => value.HasValue && double.IsFinite(value.Value) ? $"{Number(value.Value)} {unit}" : "niet beschikbaar";
@@ -302,5 +392,5 @@ public sealed partial class ActiveUsageViewModel : ObservableObject
         ? $"≈ {Number(hours.Value)} uur" : "niet betrouwbaar te bepalen";
     private static string Coverage(double covered, double total) => total > 0 ? Format(100 * covered / total, "%") : "n.v.t.";
     private static string EnergyText(UsageEnergy energy) => energy.CoveredSeconds > 0
-        ? $"{Number(energy.NetSocPoints)} procentpunt / {Number(energy.NetKwh)} kWh" : "niet beschikbaar";
+        ? $"{Number(energy.NetSocPoints)} procentpunt / {Format(energy.NetKwh, "kWh")}" : "niet beschikbaar";
 }

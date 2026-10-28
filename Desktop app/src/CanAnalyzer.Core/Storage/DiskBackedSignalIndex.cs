@@ -95,6 +95,39 @@ internal sealed class DiskBackedSignalIndex(string path) : ISignalSampleLookup, 
             BinaryPrimitives.ReadInt64LittleEndian(point[8..]), BinaryPrimitives.ReadDoubleLittleEndian(point[16..]));
     }
 
+    public SignalSeriesPoint? FindSignalPointAtOrBefore(SignalIdentity identity, long timestampNanoseconds)
+    {
+        Complete();
+        if (!_signals.TryGetValue(identity, out var signal) || signal.Count == 0) return null;
+        // Normal imports are ordered. Keep legacy/unordered input correct by building one
+        // signal-local index once, never rescanning the dataset on every cursor movement.
+        if (!signal.Ordered)
+        {
+            lock (signal)
+                signal.Sorted ??= ReadSignalSeries(identity).OrderBy(p => p.TimestampNanoseconds).ThenBy(p => p.FrameIndex).ToArray();
+            var points = signal.Sorted;
+            var low = 0; var high = points.Length;
+            while (low < high) { var mid = low + (high - low) / 2; if (points[mid].TimestampNanoseconds <= timestampNanoseconds) low = mid + 1; else high = mid; }
+            return low == 0 ? null : points[low - 1];
+        }
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
+        var buffer = new byte[PointBytes];
+        SignalSeriesPoint ReadAt(int index)
+        {
+            stream.Position = signal.Blocks[index / BlockPoints].Offset + index % BlockPoints * PointBytes;
+            stream.ReadExactly(buffer);
+            return ReadPoint(buffer, 0);
+        }
+        var left = 0; var right = signal.Count;
+        while (left < right)
+        {
+            var middle = left + (right - left) / 2;
+            if (ReadAt(middle).TimestampNanoseconds <= timestampNanoseconds) left = middle + 1;
+            else right = middle;
+        }
+        return left == 0 ? null : ReadAt(left - 1);
+    }
+
     private void Flush(SignalBuffer signal)
     {
         if (signal.PendingCount == 0) return;
@@ -123,9 +156,17 @@ internal sealed class DiskBackedSignalIndex(string path) : ISignalSampleLookup, 
         public double Minimum = first.Value;
         public double Maximum = first.Value;
         public DecodedSignalSample Latest = first;
+        public bool Ordered = true;
+        public long PreviousTimestamp = long.MinValue;
+        public long PreviousFrameIndex = long.MinValue;
+        public SignalSeriesPoint[]? Sorted;
 
         public void Append(DecodedSignalSample sample)
         {
+            Ordered &= sample.TimestampNanoseconds > PreviousTimestamp ||
+                sample.TimestampNanoseconds == PreviousTimestamp && sample.FrameIndex >= PreviousFrameIndex;
+            PreviousTimestamp = sample.TimestampNanoseconds;
+            PreviousFrameIndex = sample.FrameIndex;
             var target = Pending.AsSpan(PendingCount * PointBytes, PointBytes);
             BinaryPrimitives.WriteInt64LittleEndian(target, sample.TimestampNanoseconds);
             BinaryPrimitives.WriteInt64LittleEndian(target[8..], sample.FrameIndex);

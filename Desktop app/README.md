@@ -2,11 +2,12 @@
   <img src="src/CanAnalyzer.App/Resources/Branding/canalyser-lockup.svg" alt="CANalyser" width="520">
 </p>
 
-# CANalyser 2.4.13 (.NET 8 WPF)
+# CANalyser 2.5.0 (.NET 8 WPF)
 
 CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en CAN FD. De Python/Dash-prototypeversie is gearchiveerd onder `legacy/` en is nadrukkelijk niet geschikt voor productieanalyses.
 
-> Versie `2.4.13` beperkt weergave zonder downsampling tot het zichtbare tijdvak. Verschuiven, zoomen en resetten schakelen downsampling direct weer in. Losse grafiekvensters bereiden hun meetpunten op de achtergrond voor.
+> Versie `2.5.0` voegt automatische inzichten en analyseprofielen, volledige schema-3-machine-export, pakketvergelijking, SignalWatch en beheerde analyseopslag toe. Reactieanalyse behoudt geldige gebeurtenissen buiten meetgaten; online markeringen bewaren expliciete uitsluitingen. Automatische weergavedownsampling staat standaard aan, ook in losse plotvensters. Zie [release notes 2.5.0](RELEASE_NOTES_2.5.0.md).
+> Versie `2.4.16` verplaatste grafiekvoorbereiding naar de achtergrond, annuleert achterhaalde verzoeken en verbetert cursor- en markerweergave. Exacte weergave blijft beperkt tot het zichtbare tijdvak; verschuiven, zoomen en resetten herstellen automatische downsampling.
 > Versie `2.4.12` herstelt toegang tot beveiligde online logs met een aanmeldvenster. Inloggegevens kunnen optioneel maximaal 30 dagen versleuteld worden onthouden; Afmelden verwijdert ze.
 > Versie `2.4.11` bewaart eigen CSV-exportpresets en kolomvolgorde. Puntlimieten, downsampling en rijen per pagina zijn gedeeld tussen de bijbehorende vensters; deze instellingen beperken alleen de weergave, nooit de analyse of CSV-export.
 > Versie `2.4.10` voegde CSV-export met signaal-, kolom-, tijd- en opmaakkeuze toe. Versie `2.4.9` verbeterde grafiekrespons en tijdelijke opslag; versie `2.4.8` voegde gekalibreerde slagbenutting en analyse-export toe.
@@ -22,17 +23,21 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
 ## 1. Data-integriteitscontract
 
 - Exacte relatieve tijd als signed 64-bit nanoseconden; seconden zijn uitsluitend een weergave/projectie.
-- De absolute logger-starttijd blijft behouden. Plotcursors, flags en ruwe frames tonen lokale datum/tijd met UTC-offset; CSV bevat daarnaast ISO 8601 UTC en Unix-nanoseconden.
+- De oorspronkelijke logger-starttijd blijft behouden. Een UTC-notatie of monotone tijdreeks bewijst geen correcte klok. Loggerdatum, serverontvangst en klokkwaliteit blijven afzonderlijk; zonder bewijs blijft de klok onbevestigd. Plotcursors, flags en ruwe frames tonen lokale datum/tijd met UTC-offset; CSV kan ISO 8601 UTC, Unix-nanoseconden en `clock_quality` exporteren.
 - Exacte raw signaalwaarden als `BigInteger` en fysieke waarden als `double`.
 - Iedere bronregel wordt verklaard als non-data, geaccepteerd of afgewezen.
 - Strikte import is standaard; PARTIAL vereist expliciete bevestiging en synthetiseert nooit waarden.
 - Bronregel, frame-index, kanaal, richting, frameformat, DLC/payload en FD-flags blijven bewaard.
 - Append-only disk-backed frame- en samplestores voorkomen zware frame-/sampleobjectlijsten in RAM.
 - SHA-256 van bron en DBC, appversie en datasetstatus gaan mee in diagnostics en CSV.
+- Door CANalyser gedownloade archieven bewaren per MF4 een versiegebonden manifest met herkomst, klokkwaliteit, grootte en SHA-256. Cachehergebruik controleert de inhoud opnieuw; een checksum bewijst inhoudsintegriteit, geen juiste datum of machine-installatie. Oudere ZIP-bestanden zonder manifest blijven importeerbaar met onbevestigde herkomst/tijdkwaliteit.
+- Machine-installatiegegevens uit de CANedge-header of onderbouwde bronmetadata staan los van de loggerdatum. Onzekere datums wijzen een verplaatste logger niet automatisch aan een machine toe; strijdige bewezen installaties worden niet samengevoegd.
+- Waargenomen meetstilte blijft per CAN-kanaal behouden, binnen en tussen bestanden. Interne loggerdiagnostiek blijft als ruwe data beschikbaar maar vult geen machinegaten. Grijze gebieden, lijnonderbrekingen en analyses gebruiken de betrokken kanalen; ontbrekende tijd wordt geen stilstand of nulbelasting.
+- Klokterugsprongen in MF4/PEAK-reeksen worden niet door sorteren verborgen. Tijdcorrecties worden niet uit uploadtijd afgeleid.
 - Formaatprobes selecteren één parser; de generieke parser is nooit een automatische fallback.
 - Ondersteunde invoer:
   - CANedge MDF 4.11 `.mf4` (via de ingebouwde, gecontroleerde CSS Electronics-converter)
-  - dashboard-ZIP met maximaal 10.000 MF4-delen uit één logger (maximaal 512 MB per bestand en 4 GB uitgepakt totaal); binnen iedere geselecteerde sessie moeten de deelnummers opeenvolgen
+  - dashboard-ZIP met maximaal 10.000 MF4-delen uit één logger (maximaal 512 MB per bestand en 4 GB uitgepakt totaal); deelnummers binnen een sessie moeten opeenvolgen, tenzij manifest 2 ontbrekende tussendelen expliciet verklaart als versiegebonden uitsluitingen
   - PEAK `.trc` (classic + TSV flavor)
   - BUSMASTER text/log
   - CSS/CL1000 semicolon format (`Timestamp;Type;ID;Data`)
@@ -49,27 +54,32 @@ CANalyser is de enige productiecode voor traceerbare analyse van Classic CAN en 
   - manual/permissive decode counts
   - DBC message summaries
 - Signal list and grouped plotting
-- Volledige plotresolutie is standaard; downsampling kan voor zeer grote logs bewust worden ingeschakeld (standaardlimiet 5.000 punten per trace).
+- Automatische weergavedownsampling is standaard en past de getoonde punten aan het tijdvenster en de beeldruimte aan. Exact detail is tijdelijk beschikbaar voor het zichtbare venster, ook in losse plotvensters. Dit verandert geen samples, analyse of export.
 - Per-signal offsets
 - Group-level y-axis lock behavior
 - Layout preset export/import (JSON)
 - Decoded CSV export met signaal- en kolomkeuze, relatieve/absolute meettijd en instelbare CSV-opmaak
 - Eigen CSV-exportpresets bewaren signalen, kolommen, kolomvolgorde en opmaak lokaal; ontbrekende signalen worden gemeld en blijven bij het bijwerken in de preset bewaard.
 - Puntlimiet en downsampling worden gedeeld door Analyse, Instellingen en losse plotvensters. Rijen per pagina wordt gedeeld door Instellingen, Raw Frames en Busmaster. Beide beperken alleen de weergave.
+- Inzichten toont automatisch de herkende analyseonderwerpen, dekking en beperkingen. Bevestigde analyseprofielen bewaren signaalrollen en fysieke instellingen; DBC-wijzigingen maken gewijzigde bevestigingen ongeldig. Details en standaardoverzicht gebruiken dezelfde berekeningen.
+- Machine-analyse exporteren gebruikt altijd de volledige geladen opname en het passende opgeslagen profiel. Schema 3 bewaart analyses, alle signaalstatistieken, minuuttrends, bronidentiteit en ontbrekende dekking. Samples staan standaard uit; de exportmap wordt onthouden.
+- Vergelijken opent meerdere analysepakketten voor cijfers en signaaltrends. Alleen verenigbare resultaten met voldoende bron- en tijdsbewijs worden samengevoegd; gedeeltelijke bronoverlap blokkeert samenvoegen. Onbevestigde klokken geven geen automatische UTC-uitlijning.
+- SignalWatch toont gekozen signalen met sampletijd, ouderdom en meetgatstatus bij een cursor of de laatste sample.
 - Actief gebruik en batterijduur in CAN Analyse: instelbare detectie op motor-RPM,
   BMS-stroom, actuatorkracht of SOC-daling, met aan-tijd, gebruiksaandeel,
   SOC/energie per toestand en prognoses voor een instelbare accucapaciteit.
 - Actief gebruik en accuduur heeft een eigen subtab onder CAN Analyse en blijft
   gescheiden van joystick- en actuator-slaganalyse.
-- De joystick-gebruiksanalyse rapporteert afzonderlijk de werkelijke
-  slagbenutting van Left/Right/Front, inclusief P01–P99, tijd nabij beide
-  uitersten en tijd buiten een instelbare referentieslag.
+- Joystickgebruik toont X/Y-verdeling en, na bevestigde kalibratie, fysieke
+  uitslagklassen. Actuator-slagbenutting is een afzonderlijke analyse met
+  percentielen, tijd nabij uitersten en tijd buiten de bevestigde referentieslag.
 - Online CANedge-logs per machine en periode selecteren, downloaden en direct analyseren zonder AWS-sleutels op de pc
 - Bij een met wachtwoord beveiligd dashboard vraagt Online logs om dezelfde gebruikersnaam en hetzelfde wachtwoord als de website. Met **Inloggegevens 30 dagen onthouden** worden geaccepteerde gegevens via Windows DPAPI versleuteld voor de huidige Windows-gebruiker bewaard. De vaste vervaldatum schuift niet op bij gebruik; Afmelden verwijdert de opgeslagen aanmelding. Zonder vinkje geldt de aanmelding alleen tot het afsluiten van CANalyser. Inloggegevens worden alleen naar het dashboard gestuurd.
 - De laatste vijf online downloadselecties worden direct lokaal opgeslagen en kunnen na herstart of crash met één klik opnieuw worden geselecteerd.
 - Een complete sessie kan in één handeling worden toegevoegd of uitgevinkt. Meerdere sessies van dezelfde logger mogen samen worden geanalyseerd; de absolute tijd en meetonderbrekingen blijven behouden.
-- Binnen iedere geselecteerde sessie moeten de MF4-deelnummers opeenvolgen. Ongeldige selecties worden vóór de download uitgelegd en geblokkeerd.
+- Online markeringen kunnen met een reden worden gedeeld en hersteld wanneer het dashboard deze functies ondersteunt. Gemarkeerde bestanden blijven op de server staan maar worden niet gedownload. Manifest 2 bewaart de uitgesloten objectversies en markeringsrevisies, ook voor verborgen tussendelen. Alleen zulke expliciete uitsluitingen mogen een onderbreking in deelnummers verklaren; onverklaarde ontbrekende delen blijven geblokkeerd.
 - Identieke online selecties worden maximaal zeven dagen lokaal hergebruikt; oude bestanden worden automatisch verwijderd en de cache wordt tot circa 2 GB begrensd.
+- Instellingen toont download- en analyseopslag afzonderlijk. Ongebruikte beheerde analysesessies kunnen worden gewist; een aparte actie sluit eerst de dataset en wacht op achtergrondlezers. Actieve sessies, bronlogs, DBC's, profielen en exports blijven beschermd. Oude opslag zonder eigenaarregistratie blijft behouden.
 - Multi-run Actuator Testbench CSV comparison: direct wide-CSV import, automatic
   alignment on the first STEP target transition, and ready-made overlays for
   position, error, PWM, current, bus voltage, and power (no DBC required)
@@ -90,7 +100,7 @@ src/
     Interfaces/     # parser/decode/pipeline/export contracts
     Parsing/        # format parsers + parser orchestration
     Decoding/       # DbcParserLib 1.8.0 + strikte decoder
-    Analysis/       # downsampling, dataset builder, raw frame filtering, pipeline
+    Analysis/       # gedeelde analyseservice, profielen, export/vergelijking, pipeline
     Export/         # CSV export + preset JSON serialization
     Utilities/      # hex parsing, timestamp parsing, CAN/J1939 ID helpers
 
@@ -123,6 +133,15 @@ Why OxyPlot (instead of ScottPlot): this migration prioritizes MVVM-first bindin
 
 ## 4. Main UX Areas
 
+- **Inzichten**
+  - automatisch overzicht met dekking en configuratiestatus
+  - reactietijd, actuatorvolging, joystickgebruik en CAN-details
+  - profiel bevestigen en bewaren; melding bij nog niet opgeslagen wijzigingen
+- **Vergelijken**
+  - analyse-ZIP's openen, machine/periode kiezen en cijfers of trends vergelijken
+  - uitleg bij overlap, onbekende klok of onverenigbare resultaten
+- **Busmaster / SignalWatch**
+  - berichten en gekozen signalen, met cursorwaarde en ouderdom
 - **Analysis tab**
   - signal selection
   - plot group editing (multi-signal groups, offsets, y-axis lock)
@@ -147,6 +166,14 @@ Why OxyPlot (instead of ScottPlot): this migration prioritizes MVVM-first bindin
    - `dotnet build CanAnalyzer.sln -c Release`
 3. Run:
    - `dotnet run --project src/CanAnalyzer.App/CanAnalyzer.App.csproj`
+
+Machine-analyse exporteren en vergelijken:
+
+1. Open log en DBC, laad de opname en controleer **Inzichten**. Een gekozen pad is pas de actieve bron na laden; **Behoud** herstelt de keuze van de al geladen opname.
+2. Controleer signaalrollen en bevestig alleen bekende fysieke kalibratie, referenties, activiteit, capaciteit en bitrates. Kies **Bevestig en bewaar profiel** om die instellingen voor standaardexport te gebruiken.
+3. Kies **Machine-analyse exporteren**. De volledige geladen opname wordt opnieuw berekend, onafhankelijk van detailvensters, tabkeuzes en plotzoom. De eerste export onthoudt de gekozen map; de volgende krijgt een nieuwe bestandsnaam.
+4. Open een of meer analyse-ZIP's in **Vergelijken**. Standaard staan trends op relatieve tijd. Een UTC-datumfilter selecteert hele pakketten met bevestigde klokgegevens; het snijdt de analyse niet bij.
+5. De exportmap en optionele volledige samples zijn instelbaar onder **Instellingen / Diagnostics → Vaste machine-export**. Statistieken en minuuttrends van alle signalen zijn altijd opgenomen.
 
 CSV delen (bijvoorbeeld met Parker):
 
@@ -193,14 +220,18 @@ downsampling hebben geen invloed op de berekening uit de oorspronkelijke signale
   (standaard maximaal 10 s); werkperiodes korter dan 3 s worden verworpen. Deze
   grenzen zijn instelbaar. Importgaten en sampleafstanden boven de ingestelde
   limiet (standaard 5 s) worden nooit overbrugd of als stilstand geboekt.
-- De bruikbare capaciteit staat standaard op **15 kWh**, de SOC-reserve op **20%**.
-  Energie is een schatting: `SOC-afname / 100 × bruikbare kWh`. Per toestand wordt
+- Het capaciteitveld begint op **15 kWh**, de SOC-reserve op **20%**; dit zijn
+  startwaarden, geen bevestigde machinegegevens. Bevestig de totale bruikbare
+  capaciteit en leg de actieve accuconfiguratie vast voordat energie en prognoses
+  als resultaat beschikbaar worden. Het accuaantal vermenigvuldigt de ingevoerde
+  totale capaciteit niet. Energie is een schatting: `SOC-afname / 100 × bruikbare kWh`. Per toestand wordt
   deze energie alleen gedeeld door tijd met overeenkomstige SOC-dekking. Het
   netto verschil tussen begin- en eind-SOC wordt apart getoond en kan ook daling
   over onbekende periodes bevatten. SOC-stijging wordt afzonderlijk gerapporteerd.
 - Batterijduur wordt geschat voor continu actief gebruik en voor dezelfde gemeten
   verhouding actief/inactief, inclusief resterende tijd tot de reserve. Daarvoor
-  is minstens 90% SOC-dekking per gebruikte toestand vereist. Onbekende
+  zijn een bevestigde activiteitsdefinitie en capaciteit, een bruikbare constante
+  accuconfiguratie en minstens 90% SOC-dekking per gebruikte toestand vereist. Onbekende
   gebruiksverdeling, geen meetbare daling of meer dan 0,5 procentpunt SOC-stijging
   leveren geen voorspelling op. Een verouderde laatste SOC geeft geen resterende
   tijd. De werkelijke duur kan door belasting, temperatuur en BMS-correcties afwijken.
@@ -261,6 +292,7 @@ This is the one-file installer you can forward to operators/colleagues.
   - last window state
   - last plot options
   - last raw frame filters
+  - bevestigde analyseprofielen, SignalWatch-selectie en machine-exportmap/opties
 - Plot presets worden als JSON versie 2 met `SignalIdentity` geëxporteerd. V1-labels migreren alleen bij één unieke match.
 
 ## 8. Releaseblokkades voor 2.0.0

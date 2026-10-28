@@ -8,6 +8,18 @@ public interface ISignalSampleLookup
     IReadOnlyList<SignalSampleSummary> GetSignalSummaries();
     IEnumerable<SignalSeriesPoint> ReadSignalSeries(SignalIdentity identity);
 
+    /// <summary>Last sample at or before the requested time; never substitutes a future value.</summary>
+    SignalSeriesPoint? FindSignalPointAtOrBefore(SignalIdentity identity, long timestampNanoseconds)
+    {
+        SignalSeriesPoint? found = null;
+        foreach (var point in ReadSignalSeries(identity))
+            if (point.TimestampNanoseconds <= timestampNanoseconds &&
+                (found is not { } previous || point.TimestampNanoseconds > previous.TimestampNanoseconds ||
+                 point.TimestampNanoseconds == previous.TimestampNanoseconds && point.FrameIndex >= previous.FrameIndex))
+                found = point;
+        return found;
+    }
+
     /// <summary>
     /// Reads at most <paramref name="maximumPoints"/> points spread over the complete signal.
     /// Implementations backed by an index can override this to avoid materializing or scanning

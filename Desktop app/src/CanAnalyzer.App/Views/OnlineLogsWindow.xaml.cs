@@ -21,6 +21,8 @@ public partial class OnlineLogsWindow : Window
     private HashSet<string>? _keysToRestore;
     private string? _restoreNotice;
     private string? _loadError;
+    private CancellationTokenSource? _busyIndicatorDelay;
+    private bool _annotationsAvailable;
 
     public OnlineLogsWindow(IOnlineLogService onlineLogService, IOnlineLogSelectionHistoryStore historyStore)
     {
@@ -28,6 +30,8 @@ public partial class OnlineLogsWindow : Window
         _onlineLogService = onlineLogService;
         _historyStore = historyStore;
         DataContext = this;
+        System.Windows.Data.CollectionViewSource.GetDefaultView(Rows).Filter = item =>
+            item is OnlineLogRow row && (!row.IsExcluded || ShowExcludedBox.IsChecked == true);
         MachineBox.ItemsSource = OnlineMachineCatalog.Machines;
         MachineBox.SelectedIndex = 0;
         FromPicker.SelectedDate = DateTime.Today.AddDays(-7);
@@ -35,7 +39,7 @@ public partial class OnlineLogsWindow : Window
         ReloadHistory();
         UpdateAuthenticationStatus();
         Loaded += OnLoaded;
-        Closed += (_, _) => _windowCts.Cancel();
+        Closed += (_, _) => { _windowCts.Cancel(); HideLoadingPanel(); };
     }
 
     public ObservableCollection<OnlineLogRow> Rows { get; } = [];
@@ -65,28 +69,32 @@ public partial class OnlineLogsWindow : Window
         }
 
         SetBusy(true, "Online loglijst ophalen...");
+        _annotationsAvailable = false;
         _loadError = null;
         try
         {
             var fromUtc = new DateTimeOffset(from.Date).ToUniversalTime();
             var toUtc = new DateTimeOffset(to.Date.AddDays(1)).ToUniversalTime();
             var result = await WithAuthenticationAsync(() =>
-                _onlineLogService.GetLogsAsync(machineId, fromUtc, toUtc, _windowCts.Token));
+                _onlineLogService.GetLogsAsync(machineId, fromUtc, toUtc, SelectedTimeBasis, _windowCts.Token));
             Rows.Clear();
             _maximumSelection = result.MaximumSelection;
             _isTruncated = result.Truncated;
             _unknownRecordingTimes = result.UnknownRecordingTimes;
-            var newestFile = result.Files.Where(static file => file.RecordedAt.HasValue).OrderByDescending(static file => file.RecordedAt).FirstOrDefault();
+            _annotationsAvailable = result.AnnotationsAvailable;
+            var newestFile = result.Files.Where(file => file.Annotation?.Excluded != true &&
+                    (SelectedTimeBasis == "uploaded" || file.RecordedAt.HasValue))
+                .OrderByDescending(file => SelectedTimeBasis == "uploaded" ? file.UploadedAt : file.RecordedAt).FirstOrDefault();
             var restoreKeys = _keysToRestore;
             foreach (var file in result.Files)
             {
                 var row = new OnlineLogRow
                 {
-                    IsSelected = restoreKeys is not null
+                    IsSelected = file.Annotation?.Excluded != true && (restoreKeys is not null
                         ? restoreKeys.Contains(file.Key)
                         : newestFile is not null &&
                           string.Equals(file.Logger, newestFile.Logger, StringComparison.Ordinal) &&
-                          string.Equals(file.Session, newestFile.Session, StringComparison.Ordinal),
+                          string.Equals(file.Session, newestFile.Session, StringComparison.Ordinal)),
                     Key = file.Key,
                     Name = file.Name,
                     Machine = file.Machine,
@@ -94,7 +102,8 @@ public partial class OnlineLogsWindow : Window
                     Session = file.Session,
                     RecordedAt = file.RecordedAt,
                     UploadedAt = file.UploadedAt,
-                    SizeBytes = file.SizeBytes
+                    SizeBytes = file.SizeBytes,
+                    Provenance = file
                 };
                 row.PropertyChanged += OnRowPropertyChanged;
                 Rows.Add(row);
@@ -150,7 +159,7 @@ public partial class OnlineLogsWindow : Window
             return;
         }
 
-        var selections = CreateSelections(selected);
+        var selections = CreateSelectionWithOmissions(selected);
         var validation = ValidateSelection(selections);
         if (!validation.IsValid)
         {
@@ -169,7 +178,7 @@ public partial class OnlineLogsWindow : Window
                     from.Date,
                     to.Date,
                     DateTimeOffset.UtcNow,
-                    selections) { MachineId = machine.MachineId }, CancellationToken.None);
+                    selections) { MachineId = machine.MachineId, TimeBasis = SelectedTimeBasis }, CancellationToken.None);
                 ReloadHistory();
             }
             catch (Exception)
@@ -186,6 +195,9 @@ public partial class OnlineLogsWindow : Window
                 StatusText.Text = value.TotalBytes is > 0
                     ? $"Downloaden: {FormatBytes(value.BytesReceived)} van {FormatBytes(value.TotalBytes.Value)}"
                     : $"Downloaden: {FormatBytes(value.BytesReceived)}";
+                LoadingPhase.Text = StatusText.Text;
+                LoadingProgress.IsIndeterminate = value.TotalBytes is not > 0;
+                if (value.TotalBytes is > 0) LoadingProgress.Value = Math.Clamp(value.BytesReceived * 100d / value.TotalBytes.Value, 0, 100);
             });
             DownloadedArchivePath = await WithAuthenticationAsync(() => _onlineLogService.DownloadArchiveAsync(
                 selections,
@@ -220,6 +232,7 @@ public partial class OnlineLogsWindow : Window
         MachineBox.SelectedValue = entry.EffectiveMachineId;
         FromPicker.SelectedDate = entry.FromDate.Date;
         ToPicker.SelectedDate = entry.ToDate.Date;
+        TimeBasisBox.SelectedValue = entry.TimeBasis == "uploaded" ? "uploaded" : "recording";
         _keysToRestore = entry.Files.Select(file => file.Key).ToHashSet(StringComparer.Ordinal);
         _restoreNotice = null;
         await RefreshAsync();
@@ -230,13 +243,13 @@ public partial class OnlineLogsWindow : Window
         LogsGrid.CommitEdit();
         if (LogsGrid.SelectedItem is not OnlineLogRow active) return;
         foreach (var row in Rows.Where(row => row.Logger == active.Logger && row.Session == active.Session))
-            row.IsSelected = selected;
+            row.IsSelected = selected && !row.IsExcluded;
         UpdateSelectionStatus();
     }
 
     private void OnSelectAllClick(object sender, RoutedEventArgs e)
     {
-        foreach (var row in Rows) row.IsSelected = true;
+        foreach (var row in Rows) row.IsSelected = !row.IsExcluded;
         UpdateSelectionStatus();
     }
 
@@ -255,8 +268,9 @@ public partial class OnlineLogsWindow : Window
     {
         if (!IsLoaded || !RefreshButton.IsEnabled) return;
         var selected = Rows.Where(static row => row.IsSelected).ToArray();
-        var validation = ValidateSelection(CreateSelections(selected));
-        var withinMaximum = selected.Length <= _maximumSelection;
+        var selection = CreateSelectionWithOmissions(selected);
+        var validation = ValidateSelection(selection);
+        var withinMaximum = selection.Length <= _maximumSelection;
         var withinSize = selected.Sum(static row => row.SizeBytes) <= Mdf4ImportLimits.MaximumBytes &&
                          selected.All(static row => row.SizeBytes >= 0 && row.SizeBytes <= Mdf4ImportLimits.MaximumFileBytes);
         if (_loadError is not null)
@@ -268,7 +282,7 @@ public partial class OnlineLogsWindow : Window
         }
         if (Rows.Count == 0)
         {
-            StatusText.Text = "Geen MF4-bestanden gevonden met een meetstart in deze periode.";
+            StatusText.Text = "Geen MF4-bestanden gevonden met de gekozen datum in deze periode.";
             StatusText.Foreground = new SolidColorBrush(Color.FromRgb(94, 107, 117));
         }
         else if (!withinMaximum)
@@ -296,8 +310,13 @@ public partial class OnlineLogsWindow : Window
         }
         if (!string.IsNullOrWhiteSpace(_restoreNotice)) StatusText.Text = _restoreNotice + " " + StatusText.Text;
         if (_unknownRecordingTimes > 0)
-            StatusText.Text += $" Van {_unknownRecordingTimes:N0} bestand(en) is de meettijd niet leesbaar; deze vallen buiten de datumselectie.";
-        DownloadButton.IsEnabled = withinMaximum && withinSize && validation.IsValid;
+            StatusText.Text += $" Van {_unknownRecordingTimes:N0} bestand(en) is de meettijd niet leesbaar." +
+                (SelectedTimeBasis == "recording" ? " Deze vallen buiten de loggerdatumselectie." : " De ontvangsttijd blijft beschikbaar.");
+        var excluded = selection.Count(file => file.Annotation?.Excluded == true);
+        if (excluded > 0) StatusText.Text += $" {excluded} gemarkeerd tussendeel wordt bewust uitgesloten en in het manifest verantwoord.";
+        if (!_annotationsAvailable) StatusText.Text += " Gedeelde markeringen zijn onbekend of niet beschikbaar.";
+        StatusText.Text += " Dit zijn online beschikbare bestanden. Nog te uploaden bestanden op de SD-kaart: onbekend.";
+        DownloadButton.IsEnabled = selected.Any(row => !row.IsExcluded) && withinMaximum && withinSize && validation.IsValid;
     }
 
     private void ReloadHistory()
@@ -313,7 +332,10 @@ public partial class OnlineLogsWindow : Window
     }
 
     private static OnlineLogSelection[] CreateSelections(IEnumerable<OnlineLogRow> rows) => rows
-        .Select(static row => new OnlineLogSelection(row.Key, row.Name, row.Logger, row.Session, row.SizeBytes))
+        .Select(static row => row.Provenance?.ToSelection() ?? new OnlineLogSelection(row.Key, row.Name, row.Logger, row.Session, row.SizeBytes)
+        {
+            RawRecordedAtUtc = row.RecordedAt, UploadedAtUtc = row.UploadedAt == default ? null : row.UploadedAt, MachineName = row.Machine
+        })
         .ToArray();
 
     private static OnlineLogSequenceValidation ValidateSelection(IReadOnlyList<OnlineLogSelection> files) =>
@@ -323,9 +345,23 @@ public partial class OnlineLogsWindow : Window
 
     private void SetBusy(bool busy, string? status = null)
     {
+        HideLoadingPanel();
+        if (busy)
+        {
+            LoadingPhase.Text = status ?? "Online logs verwerken...";
+            LoadingProgress.IsIndeterminate = true;
+            var delay = new CancellationTokenSource();
+            _busyIndicatorDelay = delay;
+            _ = RevealLoadingPanelAsync(delay.Token);
+        }
         MachineBox.IsEnabled = !busy;
         FromPicker.IsEnabled = !busy;
         ToPicker.IsEnabled = !busy;
+        TimeBasisBox.IsEnabled = !busy;
+        ShowExcludedBox.IsEnabled = !busy;
+        AnnotationReasonBox.IsEnabled = !busy && _annotationsAvailable;
+        MarkExcludedButton.IsEnabled = !busy && _annotationsAvailable;
+        UnmarkExcludedButton.IsEnabled = !busy && _annotationsAvailable;
         RefreshButton.IsEnabled = !busy;
         SignOutButton.IsEnabled = !busy;
         UpdateAuthenticationStatus();
@@ -337,6 +373,23 @@ public partial class OnlineLogsWindow : Window
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => Close();
+
+    private async Task RevealLoadingPanelAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(200, cancellationToken);
+            if (!cancellationToken.IsCancellationRequested && !_windowCts.IsCancellationRequested)
+                LoadingPanel.Visibility = Visibility.Visible;
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void HideLoadingPanel()
+    {
+        _busyIndicatorDelay?.Cancel(); _busyIndicatorDelay?.Dispose(); _busyIndicatorDelay = null;
+        LoadingPanel.Visibility = Visibility.Collapsed;
+    }
 
     private Task<T> WithAuthenticationAsync<T>(Func<Task<T>> operation) =>
         OnlineLogAuthenticationFlow.RunAsync(operation, credentialsRejected =>

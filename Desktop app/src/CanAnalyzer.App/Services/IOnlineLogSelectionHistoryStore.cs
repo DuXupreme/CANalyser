@@ -10,6 +10,7 @@ public sealed record OnlineLogSelectionHistoryEntry(
 {
     // Older saved selections only contain LoggerId; those remain machine 1/2 selections.
     public string? MachineId { get; init; }
+    public string TimeBasis { get; init; } = "recording";
     public string EffectiveMachineId => string.IsNullOrWhiteSpace(MachineId) ? LoggerId : MachineId;
 
     public string DisplayName

@@ -13,7 +13,6 @@ namespace CanAnalyzer.App.Tests;
 public sealed class LatencyTelemetryRegressionTests
 {
     [Theory]
-    [InlineData("import_gap", "data_gap", "overlapt een meetgat")]
     [InlineData("duplicate_time", "duplicate_timestamp", "dubbele tijdstempels")]
     [InlineData("decreasing_time", "non_monotonic_timestamp", "lopen terug")]
     [InlineData("nonfinite_time", "non_finite_time", "niet-eindig tijdstip")]

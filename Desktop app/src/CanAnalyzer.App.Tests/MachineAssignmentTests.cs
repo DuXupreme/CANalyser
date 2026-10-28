@@ -48,7 +48,7 @@ public sealed class MachineAssignmentTests
     {
         Assert.Equal("Vlindermachine 1", OnlineMachineCatalog.ResolveName("48EDFD35", TestTransfer.AddDays(-1), transferUtc: null));
         Assert.Equal("Vlindermachine 1", OnlineMachineCatalog.ResolveName("48EDFD35", TestTransfer.AddDays(1), transferUtc: null));
-        Assert.Equal("Vlindermachine 1", OnlineMachineCatalog.ResolveExportMachine([Source(null), Source(TestTransfer)], transferUtc: null));
+        Assert.Empty(OnlineMachineCatalog.ResolveExportMachine([Source(null), Source(TestTransfer)], transferUtc: null));
         Assert.Equal("Onbekend (logger 48EDFD35)", OnlineMachineCatalog.ResolveName("48EDFD35", null, TestTransfer));
     }
 
@@ -97,6 +97,95 @@ public sealed class MachineAssignmentTests
         Assert.Equal(old.Session, currentRow.Session);
         Assert.Equal("Onbekend (logger 48EDFD35)", new DatasetSourceRow(old with { RecordedAt = null }).Machine);
         Assert.Equal("Onbekend", new DatasetSourceRow(old with { Logger = null }).Machine);
+    }
+
+    [Theory]
+    [InlineData("2026-10-06T10:00:00Z", "unverified")]
+    [InlineData("2026-10-16T10:00:00Z", "unverified")]
+    [InlineData("2026-10-06T10:00:00Z", "verified")]
+    [InlineData("2026-10-16T10:00:00Z", "verified")]
+    public void UnverifiedLoggerDateCannotProveEitherSideOfTransfer(string timestamp, string quality)
+    {
+        var source = Source(DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture)) with
+        {
+            ClockQuality = quality, ClockEvidence = null,
+            UploadedAtUtc = TestTransfer.AddDays(4), ReportedMachineName = "Vlindermachine 1"
+        };
+        Assert.StartsWith("Onbekend (machine 1/3", OnlineMachineCatalog.ResolveName(source));
+        Assert.StartsWith("Onbekend (machine 1/3", new DatasetSourceRow(source).Machine);
+        Assert.Empty(OnlineMachineCatalog.ResolveExportMachine([source]));
+    }
+
+    [Fact]
+    public void EmbeddedInstallationIdentifiesMachineEvenWithIncorrectLoggerDate()
+    {
+        var source = Source(TestTransfer.AddDays(-9)) with
+        {
+            ClockQuality = "suspect", ClockEvidence = "external-clock-mismatch",
+            MachineAssignmentQuality = "embedded-installation", MachineId = "M03", InstallationId = "M03-20261015"
+        };
+        Assert.Equal("Vlindermachine 3", OnlineMachineCatalog.ResolveName(source));
+        Assert.Equal("Vlindermachine 3", OnlineMachineCatalog.ResolveExportMachine([source]));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void MissingInstallationCannotVerifyMachine(string? installationId)
+    {
+        var source = Source(TestTransfer) with
+        {
+            ClockQuality = "unverified", ClockEvidence = null,
+            MachineAssignmentQuality = "embedded-installation", MachineId = "M03", InstallationId = installationId
+        };
+        Assert.StartsWith("Onbekend", OnlineMachineCatalog.ResolveName(source));
+        Assert.Empty(OnlineMachineCatalog.ResolveExportMachine([source]));
+    }
+
+    [Fact]
+    public void DashboardInstallationClaimAloneDoesNotOverrideUnknownSourceMachine()
+    {
+        var source = Source(TestTransfer.AddDays(-9)) with
+        {
+            ClockQuality = "unverified", ClockEvidence = null,
+            MachineAssignmentQuality = "verified-installation", MachineId = "M03", InstallationId = "api-claim"
+        };
+        Assert.StartsWith("Onbekend", OnlineMachineCatalog.ResolveName(source));
+    }
+
+    [Fact]
+    public void VerifiedInstallationEvidenceOverridesAnUnreliableLoggerDate()
+    {
+        var source = Source(TestTransfer.AddDays(-9)) with
+        {
+            ClockQuality = "suspect", ClockEvidence = null,
+            MachineAssignmentQuality = "verified-installation", MachineId = "M03", InstallationId = "I0001",
+            MachineAssignmentEvidence = "Confirmed installation inventory, 2026-10-15"
+        };
+        Assert.Equal("Vlindermachine 3", OnlineMachineCatalog.ResolveName(source));
+        Assert.Equal("Vlindermachine 3", new DatasetSourceRow(source).Machine);
+        Assert.Equal("Vlindermachine 3", OnlineMachineCatalog.ResolveExportMachine([source]));
+        Assert.Equal("Vlindermachine 3", OnlineMachineCatalog.ResolveExportMachine([source with { ClockQuality = "verified" }], TestTransfer));
+    }
+
+    [Theory]
+    [InlineData(null, "M03", "I0001")]
+    [InlineData(" ", "M03", "I0001")]
+    [InlineData("inventory", null, "I0001")]
+    [InlineData("inventory", " ", "I0001")]
+    [InlineData("inventory", "M03", null)]
+    [InlineData("inventory", "M03", " ")]
+    public void VerifiedInstallationRequiresBothIdsAndEvidence(string? evidence, string? machineId, string? installationId)
+    {
+        var source = Source(TestTransfer) with
+        {
+            ClockQuality = "unverified", ClockEvidence = null,
+            MachineAssignmentQuality = "verified-installation", MachineId = machineId, InstallationId = installationId,
+            MachineAssignmentEvidence = evidence
+        };
+        Assert.StartsWith("Onbekend", OnlineMachineCatalog.ResolveName(source));
+        Assert.Empty(OnlineMachineCatalog.ResolveExportMachine([source]));
     }
 
     [Fact]
@@ -165,12 +254,19 @@ public sealed class MachineAssignmentTests
             Assert.True(row.IsSelected);
             Assert.Equal(Assert.Single(history.Files).Key, row.Key);
             Assert.Equal(expectedName, row.Machine);
+            Assert.Equal("Onbekend (machine 1/3)", row.MachineDisplay);
+            Assert.Equal("Loggerklok onbevestigd", row.ClockDisplay);
         }
         finally { window.Close(); }
     });
 
     private static SourceLogFile Source(DateTimeOffset? recordedAt) =>
-        SourceLogFile.FromArchiveEntry("48EDFD35/00000008/00000001.MF4") with { RecordedAt = recordedAt };
+        SourceLogFile.FromArchiveEntry("48EDFD35/00000008/00000001.MF4") with
+        {
+            RecordedAt = recordedAt,
+            ClockQuality = recordedAt.HasValue ? "verified" : "unverified",
+            ClockEvidence = recordedAt.HasValue ? "explicit test time source" : null
+        };
 
     private static OnlineLogSelectionHistoryEntry LegacyHistory() =>
         JsonSerializer.Deserialize<OnlineLogSelectionHistoryEntry>("""

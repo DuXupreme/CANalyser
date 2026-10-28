@@ -42,7 +42,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
     {
         cancellationToken.ThrowIfCancellationRequested();
         var panels = new List<PlotPanelModel>();
-        var controller = CreateInteractionController();
+        var controller = TimePlotController.Create();
         uint? frameIdFilter = null;
         if (!string.IsNullOrWhiteSpace(viewOptions.FrameIdFilter))
         {
@@ -65,7 +65,7 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
             }
 
             var renderedSeries = new List<RenderedSeriesData>();
-
+            var renderedChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var viewport = viewports is not null && index < viewports.Count ? viewports[index] : null;
             var title = string.IsNullOrWhiteSpace(group.Title) ? $"Plot {index + 1}" : group.Title.Trim();
             var model = new PlotModel
@@ -161,14 +161,14 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
                 var values = _indices.GetValue(filtered.X, static _ => new());
                 var rangeIndex = values.GetValue(filtered.Y, y => new(filtered.X, y, cancellationToken));
                 var source = new RenderedSeriesData(label, filtered.X, filtered.Y, yAxisKey, seriesColor)
-                { Gaps = dataset.ImportReport?.Gaps ?? [], RangeIndex = rangeIndex };
+                { Gaps = MeasurementGapSelection.ForChannel(dataset.ImportReport, signalSeries.Identity.Channel), RangeIndex = rangeIndex };
                 renderedSeries.Add(source);
-
+                renderedChannels.Add(signalSeries.Identity.Channel);
                 model.Series.Add(PlotSeriesRenderer.Build(source, viewOptions, viewport, cancellationToken));
                 colorIndex++;
             }
 
-            AddGapAnnotations(model, dataset.ImportReport, cancellationToken);
+            AddGapAnnotations(model, dataset.ImportReport, renderedChannels, cancellationToken);
             if (viewport is { IsValid: true } range)
                 xAxis.Zoom(range.Minimum, range.Maximum);
             ViewportSampling.Attach(model, renderedSeries, viewOptions.UseDownsampling, viewOptions.MaxPointsPerTrace, viewport);
@@ -185,32 +185,62 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         return panels;
     }
 
-    private static void AddGapAnnotations(PlotModel model, ImportReport? report, CancellationToken cancellationToken)
+    private static void AddGapAnnotations(PlotModel model, ImportReport? report, IEnumerable<string> channels,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (report is null) return;
-        var collected = new List<MeasurementGap>();
-        foreach (var gap in report.Gaps)
+        // A busy second bus must not hide an interruption on the displayed first bus.
+        // Name the affected channels so the gray area does not imply all traces are absent.
+        var byGap = new Dictionary<MeasurementGap, HashSet<string>>();
+        var orderedGaps = new List<MeasurementGap>();
+        var visited = 0;
+        foreach (var channel in channels)
         {
-            if ((collected.Count & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
-            collected.Add(gap);
+            cancellationToken.ThrowIfCancellationRequested();
+            var named = !string.IsNullOrWhiteSpace(channel) && report.GapsByChannel.ContainsKey(channel);
+            foreach (var gap in MeasurementGapSelection.ForChannel(report, channel))
+            {
+                if ((visited++ & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                if (!byGap.TryGetValue(gap, out var affectedChannels))
+                {
+                    byGap.Add(gap, affectedChannels = new(StringComparer.OrdinalIgnoreCase));
+                    orderedGaps.Add(gap);
+                }
+                if (named) affectedChannels.Add(channel);
+            }
         }
-        var gaps = CancellableArrayOperations.ToArray(collected, cancellationToken);
+        var gaps = CancellableArrayOperations.ToArray(orderedGaps, cancellationToken);
         CancellableArrayOperations.Sort(gaps, static (left, right) => left.StartSeconds.CompareTo(right.StartSeconds), cancellationToken);
         foreach (var gap in gaps)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (gap.EndSeconds - gap.StartSeconds < 1) continue;
+            if (gap.EndSeconds <= gap.StartSeconds) continue;
+            var affectedList = new List<string>();
+            foreach (var channel in byGap[gap])
+            {
+                if ((affectedList.Count & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+                affectedList.Add(channel);
+            }
+            var affected = CancellableArrayOperations.ToArray(affectedList, cancellationToken);
+            CancellableArrayOperations.Sort(affected, StringComparer.OrdinalIgnoreCase.Compare, cancellationToken);
+            var description = affected.Length switch
+            {
+                0 => "Geen data",
+                1 => $"Geen data kanaal {affected[0]}",
+                _ => $"Geen data kanalen {string.Join(", ", affected)}"
+            };
             model.Annotations.Add(new OxyPlot.Annotations.RectangleAnnotation
             {
                 MinimumX = gap.StartSeconds, MaximumX = gap.EndSeconds,
                 Fill = OxyColor.FromAColor(35, OxyColors.Gray),
-                Text = $"Geen data: {gap.EndSeconds - gap.StartSeconds:0.###} s",
+                Text = $"{description}: {gap.EndSeconds - gap.StartSeconds:0.###} s",
                 Layer = OxyPlot.Annotations.AnnotationLayer.BelowSeries
             });
         }
         cancellationToken.ThrowIfCancellationRequested();
     }
+
     private static (double[] X, double[] Y) FilterAndTransformSeries(
         SignalSeries source,
         PlotGroup group,
@@ -284,18 +314,4 @@ public sealed class PlotModelBuilder : IPlotModelBuilder
         return (CancellableArrayOperations.ToArray(xOut, cancellationToken), CancellableArrayOperations.ToArray(yOut, cancellationToken));
     }
 
-    private static IPlotController CreateInteractionController()
-    {
-        var controller = new PlotController();
-        controller.UnbindAll();
-        var reverseAwareZoomCommand = new DelegatePlotCommand<OxyMouseDownEventArgs>((view, ctrl, args) =>
-        {
-            ctrl.AddMouseManipulator(view, new ReverseZoomRectangleManipulator(view), args);
-        });
-        controller.Bind(new OxyMouseDownGesture(OxyMouseButton.Left, OxyModifierKeys.None, 1), reverseAwareZoomCommand);
-        controller.Bind(new OxyMouseDownGesture(OxyMouseButton.Right, OxyModifierKeys.None, 1), PlotCommands.PanAt);
-        controller.Bind(new OxyMouseDownGesture(OxyMouseButton.Left, OxyModifierKeys.None, 2), PlotCommands.ResetAt);
-        controller.Bind(new OxyMouseWheelGesture(OxyModifierKeys.None), PlotCommands.ZoomWheel);
-        return controller;
-    }
 }

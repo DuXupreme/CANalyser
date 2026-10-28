@@ -1,0 +1,148 @@
+<UserControl x:Class="CanAnalyzer.App.Views.ReactionAnalysisView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infra="clr-namespace:CanAnalyzer.App.Infrastructure"
+             xmlns:oxy="http://oxyplot.org/wpf" xmlns:views="clr-namespace:CanAnalyzer.App.Views">
+    <UserControl.Resources>
+        <infra:FlexibleDoubleConverter x:Key="Number" />
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#DFE7F1"/>
+            <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="14"/><Setter Property="Margin" Value="0,0,10,10"/>
+        </Style>
+        <Style x:Key="Metric" TargetType="Button">
+            <Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Padding" Value="14"/>
+            <Setter Property="Margin" Value="0,0,10,8"/><Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DFE7F1"/>
+            <Setter Property="ToolTip" Value="Klik om een bijbehorende stuuractie te bekijken"/>
+        </Style>
+        <Style TargetType="ComboBox"><Setter Property="MinHeight" Value="27"/></Style>
+        <Style TargetType="TextBox"><Setter Property="MinHeight" Value="27"/><Setter Property="Padding" Value="4"/></Style>
+    </UserControl.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#F4F7FB">
+        <StackPanel Margin="18">
+            <DockPanel Margin="0,0,10,12">
+                <Button DockPanel.Dock="Right" Content="Bereken analyse" Command="{Binding RecomputeCommand}" Padding="18,8" Background="#2563EB" Foreground="White"/>
+                <StackPanel><TextBlock Text="Reactietijd &amp; actuatorvolging" FontSize="23" FontWeight="SemiBold" Foreground="#243B53"/>
+                    <TextBlock Text="Twee metingen: vanaf een setpointwijziging en vanaf een nieuwe positievraag ten opzichte van feedback." Foreground="#52677F" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel>
+            </DockPanel>
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,12,10"><TextBlock Text="Actuator"/><ComboBox ItemsSource="{Binding ReactionActuators}" SelectedItem="{Binding SelectedReactionActuator}"/></StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,12,10"><TextBlock Text="Gewenste positie / setpoint"/><ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedCommandSignal}" ToolTip="{Binding SelectedCommandSignal}"/></StackPanel>
+                        <StackPanel Grid.Column="2" Margin="0,0,0,10"><TextBlock Text="Gemeten positie / feedback"/><ComboBox ItemsSource="{Binding AvailableSignals}" SelectedItem="{Binding SelectedResponseSignal}" ToolTip="{Binding SelectedResponseSignal}"/></StackPanel>
+                    </Grid>
+                    <WrapPanel>
+                        <CheckBox Content="Selecteer tijdvenster" IsChecked="{Binding UseJoystickTimeWindow}" VerticalAlignment="Center" Margin="0,0,14,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,4"><TextBlock Text="Start [s]" VerticalAlignment="Center" Margin="0,0,6,0"/><TextBox Width="95" IsEnabled="{Binding UseJoystickTimeWindow}" Text="{Binding JoystickTimeStartSeconds, Converter={StaticResource Number}, UpdateSourceTrigger=LostFocus}"/></StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,12,4"><TextBlock Text="Einde [s]" VerticalAlignment="Center" Margin="0,0,6,0"/><TextBox Width="95" IsEnabled="{Binding UseJoystickTimeWindow}" Text="{Binding JoystickTimeEndSeconds, Converter={StaticResource Number}, UpdateSourceTrigger=LostFocus}"/></StackPanel>
+                        <Button Content="Volledige log" Command="{Binding ResetJoystickTimeWindowCommand}" Padding="8,3" Margin="0,0,12,4"/>
+                        <Button Content="Detecteer signalen" Command="{Binding AutoDetectDelaySignalsCommand}" Padding="8,3" Margin="0,0,0,4"/>
+                    </WrapPanel>
+                    <TextBlock Text="Dit tijdvenster geldt ook voor joystickgebruik en actuatorvolging. Controleer de signaalkeuze bij andere actuatoren." Foreground="#52677F" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                    <CheckBox Content="Setpoint en feedback hebben dezelfde eenheid en nulreferentie" IsChecked="{Binding PositionReferenceConfirmed}" Margin="0,10,0,0"/>
+                    <Button Content="Bewaar deze koppeling en bevestiging in profiel" Command="{Binding ConfirmProfileCommand}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,5"/>
+                    <TextBlock Text="{Binding ProfileStatus}" Foreground="#52677F" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <Expander Header="Geavanceerd · bewegingsgrens, positiemarge en zoektijd" Margin="0,10,0,0">
+                        <StackPanel Margin="0,10,0,0">
+                            <WrapPanel>
+                                <CheckBox Content="Automatische bewegingsgrens" IsChecked="{Binding UseAutomaticResponseThreshold}" VerticalAlignment="Center" Margin="0,0,20,10"/>
+                                <StackPanel Width="200" Margin="0,0,16,10"><TextBlock Text="Handmatige grens [signaaleenheid]"/><TextBox Text="{Binding ResponseThresholdAbsolute, Converter={StaticResource Number}, UpdateSourceTrigger=LostFocus}"><TextBox.Style><Style TargetType="TextBox"><Setter Property="IsEnabled" Value="True"/><Style.Triggers><DataTrigger Binding="{Binding UseAutomaticResponseThreshold}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></TextBox.Style></TextBox></StackPanel>
+                                <StackPanel Width="160" Margin="0,0,16,10"><TextBlock Text="Maximale zoektijd [s]"/><TextBox Text="{Binding DelaySearchRangeSeconds, Converter={StaticResource Number}, UpdateSourceTrigger=LostFocus}"/></StackPanel>
+                            </WrapPanel>
+                            <TextBlock Text="De bewegingsgrens voorkomt dat kleine fluctuaties als reactie tellen. Automatisch gebruikt de waargenomen variatie en kleinste stappen. Dit is geen bekende mechanische sensorresolutie. Bij een handmatige grens meet je tijd tot die verplaatsing. Een reactie buiten de zoektijd telt niet mee; uitsluitingen blijven zichtbaar." Foreground="#52677F" TextWrapping="Wrap"/>
+                            <WrapPanel Margin="0,10,0,5">
+                                <CheckBox Content="Automatische positiemarge" IsChecked="{Binding UseAutomaticPositionTolerance}" VerticalAlignment="Center" Margin="0,0,20,5"/>
+                                <StackPanel Width="200"><TextBlock Text="Handmatige marge [signaaleenheid]"/><TextBox Text="{Binding PositionToleranceAbsolute, Converter={StaticResource Number}, UpdateSourceTrigger=LostFocus}"><TextBox.Style><Style TargetType="TextBox"><Setter Property="IsEnabled" Value="True"/><Style.Triggers><DataTrigger Binding="{Binding UseAutomaticPositionTolerance}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></TextBox.Style></TextBox></StackPanel>
+                            </WrapPanel>
+                            <TextBlock Text="De positiemarge voorkomt dat een heel klein verschil tussen setpoint en positie als nieuwe bewegingsvraag telt. Dit is een analysegrens, niet de bekende regelband van de actuator. Automatisch hoef je niets in te vullen." Foreground="#52677F" TextWrapping="Wrap"/>
+                            <CheckBox Content="Bereken ook verschuiving van de hele golfvorm (correlatie; geen gemiddelde reactietijd)" IsChecked="{Binding CalculateCorrelation}" Margin="0,10,0,0"/>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </Border>
+            <DockPanel Margin="0,4,10,10"><ComboBox DockPanel.Dock="Right" Width="240" ItemsSource="{Binding ReactionKinds}" SelectedItem="{Binding SelectedReactionKind}"/>
+                <TextBlock Text="Reactietijd · twee startmomenten" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
+            <ItemsControl ItemsSource="{Binding ReactionReferenceSummaries}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate>
+                    <Border Style="{StaticResource Card}"><StackPanel>
+                        <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" Foreground="#243B53"/>
+                        <TextBlock Text="{Binding Explanation}" Foreground="#52677F" TextWrapping="Wrap" Margin="0,4,0,8"/>
+                        <WrapPanel><TextBlock Text="Gemiddeld " Foreground="#52677F" VerticalAlignment="Bottom" Margin="0,0,8,4"/><TextBlock Text="{Binding Mean}" FontSize="28" FontWeight="SemiBold" Foreground="#2563EB"/></WrapPanel>
+                        <WrapPanel Margin="0,7,0,8">
+                            <TextBlock Text="Min " Foreground="#52677F"/><TextBlock Text="{Binding Minimum}" FontWeight="SemiBold" Margin="0,0,16,0"/>
+                            <TextBlock Text="Max " Foreground="#52677F"/><TextBlock Text="{Binding Maximum}" FontWeight="SemiBold" Margin="0,0,16,0"/>
+                            <TextBlock Text="P95 " Foreground="#52677F" ToolTip="95e percentiel; een maat voor de tragere reacties"/><TextBlock Text="{Binding P95}" FontWeight="SemiBold"/>
+                        </WrapPanel>
+                        <DockPanel><Button DockPanel.Dock="Right" Content="Bekijk metingen" Command="{Binding DataContext.InspectReactionReferenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Name}" Padding="8,3"/><TextBlock Text="{Binding Count}" VerticalAlignment="Center" TextWrapping="Wrap"/></DockPanel>
+                    </StackPanel></Border>
+                </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="Beide kaarten gelden voor de gekozen categorie; ze kunnen verschillende acties bevatten. Hun gemiddelden kun je daarom niet zomaar van elkaar aftrekken." Foreground="#52677F" TextWrapping="Wrap" Margin="0,0,10,10"/>
+            <WrapPanel Margin="0,0,10,8">
+                <TextBlock Text="Meting bekijken:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox ItemsSource="{Binding ReactionReferences}" SelectedItem="{Binding SelectedReactionReference}" Width="260" Margin="0,0,12,0"/>
+                <Button Content="Gemiddelde" Command="{Binding InspectReactionMetricCommand}" CommandParameter="mean" Padding="8,3" Margin="0,0,5,0"/>
+                <Button Content="Minimum" Command="{Binding InspectReactionMetricCommand}" CommandParameter="min" Padding="8,3" Margin="0,0,5,0"/>
+                <Button Content="Maximum" Command="{Binding InspectReactionMetricCommand}" CommandParameter="max" Padding="8,3" Margin="0,0,5,0"/>
+                <Button Content="P95" Command="{Binding InspectReactionMetricCommand}" CommandParameter="p95" Padding="8,3"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding ReactionReferenceExplanation}" TextWrapping="Wrap" Foreground="#52677F" Margin="0,0,10,8"/>
+            <TextBlock Text="{Binding ReactionCountText}" FontWeight="SemiBold" Margin="0,0,10,5"/>
+            <TextBlock Text="{Binding ReactionStatus}" TextWrapping="Wrap" Margin="0,0,10,5"/>
+            <DockPanel Margin="0,0,10,8"><Button DockPanel.Dock="Right" Content="Bekijk eerste meetgat" Command="{Binding ShowReactionSourceGapCommand}" Padding="8,3" Margin="10,0,0,0"/><TextBlock Text="{Binding ReactionGapSummary}" TextWrapping="Wrap" Foreground="#52677F" VerticalAlignment="Center"/></DockPanel>
+            <TextBlock Text="{Binding ReactionThresholdText}" Foreground="#52677F" TextWrapping="Wrap" Margin="0,0,10,5"/>
+            <TextBlock Text="{Binding ReactionTimingText}" Foreground="#52677F" TextWrapping="Wrap" Margin="0,0,10,12"/>
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="0.95*"/><ColumnDefinition Width="1.25*"/></Grid.ColumnDefinitions>
+                <Border Style="{StaticResource Card}" Padding="8">
+                    <DockPanel><TextBlock DockPanel.Dock="Top" Text="Stuuracties · klik een rij om te controleren" FontWeight="SemiBold" Margin="5,2,0,8"/>
+                        <DataGrid ItemsSource="{Binding ReactionEvents}" SelectedItem="{Binding SelectedReactionEvent}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Height="260" EnableRowVirtualization="True" HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Tijd [s]" Binding="{Binding Time}" Width="70"/>
+                                <DataGridTextColumn Header="Reactietijd" Binding="{Binding Delay}" Width="85"/>
+                                <DataGridTextColumn Header="Meetinterval" Binding="{Binding Bounds}" Width="105"/>
+                                <DataGridTemplateColumn Header="Uitkomst" Width="*"><DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Outcome}" ToolTip="{Binding Kind}" TextWrapping="Wrap" Margin="3"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource Card}" Padding="8"><views:TimePlotView InteractionGroup="reaction-detail" Model="{Binding ReactionEventPlot}" Height="340"/></Border>
+            </Grid>
+            <TextBlock Text="{Binding ReactionDetailText}" TextWrapping="Wrap" Foreground="#52677F" Margin="0,0,10,12"/>
+            <Expander Header="Verdeling van de gemeten reactietijden" Margin="0,0,10,12"><Border Style="{StaticResource Card}" Margin="0,8,0,0"><oxy:PlotView Model="{Binding DelayHistogramModel}" Height="220"/></Border></Expander>
+            <TextBlock Text="Volgen tijdens beweging" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,10"/>
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <WrapPanel><TextBlock Text="Gemiddelde fout: " Foreground="#52677F"/><TextBlock Text="{Binding MotionTrackingMeanText}" FontWeight="SemiBold" Margin="0,0,24,0"/>
+                        <TextBlock Text="95% kleiner dan: " Foreground="#52677F"/><TextBlock Text="{Binding MotionTrackingP95Text}" FontWeight="SemiBold" Margin="0,0,24,0"/>
+                        <TextBlock Text="Grootste fout: " Foreground="#52677F"/><TextBlock Text="{Binding MotionTrackingMaximumText}" FontWeight="SemiBold" Margin="0,0,24,0"/>
+                        <Button Content="Bekijk grootste afwijking" Command="{Binding ShowWorstTrackingCommand}" Padding="8,3"/></WrapPanel>
+                    <TextBlock Text="{Binding MotionTrackingStatus}" TextWrapping="Wrap" Foreground="#52677F" Margin="0,10,0,10"/>
+                    <views:TimePlotView InteractionGroup="reaction-detail" Model="{Binding MotionTrackingPlot}" Height="290"/>
+                </StackPanel>
+            </Border>
+            <Expander Header="Alle actuatoren · gemiddelde volgafwijking over het gekozen venster" Margin="0,0,10,12">
+                <StackPanel Margin="0,10,0,0">
+                    <TextBlock Text="Tijdgewogen gemiddelde absolute fout tijdens detecteerbare beweging. Stilstand telt niet mee; de beoordeelde bewegingstijd kan door meetgaten en een bedrijfsfilter verschillen van de reactietijdmeting." Foreground="#52677F" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <DataGrid ItemsSource="{Binding ActuatorMatrix}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"><DataGrid.Columns>
+                        <DataGridTextColumn Header="Waarde" Binding="{Binding Metric}" Width="*"/><DataGridTextColumn Header="Links" Binding="{Binding Left}" Width="130"/><DataGridTextColumn Header="Rechts" Binding="{Binding Right}" Width="130"/><DataGridTextColumn Header="Voor" Binding="{Binding Front}" Width="130"/>
+                    </DataGrid.Columns></DataGrid>
+                    <TextBlock Text="{Binding ActuatorSummary}" Foreground="#52677F" TextWrapping="Wrap" Margin="0,8,0,8"/>
+                    <UniformGrid Columns="3"><views:TimePlotView InteractionGroup="actuator-overview" Model="{Binding ActuatorLeftOverlayModel}" Height="300"/><views:TimePlotView InteractionGroup="actuator-overview" Model="{Binding ActuatorRightOverlayModel}" Height="300"/><views:TimePlotView InteractionGroup="actuator-overview" Model="{Binding ActuatorFrontOverlayModel}" Height="300"/></UniformGrid>
+                </StackPanel>
+            </Expander>
+            <Expander Header="Berekeningsdetails en optionele golfvormvergelijking" Margin="0,0,10,12"><StackPanel Margin="0,10,0,0">
+                <DataGrid ItemsSource="{Binding DelayMetrics}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"><DataGrid.Columns>
+                    <DataGridTextColumn Header="Onderdeel" Binding="{Binding Name}" Width="250"/><DataGridTextColumn Header="Waarde / uitleg" Binding="{Binding Value}" Width="*"/>
+                </DataGrid.Columns></DataGrid>
+                <WrapPanel Margin="0,10,0,0"><CheckBox Content="Normaliseer" IsChecked="{Binding DelayOverlayNormalize}" Margin="0,0,15,0"/><CheckBox Content="Trapjes" IsChecked="{Binding DelayOverlayStepPlot}" Margin="0,0,15,0"/><CheckBox Content="Samples" IsChecked="{Binding DelayOverlaySampleMarkers}" Margin="0,0,15,0"/><CheckBox Content="Legenda" IsChecked="{Binding DelayOverlayShowLegend}"/></WrapPanel>
+                <TextBlock Text="Zonder berekende correlatie zie je de onverschoven bronwaarden met meetgaten. Alleen bij berekende correlatie verschijnt een groene verschoven lijn om golfvormen te vergelijken; dit is geen gemeten bewegingsstart." TextWrapping="Wrap" Foreground="#52677F" Margin="0,8,0,8"/>
+                <views:TimePlotView InteractionGroup="actuator-overview" Model="{Binding DelayOverlayModel}" Height="300"/>
+            </StackPanel></Expander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

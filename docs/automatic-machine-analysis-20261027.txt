@@ -1,0 +1,322 @@
+CANalyser — automatische machineanalyse en overdracht
+Datum: 27 oktober 2026
+Status: lokale implementatie in de werkmap; geen release- of deploymentbewijs.
+
+Dit document beschrijft de huidige desktopcontracten. Het onderscheidt een
+geïmplementeerde lokale werkwijze van nog ontbrekende backendfunctionaliteit en
+fysiek bewijs. Een geslaagde softwaretest bevestigt geen loggerklok, installatie,
+daadwerkelijke beweging, lege uploadwachtrij of productie-uitrol.
+
+GEBRUIK: ANALYSEREN EN EXPORTEREN
+
+1. Open de gewenste log of het logarchief en de toepasselijke DBC. Controleer bij
+   meerdere kanalen de DBC-toewijzing. Een passend bevestigd profiel kan een
+   eerder vastgelegde kanaaltoewijzing hergebruiken.
+2. Na laden opent Inzichten. Het overzicht gebruikt de volledige dataset met de
+   standaardmodules: herkende joysticks, actuatorreactie en volgfout, CAN-kanalen,
+   actief gebruik, accuconfiguratie en datakwaliteit. Een ontbrekend signaal of
+   onvoldoende bevestigde instelling blijft zichtbaar als beperking.
+3. Controleer de signaalkoppelingen en bevestig uitsluitend bekende fysieke
+   grenzen, nulreferenties, activiteit, capaciteit en bitrates. Bewaar die met
+   het analyseprofiel. Zonder passende machine/installatie-identiteit kan een
+   profiel alleen aan dezelfde bronlog worden gekoppeld. Bij DBC-wijzigingen
+   blijven alleen bevestigingen voor onveranderde signaaldefinities geldig.
+4. Kies Machine-analyse exporteren. De eerste succesvolle export onthoudt de
+   gekozen map. Volgende exports krijgen een nieuwe naam met tijd en willekeurig
+   achtervoegsel. Import/export en andere nog lopende analyses moeten eerst klaar
+   zijn. De export is annuleerbaar.
+5. De export berekent een nieuw volledig standaardplan uit originele meetdata
+   en het opgeslagen passende profiel. Tijdvelden, geselecteerde joystick of
+   actuator, tabblad, Signal Watch, plotzoom en downsampling zijn geen invoer
+   voor deze standaardexport. Onbevestigde tijdelijke UI-keuzes worden daarmee
+   niet automatisch een opgeslagen analyseprofiel.
+
+Ruwe samples staan standaard uit. Ze zijn apart in te schakelen bij de
+exportinstellingen; dat kan het ZIP-bestand aanzienlijk groter maken. De map en
+die optie worden in de desktopinstellingen bewaard. De gewone CSV-export en
+plotlayout-export behouden hun eigen doelen.
+
+SCHEMA 3: ANALYSE-ZIP
+
+Dit is het schema van een analysepakket. Het is een ander contract dan het
+downloadmanifest van oorspronkelijke MF4-bestanden.
+
+- manifest.json: SchemaVersion=3, MethodVersion=canalyser-analysis-bundle-3,
+  AnalysisScope=FullDataset en StatisticsScope=FullDataset; versies, DBC-hash,
+  compleetheid, loggeroorsprong, klokkwaliteit, opties en bronidentiteit.
+- analyses.json: numerieke standaardresultaten, profiel, modules, scopes,
+  eenheden, dekking, redenen en beschikbaarheidsstatus in een compacte samenvatting.
+  Lange event-, episode-, gebruiksinterval- en accu-intervalreeksen zijn hierin
+  weggelaten. De overige cijfers zijn over de volledige opname berekend; ze worden
+  niet herberekend uit een ingekorte reeks. Het interne StandardAnalysisRun heeft
+  daarnaast zijn eigen schema- en methodeversie.
+- analysis_details.json: het volledige standaardresultaat met alle oorspronkelijke
+  events, episodes en intervallen. Dit bestand wordt rechtstreeks naar de ZIP
+  gestreamd. Het manifest verwijst ernaar via AnalysisDetailsEntry. Oude schema-3-
+  pakketten zonder die verwijzing bevatten hun volledige resultaat in analyses.json.
+- analysis_values.csv: vlakke pad/type/waarde-weergave van analyses.json.
+- signal_statistics.csv: per signaal onder meer sampleaantal, eerste/laatste
+  tijd, minimum/maximum, samplegemiddelde, integraal en geldige tijddekking.
+- signal_minutes.csv: tijdintegraal en dekking per minuut voor signaaltrends.
+  Een minuutwaarde is geen ruwe sample en geeft geen exact gebeurtenistijdstip.
+- signals.json: numeriek SignalId, StableSignalId, volledige SignalIdentity,
+  eenheid en SourceIndices. De identity bevat kanaal, frameformaat,
+  standaard/extended, CAN-ID, berichtnaam en signaalnaam.
+- sources.json en source_registry.json: oorspronkelijke bronmetadata; de
+  registry koppelt SourceIndex aan SourceId, SHA-256, grootte en identiteit.
+  SourceId is sha256: gevolgd door 64 hexadecimale tekens. Ontbrekende geldige
+  bronhashes maken SourceIdentityComplete onwaar.
+- gaps.json, channel_gaps.json, exclusions.json en continuity_breaks.json:
+  ontbrekende dekking en bewuste uitsluitingen, zonder ontbrekende samples te
+  verzinnen. Ook logger_diagnostics.json en messages.json worden opgenomen.
+- samples.csv, alleen op verzoek: exacte loggerrelatieve nanoseconden, waarde,
+  kwaliteit, frame_index, source_index en source_frame_index. Bekende oorspronkelijke
+  bronindices blijven behouden. Bij precies één bron is index 0 een veilige
+  terugval; bij meerdere onbekende bronnen blijven de bronvelden leeg.
+
+CSV is UTF-8 met komma's, gequote velden en invariant decimaalpunt. Leeg/null
+betekent niet beschikbaar, niet nul. Tijdgewogen statistiek gebruikt de vorige
+eindige waarde tot de volgende eindige sample, uitsluitend over oplopende,
+voldoende korte intervallen zonder relevant meetgat. Er is geen extrapolatie
+na de laatste sample. Een gedeeltelijke import blijft gedeeltelijk, ook wanneer
+de export het volledige geïmporteerde bereik omvat.
+
+Het gedeelde gebruiksdetailcontract houdt SOC-verandering en dekking beschikbaar
+wanneer energie of prognoses niet onderbouwd zijn. EnergyAvailable en
+ForecastUnavailableReason leggen die grens vast; kWh/kW en prognoses blijven null
+bij onbevestigde capaciteit of onbruikbare/wisselende accuconfiguratie. Een
+onbevestigde activiteitsdefinitie blokkeert de gebruiksduurprognose.
+
+De schrijver maakt eerst een tijdelijk compleet ZIP-bestand en vervangt daarna
+de bestemming. Fout of annulering levert geen geslaagde nieuwe export op. Deze
+lokale bestanden worden niet automatisch naar een server geüpload.
+
+GEBRUIK: VERGELIJKEN
+
+Open op het tabblad Vergelijken meerdere analyse-ZIP-bestanden. Kies een uitkomst
+en eventueel één machine. De tabel toont individuele waarden met eenheid,
+meetbasis en beperkingen; signaalminuuttrends worden per pakket getoond.
+
+De huidige selectors ondersteunen tijdgewogen signaalgemiddelden, joystick-
+uitslagverhoudingen, actief percentage en afzonderlijke reactietijdreferenties
+met gemiddelde en P95. Actieve, stationaire en onbekende gebruikstijd, SOC-daling
+en -stijging, bevestigde capaciteit, netto kWh en actieve gebruiksduurprognoses
+worden naast elkaar getoond, zonder automatische optelling. Ontbrekende waarden
+blijven niet beschikbaar. Gemiddelde absolute volgfout kan worden gecombineerd
+met de bewegingsduur als noemer; de teller wordt uit gemiddelde maal diezelfde
+bewegingsduur gereconstrueerd. Volgfout-P95 blijft alleen per opname beschikbaar.
+Uitgebreide CAN-cyclestatistiek, accu-intervallen en trackingverdelingen hebben
+nog geen eigen vergelijkingsselector. Ze blijven in de ZIP beschikbaar. Een
+module zonder minuutreeks krijgt geen verzonnen trendgrafiek.
+
+Regels voor een gezamenlijke uitkomst:
+- Alleen schema 3 met volledige scope en volledige geldige bronidentiteit.
+- Eén bekende machine. Een losse bronlabel wordt niet stilzwijgend een bewezen
+  machine. Fallback uit bronnen vereist dezelfde bevestigde identiteit bij
+  iedere bron; anders blijft de machine onbekend.
+- Methode, eenheid, DBC, kalibratie, referentie, filter en betekenis moeten
+  overeenkomen. Een mismatch houdt individuele resultaten beschikbaar met reden.
+- Een identieke bronset telt slechts eenmaal als ook de berekening verenigbaar
+  is. Bij dezelfde bronnen met een ander profiel wordt niet één versie gekozen.
+- Gedeeltelijk overlappende bronsets blokkeren samenvoegen. Sluit een conflicterend
+  pakket zelf uit; de uitleg noemt de betrokken ZIP-bestanden. Gelijke meetwaarden
+  bewijzen geen duplicaat.
+- Verschillende bronsets moeten aantoonbaar niet-overlappende perioden hebben.
+  Met onbevestigde loggerklokken wordt geen gezamenlijk periodetotaal beweerd.
+- Gewogen gemiddelde = som integralen / som dekking. Percentages worden alleen
+  uit verenigbare tellers en noemers gecombineerd.
+- Reactietijd-P95 wordt opnieuw berekend uit alle geaccepteerde events. Er wordt
+  nooit een gemiddelde van P95-waarden genomen. Ontbreekt de volledige
+  eventverdeling, dan blijft een geaggregeerde P95 niet beschikbaar.
+
+De standaardas is relatieve tijd per opname. UTC-uitlijning is pas beschikbaar
+als alle geselecteerde pakketten ClockQuality=verified en een tijdorigine
+hebben. Een UTC-datumfilter selecteert hele pakketten die dat bereik overlappen;
+het snijdt geen pakket bij en herberekent geen deelperiode. Onbevestigde datums
+vallen buiten zo'n datumfilter. Verschillende eenheden worden in de tabel naast
+elkaar behouden; ze krijgen geen misleidende gezamenlijke trendas.
+
+Grenzen: maximaal 32 geopende pakketten; maximaal 100 ZIP-onderdelen; begrensde
+JSON/CSV-invoer, waaronder maximaal 128 MiB minuut-CSV en 2 miljoen CSV-rijen per
+onderdeel. Analysedetails worden streamend geprojecteerd: maximaal 512 MiB
+JSON-invoer, 1 MiB per token, 2 miljoen reactietijdevents en 64 MiB benodigde
+vergelijkingsgegevens. Ongebruikte detailreeksen worden niet in een groot
+JSON-geheugenmodel geladen. Exacte geaccepteerde vertragingen blijven behouden
+voor een gezamenlijke P95. De grafiek toont maximaal 2.000 min/max-punten per pakket met behoud
+van meetgaten. Globale/kanaalmeetgaten, expliciete continuïteitsbreuken en onvolledig
+gedekte minuten onderbreken de lijn. Een minuutgemiddelde lokaliseert een intern
+meetgat niet; de betrokken minuut wordt daarom als los punt weergegeven. Dat kan
+conservatief meer lijnstukken onderbreken, ook bij een gedeeltelijke eindminuut.
+Statistieken gebruiken de volledige meetbasis. De oorspronkelijke
+minuutsamenvattingen blijven wel in geheugen: dit is geen onbeperkte database
+voor tientallen zeer grote pakketten. Schema 2 blijft leesbaar met beperkingen,
+zonder onbewezen gezamenlijke berekeningen.
+
+WEERGAVE EN OPSLAG
+
+Automatische weergavedownsampling staat bij een nieuwe sessie/dataset aan.
+Zoom en beschikbare beeldruimte sturen de weergegeven punten; exact detail is
+een tijdelijke weergavekeuze per venster. Dit verandert de oorspronkelijke
+samples en de standaardanalyse niet. Het laadscherm verschijnt na een korte
+vertraging, zodat snelle bewerkingen niet flitsen. Reparatiedialogen houden hun
+eigen interactie. Een laadlogo bewijst geen snelheidswinst; daarvoor dienen de
+afzonderlijke lokale metingen.
+
+Instellingen / Diagnostics toont de huidige bronlogs, DBC en opslaglocaties:
+- Downloadcache wissen verwijdert tijdelijke online downloads.
+- Ongebruikte analyseopslag wissen behandelt frame-cache, sample-cache en
+  tijdelijke MF4-conversie onder de CANalyser-tempmap.
+- Dataset sluiten en analyseopslag wissen annuleert achtergrondanalyses,
+  wacht op lezers, koppelt schermen los en sluit daarna de dataset. Een actieve
+  import of export moet eerst worden beëindigd.
+
+Nieuwe analyseopslag gebruikt session-<guid>-mappen met een owner.lock en een
+vaste eigenaarsmarkering. De eigenaar houdt de lock open gedurende import of
+datasetgebruik, ook wanneer gegevensbestanden tussen lazy reads gesloten zijn.
+Een andere procesinstantie kan die actieve sessie niet opruimen. Datasetleases
+houden opslag in leven tot reeds begonnen achtergrondlezers klaar zijn.
+
+Opruimen verwijdert uitsluitend aantoonbaar ongebruikte beheerde sessies.
+Symlinks/junctions worden niet gevolgd. Oude platte cache zonder eigenaarsbewijs,
+onbekende bestanden en vergrendelde sessies blijven behouden, met toelichting.
+Daarom kan na opruimen nog opslag zichtbaar zijn. Bronlogs, DBC's, profielen,
+exports en AWS-objecten vallen niet onder deze analysecacheactie.
+
+SD-INVENTARIS: JSON EN ONTVANGSTBEWIJS
+
+De huidige UI leest een historische inventaris; zij scant niet automatisch de
+SD-kaart en vraagt geen volledige live serverinventaris op. Maak een snapshot
+met exacte grootte en SHA-256 van de werkelijk geïnventariseerde bestanden en
+leg het observatietijdstip vast. Originele kaartinhoud wordt daarvoor niet
+gewijzigd. Open de JSON via Instellingen / Diagnostics > SD-inventaris openen.
+
+Formaat (synthetisch voorbeeld; vervang datum, identiteit, grootte en hash door
+werkelijk gemeten waarden, de voorbeeldhash is geen inhoudelijk bewijs):
+
+{
+  "schemaVersion": 1,
+  "inventoryTakenAtUtc": "2026-10-27T08:00:00Z",
+  "files": [
+    {
+      "loggerId": "ABCDEF01",
+      "session": "00000001",
+      "name": "00000001.MF4",
+      "sizeBytes": 123456,
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ]
+}
+
+De reader accepteert maximaal 16 MiB en 100.000 bestandsregels. Een expliciete
+inventarisdatum, logger/sessie, herkenbaar vooropstaand numeriek deelnummer,
+niet-negatieve grootte en 64 hexadecimale SHA-256-tekens zijn vereist. De
+reconciliatiesleutel is logger/sessie/deelnummer. Identieke dubbele regels tellen
+eenmaal; verschillende inhoud voor dezelfde sleutel is ongeldig.
+
+Voor een ontvangstbevestiging zijn gelijke sleutel, grootte en SHA-256 én een
+daadwerkelijk opgegeven serverontvangsttijd nodig. Alleen overeenkomende lokale
+bytes zonder UploadedAtUtc tellen niet als ontvangen. De desktop haalt
+ontvangstgegevens uit de momenteel geladen bronnen en vereist daarvoor ook een
+ObjectKey en de benodigde bronvelden. Het is dus een inhoudsmatch met bewaarde
+ontvangstmetadata, geen nieuwe onafhankelijke AWS-audit of digitale handtekening.
+
+RecordedAt/RawRecordedAtUtc blijft de ruwe loggeropnametijd. UploadedAtUtc blijft
+serverontvangsttijd. ClockQuality=verified is een afzonderlijke klokclaim met
+bewijs; een geldige hash of serverontvangst bevestigt de loggerklok niet. De
+laatste getoonde serverontvangst is de laatste beschikbare ontvangst voor de
+logger(s) van deze inventaris, niet noodzakelijk het laatste gematchte kaartdeel.
+
+Niet bevestigd betekent alleen: niet bewezen ontvangen met de geladen bronnen.
+Het betekent niet bewezen ontbrekend op de server. Ook een volledig ontvangen
+historische inventaris bewijst niet dat de actuele uploadwachtrij leeg is:
+de logger kan sindsdien nieuwe bestanden hebben gemaakt. CurrentQueueBytes blijft
+daarom onbekend. Heartbeat, ontvangst van een nieuw bestand, vrije kaartruimte
+en alleen het verstrijken van tijd vullen dat ontbrekende bewijs niet aan.
+
+MF4-DOWNLOADMANIFEST EN BEWUSTE UITSLUITINGEN
+
+canalyser-log-manifest.json is het bronarchiefcontract, los van analyse-schema 3.
+De reader ondersteunt bronmanifest 1 en 2. Versie 2 kan OmittedFiles opnemen
+met archiveName, objectKey, loggerId, session, objectVersion, sizeBytes, reason
+en annotationRevision. Een uitsluiting vereist een concrete objectversie en
+annotatierevisie; de uitgesloten bytes zitten niet in de ZIP.
+
+De desktop valideert archiefnamen, aantallen, grootte, SHA-256 en bewijsclaims.
+verified-klokmetadata vereist tijd en ClockEvidence; verified-installation
+vereist machine-, installatie- en bewijsvelden. Dat zijn contractcontroles,
+geen fysieke bewijsvergaring. De import behoudt uitsluitingen en onderbrekingen
+als onvolledige dekking. Ontbrekende duur wordt niet als stilstand of geldige
+meetdekking ingevuld. Imports zijn begrensd op 10.000 bestanden, 512 MiB per
+bestand en 4 GiB totaal.
+
+De online downloadservice vraagt plannen in batches van 200 op en controleert
+objectversie, metadatarevisie, ETag/version-ID, grootte en hash. Met het nieuwe
+annotatiecontract worden verwachte object- en annotatierevisies opnieuw op de
+server gecontroleerd, ook voor cachehergebruik. De schrijver maakt manifest 2
+met OmittedFiles voor bewust uitgesloten tussendelen. Onverklaarde ontbrekende
+delen blijven een fout. Een onbereikbare annotatiestore is onbekend en kan niet
+als ongemarkeerd worden gedownload. Oudere API-antwoorden blijven ondersteund
+met manifest 1; niet alle bewijzen zijn dan aanwezig.
+
+De desktop biedt markeren met verplichte reden, herstellen, gemarkeerde rijen
+tonen en zoeken op loggerdatum of serverontvangst. Markeringen gelden voor de
+geselecteerde tabelrijen; maximaal 25 wijzigingen worden als een batch aangeboden.
+De lijst wordt na een wijziging opnieuw opgehaald. Een revisieconflict schrijft
+niets stilzwijgend over. Selectie en herkomst van bekende gemarkeerde tussendelen
+blijven bewaard, ook wanneer die rijen standaard verborgen zijn.
+
+FEITELIJK OPENSTAAND EN VALIDATIE
+
+- Standaardoverzicht, standaardexport en de detailberekeningen voor joystick,
+  gekalibreerde slag, beide reactiereferenties, volgfout, actief gebruik en CAN
+  gebruiken de gedeelde AnalysisRunService en ModuleResult. De expliciete
+  correlatieoptie blijft een afzonderlijke methode voor vormvergelijking.
+- De desktop- en dashboardbron zijn afzonderlijk gecontroleerd. De interne
+  deploymentidentiteit en toegangsconfiguratie horen bij het lokale auditbewijs,
+  niet bij dit openbare gebruikscontract. Een lokale broncontrole bewijst geen
+  nieuwe backenddeployment.
+- De lokale dashboardimplementatie staat afzonderlijk onder
+  artifacts/dashboard-live-20261028/source; de ongewijzigde snapshot staat in
+  original. Gedeelde annotaties, revisiecontrole, webmanifest en ontvangstfilter
+  moeten gezamenlijk gebouwd, getest en uitgerold worden. Deze bronwijziging
+  is op zichzelf geen bevestiging dat de live website al is bijgewerkt.
+- Er is geen geverifieerde huidige SD-inventaris plus volledige actuele
+  serverontvangstlijst meegeleverd. Live achterstand/lege wachtrij blijft open.
+- Klokcorrectheid, daadwerkelijke machine/installatie, sensorreferenties,
+  accuaantal/-capaciteit en fysieke actuatorbeweging vereisen afzonderlijk bewijs.
+  Reactietijd meet hier een bevestigde feedbackgrens in de log; dat is geen
+  onafhankelijk gemeten mechanische start. SOC-energie blijft een schatting.
+- Commit-, pakket-, push- en publicatiestatus staan in het afzonderlijke
+  opleverrapport. Bestaande releases bewijzen niet dat deze wijzigingen op
+  gebruikersmachines staan.
+- Lokale regressies behandelen onder meer exportscope, gewogen vergelijking,
+  event-P95, bronoverlap, locks tussen processen, junctions, oorspronkelijke
+  bronindices en WPF-binding/layout. Een shelltest voert twee publieke exports
+  uit met verschillende schermselecties en vergelijkt de inhoud. Alleen de
+  definitieve testuitvoer na alle wijzigingen bepaalt de eindstatus.
+- Performancecijfers en definitieve Core/WPF/webstatus worden afzonderlijk
+  vastgelegd in het opleverrapport. Tussentijdse groene suites zijn geen
+  eindtotaal voor de gecombineerde versie.
+
+Gecombineerde broncontrole op 28 oktober: 519 Core-tests en 275 WPF-tests
+geslaagd. De aanvullende online-vensterweergave is na een rendercorrectie
+afzonderlijk opnieuw gecontroleerd. De visuele artifacts zijn offscreen-WPF-
+weergaven; zij vervangen geen echte gebruiksproef op de gebruikersmachine.
+
+Afzonderlijke referentiemeting vóór deze implementatie: dezelfde lokale ZIP van
+50.314.617 bytes en dezelfde DBC leverden 9.479.173 frames, 30.701.982 gedecodeerde
+samples en 144 signalen op, met Complete/0 fouten. Totale verwerking 236.359 ms;
+parse 117.050 ms, DBC 270 ms, decode 113.659 ms, hash 459 ms. Plotvoorbereiding
+428,138 ms; viewportbereikselectie mediaan 2,291 ms / P95 2,936 ms; gemelde piek
+134 MB. De viewportmeting is selectie in een bereikindex, geen WPF-interactie-
+latentie. Deze baseline alleen bewijst geen versnelling. De nameting en exacte
+fixture-identiteit blijven in de lokale performance-artifacts; vertrouwelijke
+bronpaden staan niet in dit document.
+
+Codecontracten: Core/Analysis/AnalysisBundleExporter.cs,
+AnalysisBundleComparison.cs, AnalysisRunService.cs en AnalysisProfileResolver.cs;
+Core/Storage/AnalysisCacheStorage.cs; Core/Domain/LogInventorySnapshot.cs,
+LogInventoryReconciler.cs en OnlineLogArchiveManifest.cs; App/ViewModels/
+MainWindowViewModel.MachineExport.cs, MainWindowViewModel.Storage.cs,
+SettingsDiagnosticsViewModel.Inventory.cs en ComparisonViewModel.cs.
+Deze paden vallen onder Desktop app/src/CanAnalyzer.<laag> in de repository.

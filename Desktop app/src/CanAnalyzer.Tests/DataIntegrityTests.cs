@@ -368,7 +368,9 @@ public sealed class DataIntegrityTests
                 Assert.Equal(string.Empty, fields[2]);
                 Assert.Equal("0", fields[14]);
                 Assert.Equal("0", fields[15]);
-                Assert.Equal(string.Empty, fields[^1]);
+                var headers = rows[0].Split(',');
+                Assert.Equal(string.Empty, fields[Array.IndexOf(headers, "import_mode")]);
+                Assert.Equal("unverified", fields[Array.IndexOf(headers, "clock_quality")]);
             }
         }
         finally { File.Delete(path); }

@@ -12,8 +12,8 @@ public sealed record CsvExportOptions
     public static IReadOnlyList<CsvExportColumn> AvailableColumns { get; } = Array.AsReadOnly(new[]
     {
         new CsvExportColumn("time_s", "Tijd in seconden (gekozen nulpunt)"),
-        new("timestamp_utc", "Absolute datum en tijd (ISO 8601, UTC)"),
-        new("unix_time_ns", "Absolute Unix-tijd in nanoseconden"),
+        new("timestamp_utc", "Datum en tijd volgens loggerklok (ISO 8601, UTC; zie clock_quality)"),
+        new("unix_time_ns", "Unix-tijd volgens loggerklok in nanoseconden"),
         new("frame_id", "CAN-ID (decimaal)"), new("message_name", "Berichtnaam"),
         new("signal_name", "Signaalnaam"), new("value", "Gedecodeerde waarde"),
         new("label", "Volledige signaalnaam inclusief kanaal en CAN-ID"),
@@ -25,7 +25,8 @@ public sealed record CsvExportOptions
         new("unit", "Eenheid"), new("decode_quality", "Decodeerkwaliteit"),
         new("dataset_status", "COMPLETE / PARTIAL"), new("source_log_sha256", "SHA-256 bronlog"),
         new("dbc_sha256", "SHA-256 DBC"), new("app_version", "CANalyser-versie"),
-        new("import_mode", "Importmodus")
+        new("import_mode", "Importmodus"),
+        new("clock_quality", "Betrouwbaarheid loggerklok; unverified is niet onafhankelijk bevestigd")
     });
 
     public static IReadOnlyList<string> CompactColumns { get; } = Array.AsReadOnly(new[]

@@ -71,7 +71,9 @@ public sealed class Mdf4ConversionService : IMdf4ConversionService
         };
         startInfo.ArgumentList.Add("--non-interactive");
         startInfo.ArgumentList.Add("--verbosity=1");
-        startInfo.ArgumentList.Add("--trace-format=version1");
+        // Version 1 drops the bus column. Version 2 preserves physical CAN buses
+        // and CANedge's internal diagnostic bus, as well as CAN FD flags.
+        startInfo.ArgumentList.Add("--trace-format=version2");
         startInfo.ArgumentList.Add("--output-directory");
         startInfo.ArgumentList.Add(outputDirectory);
         startInfo.ArgumentList.Add("--input-files");

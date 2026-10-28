@@ -15,7 +15,30 @@ namespace CanAnalyzer.App.Tests;
 public sealed class DisplayLimitsTests
 {
     [Fact]
-    public Task PlotLimits_AreSharedWithSettingsAndEveryDetachedWindow_WithoutChangingSource() =>
+    public void NewWindowsStartWithAutomaticOverview()
+    {
+        Assert.True(new DisplayLimits().UseDownsampling);
+        Assert.True(new PlotViewOptions().UseDownsampling);
+        Assert.True(new AppSettings().LastPlotViewOptions.UseDownsampling);
+    }
+
+    [Fact]
+    public Task ANewDatasetAlwaysLeavesTemporaryExactDetail() => PlotRegressionTests.OnDispatcher(async () =>
+    {
+        var telemetry = new AnalyticsRegressionTests.Telemetry();
+        using var analysis = new AnalysisViewModel(new PlotModelBuilder(), null!, null!, null!,
+            new XAxisSyncService(), telemetry, new ActiveUsageViewModel(telemetry),
+            NullLogger<AnalysisViewModel>.Instance, new DisplayLimits());
+        using var first = PlotRegressionTests.Dataset(); using var second = PlotRegressionTests.Dataset();
+        analysis.LoadDataset(first); analysis.UseDownsampling = false;
+        Assert.False(analysis.UseDownsampling);
+        analysis.LoadDataset(second);
+        Assert.True(analysis.UseDownsampling); Assert.Empty(analysis.PlotPanels);
+        await analysis.CancelAndWaitAsync();
+    });
+
+    [Fact]
+    public Task PointLimitsAreSharedButExactDetailBelongsOnlyToTheChosenWindow() =>
         PlotRegressionTests.OnDispatcher(async () =>
         {
             var limits = new DisplayLimits { UseDownsampling = true, MaxPointsPerTrace = 500 };
@@ -51,12 +74,13 @@ public sealed class DisplayLimitsTests
                 foreach (var panel in analysis.PlotPanels.Concat(first.Panels).Concat(second.Panels))
                     ((OxyPlot.IPlotModel)panel.PlotModel).Update(true);
                 analysis.UseDownsampling = false;
-                Assert.False(first.UseDownsampling);
-                Assert.False(settings.DefaultUseDownsampling);
+                Assert.True(first.UseDownsampling);
+                Assert.True(second.UseDownsampling);
+                Assert.True(settings.DefaultUseDownsampling);
                 while (analysis.IsBusy || first.IsBusy || second.IsBusy) await Task.Delay(10);
                 foreach (var panel in analysis.PlotPanels.Concat(first.Panels).Concat(second.Panels))
                     ((OxyPlot.IPlotModel)panel.PlotModel).Update(true);
-                Assert.Equal(source.Time.Length, ((LineSeries)second.Panels[0].PlotModel.Series[0]).Points.Count);
+                Assert.InRange(((LineSeries)second.Panels[0].PlotModel.Series[0]).Points.Count, 1, 600);
                 Assert.Equal(source.Time.Length, ((LineSeries)analysis.PlotPanels[0].PlotModel.Series[0]).Points.Count);
                 Assert.Equal(values, source.Value);
                 Assert.Same(source.Time, first.Panels[0].SeriesData[0].Time);
@@ -64,7 +88,7 @@ public sealed class DisplayLimitsTests
                 var saved = new AppSettings();
                 settings.WriteBackToSettings(saved);
                 Assert.Equal(600, saved.LastPlotViewOptions.MaxPointsPerTrace);
-                Assert.False(saved.LastPlotViewOptions.UseDownsampling);
+                Assert.True(saved.LastPlotViewOptions.UseDownsampling);
             }
             finally { first.Close(); second.Close(); }
         });

@@ -5,7 +5,7 @@ namespace CanAnalyzer.App.State;
 /// <summary>
 /// Persisted desktop application settings.
 /// </summary>
-public sealed class AppSettings
+public sealed partial class AppSettings
 {
     public int SettingsVersion { get; set; }
 

@@ -1,0 +1,56 @@
+<UserControl x:Class="CanAnalyzer.App.Views.ComparisonView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:oxy="http://oxyplot.org/wpf">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="14">
+            <TextBlock Text="Analyse-uitvoer vergelijken" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="Vergelijk volledige analyses naast elkaar. Pakketten blijven gescheiden; alleen verenigbare, niet-overlappende bronnen krijgen een gezamenlijke uitkomst."
+                       TextWrapping="Wrap" Margin="0,4,0,10" />
+            <WrapPanel>
+                <Button Content="Analyse-ZIP-bestanden openen…" Command="{Binding OpenBundlesCommand}" Padding="12,6" Margin="0,0,8,6" />
+                <Button Content="Vergelijking leegmaken" Command="{Binding ClearBundlesCommand}" Padding="12,6" Margin="0,0,8,6" />
+                <Button Content="Lezen annuleren" Command="{Binding CancelLoadingCommand}" Padding="12,6" Margin="0,0,8,6" />
+            </WrapPanel>
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,2,0,8" />
+            <DataGrid ItemsSource="{Binding Bundles}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" MaxHeight="220">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="Meenemen" Binding="{Binding Included, UpdateSourceTrigger=PropertyChanged}" Width="85" />
+                    <DataGridTextColumn Header="Pakket" Binding="{Binding Name}" IsReadOnly="True" Width="2*" />
+                    <DataGridTextColumn Header="Machine" Binding="{Binding Machine}" IsReadOnly="True" Width="100" />
+                    <DataGridTextColumn Header="Opname" Binding="{Binding Period}" IsReadOnly="True" Width="160" />
+                    <DataGridTextColumn Header="Kwaliteit" Binding="{Binding Quality}" IsReadOnly="True" Width="200" />
+                    <DataGridTextColumn Header="Beperkingen" Binding="{Binding Notes}" IsReadOnly="True" Width="2*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <WrapPanel Margin="0,12,0,10">
+                <StackPanel Width="180" Margin="0,0,12,6"><TextBlock Text="Machine" /><ComboBox ItemsSource="{Binding Machines}" SelectedItem="{Binding SelectedMachine}" /></StackPanel>
+                <StackPanel Width="150" Margin="0,0,12,6"><TextBlock Text="Vanaf (bevestigde UTC)" /><DatePicker SelectedDate="{Binding PeriodStart}" /></StackPanel>
+                <StackPanel Width="150" Margin="0,0,12,6"><TextBlock Text="Tot en met (UTC)" /><DatePicker SelectedDate="{Binding PeriodEnd}" /></StackPanel>
+                <StackPanel Width="480" Margin="0,0,12,6"><TextBlock Text="Te vergelijken uitkomst" /><ComboBox ItemsSource="{Binding Metrics}" SelectedItem="{Binding SelectedMetric}" DisplayMemberPath="Label" /></StackPanel>
+            </WrapPanel>
+            <TextBlock Text="{Binding FilterStatus}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <DataGrid ItemsSource="{Binding Results}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MaxHeight="240">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Pakket" Binding="{Binding Bundle}" Width="2*" />
+                    <DataGridTextColumn Header="Machine" Binding="{Binding Machine}" Width="95" />
+                    <DataGridTextColumn Header="Uitkomst" Binding="{Binding Value}" Width="130" />
+                    <DataGridTextColumn Header="Eenheid" Binding="{Binding Unit}" Width="65" />
+                    <DataGridTextColumn Header="Meetbasis" Binding="{Binding Basis}" Width="120" />
+                    <DataGridTextColumn Header="Minimum" Binding="{Binding Minimum}" Width="110" />
+                    <DataGridTextColumn Header="Maximum" Binding="{Binding Maximum}" Width="110" />
+                    <DataGridTextColumn Header="Betekenis" Binding="{Binding Explanation}" Width="2*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <Border Background="#FFF2F5F9" Padding="12" Margin="0,12,0,8" CornerRadius="5">
+                <StackPanel><TextBlock Text="Gezamenlijke uitkomst" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding AggregateValue}" FontSize="20" Margin="0,3" />
+                    <TextBlock Text="{Binding AggregateExplanation}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+            <CheckBox Content="Uitlijnen op bevestigde UTC" IsChecked="{Binding UseVerifiedUtc}" IsEnabled="{Binding CanUseVerifiedUtc}" Margin="0,5" />
+            <TextBlock Text="{Binding AxisExplanation}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <oxy:PlotView Model="{Binding Trend}" Height="330" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

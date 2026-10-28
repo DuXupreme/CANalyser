@@ -15,6 +15,11 @@
     <Border Margin="0,0,0,8" Background="#F5F8FA" BorderBrush="#D6E0E5" BorderThickness="1" Padding="8">
         <StackPanel>
             <TextBlock Text="{Binding Scope}" TextWrapping="Wrap" Foreground="#52616B" Margin="0,4,0,8" />
+            <TextBlock Text="Beschikbare analyses worden automatisch bijgewerkt. Bevestig de betekenis van grenzen voordat je deze als vaste machine-instelling bewaart." TextWrapping="Wrap" Foreground="#52616B" Margin="0,0,0,8"/>
+            <WrapPanel Margin="0,0,0,8">
+                <CheckBox Content="Activiteitssignaal en grens zijn bevestigd" IsChecked="{Binding ActivityThresholdConfirmed}" Margin="0,0,18,0"/>
+                <CheckBox Content="Totale bruikbare accucapaciteit is bevestigd" IsChecked="{Binding CapacityConfirmed}"/>
+            </WrapPanel>
             <WrapPanel>
                 <StackPanel Width="310" Margin="0,0,10,8">
                     <TextBlock Text="Activiteitssignaal (RPM, BMS current, kracht, …)" />
@@ -37,7 +42,7 @@
                 <StackPanel Width="115" Margin="0,0,10,8"><TextBlock Text="Korte pauze [s]" /><TextBox Text="{Binding BridgeSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Voeg werkperiodes samen als er hoogstens zoveel seconden bekende inactiviteit tussen zit. Deze korte pauze telt mee als actief gebruik." /></StackPanel>
                 <StackPanel Width="130" Margin="0,0,10,8"><TextBlock Text="Min. werkperiode [s]" /><TextBox Text="{Binding MinimumSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Kortere periodes worden als inactief beschouwd, bijvoorbeeld losse meetpieken." /></StackPanel>
                 <StackPanel Width="135" Margin="0,0,10,8"><TextBlock Text="Max. sampleafstand [s]" /><TextBox Text="{Binding MaxGapSeconds, UpdateSourceTrigger=PropertyChanged}" ToolTip="Grotere afstanden tussen meetpunten zijn onbekend. Kies een waarde passend bij de samplefrequentie. Importgaten blijven altijd onbekend." /></StackPanel>
-                <StackPanel Width="115" Margin="0,0,10,8"><TextBlock Text="Bruikbare accu [kWh]" /><TextBox Text="{Binding CapacityKwh, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                <StackPanel Width="160" Margin="0,0,10,8"><TextBlock Text="Totale bruikbare accu [kWh]" /><TextBox Text="{Binding CapacityKwh, UpdateSourceTrigger=PropertyChanged}" ToolTip="Totale bruikbare capaciteit van de actieve accuconfiguratie, niet per pack. Een accuaantal vermenigvuldigt deze waarde niet automatisch." /></StackPanel>
                 <StackPanel Width="85" Margin="0,0,10,8"><TextBlock Text="Reserve SOC [%]" /><TextBox Text="{Binding ReserveSoc, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
             </WrapPanel>
             <WrapPanel Margin="0,0,0,8">
@@ -46,14 +51,52 @@
                 <StackPanel Width="160" Margin="0,0,16,0"><TextBlock Text="Daling ≥ [procentpunt/uur]" /><TextBox Text="{Binding SocRateThreshold, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding UseSocSlope}" /></StackPanel>
                 <Button Content="Bereken actief gebruik" Command="{Binding CalculateCommand}" Padding="12,6" VerticalAlignment="Bottom" />
             </WrapPanel>
+            <Expander Header="Accuconfiguratie (optioneel)" Margin="0,0,0,8">
+                <StackPanel Margin="4,8,4,0">
+                    <WrapPanel>
+                        <StackPanel Width="300" Margin="0,0,10,8">
+                            <TextBlock Text="Bron voor het aantal actieve accupacks" />
+                            <ComboBox ItemsSource="{Binding BatteryCountSources}" SelectedIndex="{Binding BatteryCountSourceIndex}" />
+                        </StackPanel>
+                        <StackPanel Width="340" Margin="0,0,10,8" IsEnabled="{Binding UsesBatteryCountSignal}">
+                            <TextBlock Text="CAN-signaal met actieve accupacks" />
+                            <ComboBox ItemsSource="{Binding Signals}" SelectedItem="{Binding BatteryCountSignal}" IsTextSearchEnabled="True"
+                                      ToolTip="Kies alleen een signaal waarvan je weet dat het actieve/meewerkende accupacks telt. Een telling van communicerende BMS-nodes of geplaatste packs kan iets anders betekenen." />
+                        </StackPanel>
+                        <StackPanel Width="160" Margin="0,0,10,8" IsEnabled="{Binding UsesManualBatteryCount}">
+                            <TextBlock Text="Bevestigd aantal packs" />
+                            <TextBox Text="{Binding ConfirmedBatteryCount, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="Bevestig hiermee hoeveel accupacks gedurende de hele geselecteerde periode actief waren. Dit is een handmatige opgave, geen detectie uit de log." />
+                        </StackPanel>
+                    </WrapPanel>
+                    <TextBlock Text="Geen betrouwbare bron? Laat het aantal onbekend. Communicerende of geplaatste packs zijn niet automatisch actieve packs. De totale kWh hierboven blijft ongewijzigd."
+                               TextWrapping="Wrap" Foreground="#52616B" />
+                </StackPanel>
+            </Expander>
+            <TextBlock Text="{Binding BatteryCountSummary}" TextWrapping="Wrap" Foreground="#52616B" Margin="0,0,0,8" />
             <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,0,0,8" FontWeight="SemiBold" />
             <StackPanel Visibility="{Binding HasResult, Converter={StaticResource UsageVisibility}}">
                 <WrapPanel>
                     <GroupBox Header="Tijd en gebruik" Width="410" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding TimeMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
                     <GroupBox Header="SOC en energie" Width="470" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding EnergyMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
                     <GroupBox Header="Verbruik en batterijduur" Width="490" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding BatteryMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
+                    <GroupBox Header="Accuconfiguratie" Width="470" Margin="0,0,10,8" Padding="8"><ItemsControl ItemsSource="{Binding BatteryConfigurationMetrics}" ItemTemplate="{StaticResource UsageMetric}" /></GroupBox>
                 </WrapPanel>
                 <oxy:PlotView Model="{Binding Timeline}" Height="195" Margin="0,0,0,8" />
+                <Expander Header="Periodes met hetzelfde accuaantal" Margin="0,0,0,6">
+                    <StackPanel Margin="4,6">
+                        <TextBlock Text="Een ander aantal na een datagat bewijst een andere waargenomen configuratie; het precieze wisselmoment is dan onbekend."
+                                   TextWrapping="Wrap" Foreground="#52616B" Margin="0,0,0,6" />
+                        <DataGrid ItemsSource="{Binding BatteryCountIntervals}" AutoGenerateColumns="False" IsReadOnly="True" MaxHeight="195"
+                                  CanUserAddRows="False" CanUserDeleteRows="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Vanaf [s]" Binding="{Binding StartSeconds, StringFormat=F2}" Width="*" />
+                                <DataGridTextColumn Header="Tot [s]" Binding="{Binding EndSeconds, StringFormat=F2}" Width="*" />
+                                <DataGridTextColumn Header="Actieve accupacks" Binding="{Binding CountLabel}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </StackPanel>
+                </Expander>
                 <Expander Header="Berekening en betrouwbaarheid" Margin="0,0,0,6">
                     <TextBlock Text="{Binding Notes}" TextWrapping="Wrap" Foreground="#52616B" Margin="4,6" />
                 </Expander>

@@ -13,8 +13,10 @@ namespace CanAnalyzer.App.Views;
 internal sealed class PlotInteractionHistory
 {
     private readonly Func<IEnumerable<PlotModel>> _models;
-    private readonly List<Limit[]> _history = [];
-    private record Limit(PlotModel Model, Axis Axis, double Min, double Max);
+    private List<Limit[]> _history = [];
+    internal record Limit(PlotModel Model, Axis Axis, double Min, double Max);
+    internal sealed class State { internal List<Limit[]> Entries { get; } = []; }
+    internal void UseState(State state) => _history = state.Entries;
 
     public PlotInteractionHistory(FrameworkElement host, Func<IEnumerable<PlotModel>> models)
     {
@@ -47,7 +49,7 @@ internal sealed class PlotInteractionHistory
 
     public void Clear() => _history.Clear();
 
-    private void Capture()
+    internal void Capture()
     {
         var limits = _models().SelectMany(m => m.Axes.Where(a => double.IsFinite(a.ActualMinimum) && double.IsFinite(a.ActualMaximum))
             .Select(a => new Limit(m, a, a.ActualMinimum, a.ActualMaximum))).ToArray();
@@ -81,7 +83,7 @@ public static class DownsamplingConfirmation
         else { box.PreviewMouseLeftButtonDown -= OnMouse; box.PreviewKeyDown -= OnKey; }
     }
     private static bool Cancel(CheckBox box) => box.IsChecked == true && MessageBox.Show(Window.GetWindow(box),
-        "Alle meetpunten in het zichtbare tijdvak tonen voor Analyse en alle losse plotvensters? Bij verschuiven, zoomen of resetten gaat downsampling automatisch weer aan. Een breed tijdvak kan nog veel meetpunten bevatten.",
+        "Alle meetpunten in het zichtbare tijdvak tonen in dit venster? Bij verschuiven, zoomen of resetten gaat downsampling hier automatisch weer aan. Een breed tijdvak kan nog veel meetpunten bevatten.",
         "Downsampling uitschakelen", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes;
     private static void OnMouse(object sender, MouseButtonEventArgs e)
     {

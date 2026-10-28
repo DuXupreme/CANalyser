@@ -32,11 +32,18 @@ public sealed class CanDataset : IDisposable
     public string SourceLogSha256 { get; init; } = string.Empty;
 
     public string DbcSha256 { get; init; } = string.Empty;
+    public IReadOnlyDictionary<SignalIdentity, string> SignalDefinitionHashes { get; internal set; } =
+        new Dictionary<SignalIdentity, string>();
 
     public string ApplicationVersion { get; init; } = string.Empty;
 
-    /// <summary>Absolute UTC start time supplied by the logger, when available.</summary>
+    /// <summary>UTC-formatted origin supplied by the logger; accuracy is not implied.</summary>
     public DateTimeOffset? StartTimeUtc { get; init; }
+
+    public LoggerDiagnostics LoggerDiagnostics { get; internal set; } = new();
+    public string ClockQuality => SourceFiles.Count == 0 ? "unverified"
+        : SourceFiles.Select(source => source.ClockQuality).Distinct(StringComparer.Ordinal).Count() == 1
+            ? SourceFiles[0].ClockQuality : "mixed";
 
     /// <summary>First imported record offset from the logger time origin.</summary>
     public long FirstRecordOffsetNanoseconds => RawFrames.Count == 0 ? 0 : RawFrames[0].TimestampNanoseconds;

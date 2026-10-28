@@ -1,13 +1,17 @@
 using System.Globalization;
 using CanAnalyzer.Core.Domain;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CanAnalyzer.App.Models;
 
 /// <summary>
 /// Current/summary value for one decoded signal in the BUSMASTER Signal Watch view.
 /// </summary>
-public sealed class BusmasterSignalWatchRow
+public sealed partial class BusmasterSignalWatchRow : ObservableObject
 {
+    [ObservableProperty] private bool _isWatched;
+    [ObservableProperty] private string _age = "—";
+    [ObservableProperty] private string _status = "Laatste opname";
     public BusmasterSignalWatchRow(
         SignalIdentity identity,
         long lastTimestampNanoseconds,
@@ -44,19 +48,33 @@ public sealed class BusmasterSignalWatchRow
 
     public string FrameIdHex { get; }
 
-    public string LastTimeSeconds { get; }
+    public string LastTimeSeconds { get; private set; }
 
-    public long LastFrameIndex { get; }
+    public long LastFrameIndex { get; private set; }
 
-    public string PhysicalValue { get; }
+    public string PhysicalValue { get; private set; }
 
-    public string RawValue { get; }
+    public string RawValue { get; private set; }
 
-    public string Unit { get; }
+    public string Unit { get; private set; }
 
     public int UpdateCount { get; }
 
     public string Minimum { get; }
 
     public string Maximum { get; }
+
+    public void UpdateSample(DecodedSignalSample? sample, long? cursor, string status)
+    {
+        LastTimeSeconds = sample is null ? "—" : sample.TimeSeconds.ToString("G17", CultureInfo.CurrentCulture);
+        LastFrameIndex = sample?.FrameIndex ?? -1;
+        PhysicalValue = sample?.Value.ToString("G17", CultureInfo.CurrentCulture) ?? "—";
+        RawValue = sample?.RawValueHex ?? "—";
+        if (sample is not null) Unit = sample.Unit;
+        Age = sample is not null && cursor is { } time
+            ? ((time - (double)sample.TimestampNanoseconds) / 1e9).ToString("G9", CultureInfo.CurrentCulture) + " s" : "—";
+        Status = status;
+        OnPropertyChanged(nameof(LastTimeSeconds)); OnPropertyChanged(nameof(LastFrameIndex));
+        OnPropertyChanged(nameof(PhysicalValue)); OnPropertyChanged(nameof(RawValue)); OnPropertyChanged(nameof(Unit));
+    }
 }

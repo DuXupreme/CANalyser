@@ -2,13 +2,16 @@ using System.Text.Json;
 using CanAnalyzer.App.Services;
 using CanAnalyzer.App.State;
 using System.IO;
+using System.Collections.Concurrent;
 
 namespace CanAnalyzer.App.Infrastructure;
 
 /// <inheritdoc />
 public sealed class AppSettingsStore : IAppSettingsStore
 {
-    private const int CurrentSettingsVersion = 2;
+    private const int CurrentSettingsVersion = 3;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SaveGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string, string, CancellationToken, Task> _writeText;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -24,7 +27,13 @@ public sealed class AppSettingsStore : IAppSettingsStore
     {
     }
 
-    public AppSettingsStore(string settingsPath) => SettingsPath = Path.GetFullPath(settingsPath);
+    public AppSettingsStore(string settingsPath) : this(settingsPath, File.WriteAllTextAsync) { }
+
+    internal AppSettingsStore(string settingsPath, Func<string, string, CancellationToken, Task> writeText)
+    {
+        SettingsPath = Path.GetFullPath(settingsPath);
+        _writeText = writeText;
+    }
 
     public AppSettings Load()
     {
@@ -39,15 +48,20 @@ public sealed class AppSettingsStore : IAppSettingsStore
             var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions) ?? new AppSettings();
             settings.RecentDbcFiles ??= [];
             settings.CsvExportPresets ??= [];
+            settings.AnalysisProfiles ??= [];
+            settings.SignalWatch ??= new();
+            settings.SignalWatch.Signals ??= [];
             settings.RecentLogFiles ??= [];
             settings.LastPlotViewOptions ??= new CanAnalyzer.Core.Domain.PlotViewOptions();
+            settings.LastPlotViewOptions.UseDownsampling = true;
+            settings.LastPlotViewOptions.PlotOptions ??= [];
+            settings.LastPlotViewOptions.PlotOptions.Remove("disable_downsampling");
             settings.LastRawFrameFilter ??= new CanAnalyzer.Core.Domain.RawFrameFilterOptions();
             settings.Telemetry ??= new TelemetryOptions();
             if (settings.SettingsVersion < CurrentSettingsVersion)
             {
-                // Version 2 changes the safe defaults to full-resolution plotting and 5,000 points.
-                settings.LastPlotViewOptions.UseDownsampling = false;
-                settings.LastPlotViewOptions.MaxPointsPerTrace = 5000;
+                // Exact detail is temporary per window; every new session starts with automatic display sampling.
+                settings.LastPlotViewOptions.UseDownsampling = true;
                 settings.SettingsVersion = CurrentSettingsVersion;
             }
             if (string.IsNullOrWhiteSpace(settings.Telemetry.InstallationId))
@@ -76,6 +90,14 @@ public sealed class AppSettingsStore : IAppSettingsStore
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        var gate = SaveGates.GetOrAdd(SettingsPath, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await SaveCoreAsync(settings, cancellationToken).ConfigureAwait(false); }
+        finally { gate.Release(); }
+    }
+
+    private async Task SaveCoreAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
         settings.SettingsVersion = CurrentSettingsVersion;
         var directory = Path.GetDirectoryName(SettingsPath)
                         ?? throw new InvalidOperationException("Settings path has no directory.");
@@ -87,7 +109,7 @@ public sealed class AppSettingsStore : IAppSettingsStore
         {
             // Complete the new file beside the current one before replacing it.
             // A failed write or cancellation must preserve saved presets and settings.
-            await File.WriteAllTextAsync(temporaryPath, json, cancellationToken).ConfigureAwait(false);
+            await _writeText(temporaryPath, json, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(SettingsPath))
                 File.Replace(temporaryPath, SettingsPath, destinationBackupFileName: null);

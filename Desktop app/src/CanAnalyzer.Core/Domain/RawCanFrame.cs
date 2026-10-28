@@ -42,6 +42,10 @@ public sealed record RawCanFrame(
     bool BitRateSwitch = false,
     bool ErrorStateIndicator = false)
 {
+    /// <summary>Index in the original source registry; -1 means unknown.</summary>
+    public int SourceFileIndex { get; init; } = -1;
+    public long SourceFrameIndex { get; init; } = -1;
+
     /// <summary>Compatibility/view projection only; the stored timestamp is integer nanoseconds.</summary>
     public double TimeSeconds => TimestampNanoseconds / 1_000_000_000d;
 

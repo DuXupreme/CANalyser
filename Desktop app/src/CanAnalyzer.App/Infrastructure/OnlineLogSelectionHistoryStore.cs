@@ -67,6 +67,6 @@ public sealed class OnlineLogSelectionHistoryStore : IOnlineLogSelectionHistoryS
         !string.IsNullOrWhiteSpace(entry.LoggerId) && entry.Files is { Count: > 0 };
 
     private static string Fingerprint(OnlineLogSelectionHistoryEntry entry) =>
-        entry.EffectiveMachineId.Trim().ToUpperInvariant() + "|" +
+        entry.EffectiveMachineId.Trim().ToUpperInvariant() + "|" + entry.TimeBasis + "|" +
         string.Join("|", entry.Files.Select(file => file.Key).OrderBy(key => key, StringComparer.Ordinal));
 }

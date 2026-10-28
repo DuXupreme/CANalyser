@@ -23,7 +23,7 @@ public sealed class ActiveUsageTests
         Assert.Equal(300, r.ActiveSeconds, 6);
         Assert.Equal(300, r.IdleSeconds, 6);
         Assert.Equal(50, r.ActivePercent!.Value, 6);
-        Assert.Equal(1.5, r.TotalEnergy.NetKwh, 6);
+        Assert.Equal(1.5, r.TotalEnergy.NetKwh!.Value, 6);
         Assert.Equal(14.4, r.EnergyByState[UsageState.Active].AverageKw!.Value, 6);
         Assert.Equal(3.6, r.EnergyByState[UsageState.Idle].AverageKw!.Value, 6);
         Assert.Equal(15 / 14.4, r.ActiveRuntimeHours!.Value, 6);
@@ -121,7 +121,7 @@ public sealed class ActiveUsageTests
         Assert.Equal(10, r.ActiveSeconds, 6);
         Assert.Equal(98.95, r.StartSoc!.Value, 6);
         Assert.Equal(97.95, r.EndSoc!.Value, 6);
-        Assert.Equal(0.15, r.TotalEnergy.NetKwh, 6);
+        Assert.Equal(0.15, r.TotalEnergy.NetKwh!.Value, 6);
     }
 
     [Fact]

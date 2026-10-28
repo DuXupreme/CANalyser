@@ -84,17 +84,27 @@ public sealed partial class BusmasterViewModel : ObservableObject
 
     public void LoadDataset(CanDataset dataset)
     {
+        _watchWork?.CancelPending();
+        foreach (var row in _allSignalWatchRows) row.PropertyChanged -= WatchRowChanged;
+        _allSignalWatchRows = []; SignalWatchRows = [];
         _dataset = dataset;
         _sampleLookup = dataset.DecodedSamples as IFrameSampleLookup;
+        _watchLookup = new SignalWatchLookup(dataset);
+        _watchCursor = null;
 
         ApplyFilters(resetPage: true);
         BuildSignalWatchRows(dataset);
+        InitializeWatchRows();
     }
 
     public void ClearDataset()
     {
+        _watchWork?.CancelPending();
+        foreach (var row in _allSignalWatchRows) row.PropertyChanged -= WatchRowChanged;
         _dataset = null;
         _sampleLookup = null;
+        _watchLookup = null;
+        SetWatchCursorAt(null);
         ApplyFilters(resetPage: true);
     }
 
@@ -106,6 +116,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
                 .OrderBy(sample => sample.SignalName, StringComparer.Ordinal)
                 .Select(sample => new BusmasterSignalRow(sample))
                 .ToList();
+        if (value is not null) SetWatchCursorAt(value.TimeSeconds);
     }
 
     partial void OnSignalWatchSearchTextChanged(string? value)
@@ -283,6 +294,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
     {
         var search = SignalWatchSearchText?.Trim();
         var rows = _allSignalWatchRows;
+        if (OnlyWatchedSignals) rows = rows.Where(row => row.IsWatched).ToArray();
         if (!string.IsNullOrWhiteSpace(search))
         {
             rows = rows
@@ -298,7 +310,7 @@ public sealed partial class BusmasterViewModel : ObservableObject
         SignalWatchRows = rows;
         SignalWatchStatistics = _dataset is null
             ? "Geen dataset geladen."
-            : $"Signal Watch: {SignalWatchRows.Count:N0} / {_allSignalWatchRows.Count:N0} signalen, {_dataset.DecodedSamples.Count:N0} gedecodeerde meetpunten.";
+            : $"{_allSignalWatchRows.Count(row => row.IsWatched):N0} gevolgd · {SignalWatchRows.Count:N0} / {_allSignalWatchRows.Count:N0} zichtbaar (max. 128 gevolgd).";
     }
 
     private void PreviousPage()

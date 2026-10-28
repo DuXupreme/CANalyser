@@ -6,7 +6,7 @@ namespace CanAnalyzer.App.Models;
 public sealed class DisplayLimits : ObservableObject
 {
     private int _maxPointsPerTrace = 5000;
-    private bool _useDownsampling;
+    private bool _useDownsampling = true;
     private int _rawRowsPerPage = 50_000;
 
     public int MaxPointsPerTrace

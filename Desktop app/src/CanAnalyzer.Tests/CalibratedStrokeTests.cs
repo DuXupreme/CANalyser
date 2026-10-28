@@ -150,7 +150,9 @@ public sealed class CalibratedStrokeTests
     {
         var result = UsageAnalytics.AnalyzeJoystick(S("x", 0, 0, 0, 0), S("y", 0, 0, 0, 0),
             gaps: [new(.5, 2.5)]);
-        Assert.Equal(1, result.CoveredSeconds);
+        // After 2.5 s the previous sample is still inside the declared gap;
+        // no post-gap interval exists until a fresh sample at 3 s.
+        Assert.Equal(.5, result.CoveredSeconds);
     }
 
     [Fact]

@@ -19,6 +19,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     private readonly IMessageDialogService _messageDialogService;
     private readonly ITelemetryService _telemetryService;
     private Func<Task>? _applySettingsAsync;
+    private Func<Task>? _closeDatasetForStorageAsync;
+    private Func<bool>? _canCloseDatasetForStorage;
     private readonly OnlineDownloadCache _downloadCache = new(OnlineDownloadCache.DefaultDirectory);
 
     [ObservableProperty]
@@ -33,6 +35,9 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private string _totalCacheStatus = "Totale cacheopslag wordt berekend...";
 
+    [ObservableProperty]
+    private string _analysisCleanupStatus = string.Empty;
+
     public string DownloadCacheDirectory => OnlineDownloadCache.DefaultDirectory;
     public string FrameCacheDirectory => System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "frame-cache");
     public string SampleCacheDirectory => System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "sample-cache");
@@ -40,6 +45,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public IAsyncRelayCommand RefreshOnlineCacheCommand { get; }
     public IAsyncRelayCommand ClearOnlineCacheCommand { get; }
+    public IAsyncRelayCommand ClearUnusedAnalysisCacheCommand { get; }
+    public IAsyncRelayCommand CloseDatasetAndClearAnalysisCacheCommand { get; }
 
     [ObservableProperty]
     private string? _logFilePath;
@@ -150,13 +157,68 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         CheckForUpdatesCommand = new AsyncRelayCommand(CheckForUpdatesAsync);
         RefreshOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(false), () => !IsCacheBusy);
         ClearOnlineCacheCommand = new AsyncRelayCommand(() => UpdateOnlineCacheAsync(true), () => !IsCacheBusy);
+        ClearUnusedAnalysisCacheCommand = new AsyncRelayCommand(() => ClearAnalysisStorageAsync(false), () => !IsCacheBusy);
+        CloseDatasetAndClearAnalysisCacheCommand = new AsyncRelayCommand(() => ClearAnalysisStorageAsync(true),
+            () => !IsCacheBusy && _closeDatasetForStorageAsync is not null && _canCloseDatasetForStorage?.Invoke() == true);
+    }
+
+    public void BindAnalysisStorageHandlers(Func<Task> closeDatasetAsync, Func<bool> canCloseDataset)
+    {
+        _closeDatasetForStorageAsync = closeDatasetAsync;
+        _canCloseDatasetForStorage = canCloseDataset;
+        NotifyStorageStateChanged();
+    }
+
+    public void NotifyStorageStateChanged()
+    {
+        RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
+        ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        ClearUnusedAnalysisCacheCommand.NotifyCanExecuteChanged();
+        CloseDatasetAndClearAnalysisCacheCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task ClearAnalysisStorageAsync(bool closeDataset)
+    {
+        if (IsCacheBusy) return;
+        if (closeDataset && (_canCloseDatasetForStorage?.Invoke() != true || _closeDatasetForStorageAsync is null)) return;
+        IsCacheBusy = true;
+        NotifyStorageStateChanged();
+        try
+        {
+            if (closeDataset) await _closeDatasetForStorageAsync!();
+            AnalysisCleanupStatus = "Ongebruikte analyseopslag opruimen...";
+            var results = await Task.Run(() => new[]
+            {
+                AnalysisCacheStorage.ClearUnused(FrameCacheDirectory),
+                AnalysisCacheStorage.ClearUnused(SampleCacheDirectory),
+                AnalysisCacheStorage.ClearUnused(ConversionCacheDirectory)
+            });
+            var deleted = results.Sum(result => result.Usage.DeletedBytes);
+            var active = results.Sum(result => result.BusySessions);
+            var legacy = results.Sum(result => result.UnownedEntries);
+            var unsafeSessions = results.Sum(result => result.RejectedSessions);
+            AnalysisCleanupStatus = $"{FormatCacheSize(deleted)} vrijgemaakt. {active:N0} actieve of vergrendelde sessies behouden.";
+            if (legacy > 0)
+                AnalysisCleanupStatus += $" {legacy:N0} oude of onbekende opslagitems behouden: hun eigenaar kan niet betrouwbaar worden vastgesteld.";
+            if (unsafeSessions > 0)
+                AnalysisCleanupStatus += $" {unsafeSessions:N0} sessies met bestandsverwijzingen overgeslagen.";
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            AnalysisCleanupStatus = $"Analyseopslag kon niet volledig worden opgeruimd: {ex.Message}";
+        }
+        finally
+        {
+            IsCacheBusy = false;
+            NotifyStorageStateChanged();
+        }
+        await UpdateOnlineCacheAsync(false);
     }
 
     private async Task UpdateOnlineCacheAsync(bool clear)
     {
         IsCacheBusy = true;
-        RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
-        ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+        NotifyStorageStateChanged();
         var preserve = string.IsNullOrEmpty(CurrentSourceLogPath) ? LogFilePath : CurrentSourceLogPath;
         try
         {
@@ -165,8 +227,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
             TotalCacheStatus = "Totale cacheopslag wordt berekend...";
             var (usage, frames, samples, conversion) = await Task.Run(() => (
                 clear ? _downloadCache.Clear(preserve) : _downloadCache.Inspect(),
-                AnalysisCacheStorage.Inspect(System.IO.Path.Combine(AnalysisCacheStorage.DefaultDirectory, "frame-cache")),
-                AnalysisCacheStorage.Inspect(SampleCacheDirectory),
+                AnalysisCacheStorage.Inspect(FrameCacheDirectory, recursive: true),
+                AnalysisCacheStorage.Inspect(SampleCacheDirectory, recursive: true),
                 AnalysisCacheStorage.Inspect(ConversionCacheDirectory, recursive: true)));
             AnalysisCacheStatus = $"Frame-cache: {FormatCacheSize(frames.Bytes)} ({frames.Files:N0} bestanden)\n" +
                                   $"Gedecodeerde data: {FormatCacheSize(samples.Bytes)} ({samples.Files:N0} bestanden)\n" +
@@ -184,8 +246,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
         finally
         {
             IsCacheBusy = false;
-            RefreshOnlineCacheCommand.NotifyCanExecuteChanged();
-            ClearOnlineCacheCommand.NotifyCanExecuteChanged();
+            NotifyStorageStateChanged();
         }
     }
 
@@ -213,6 +274,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void ApplySettings(AppSettings settings, string settingsPath)
     {
+        MachineExportDirectory = settings.MachineExportDirectory ?? string.Empty;
+        MachineExportIncludeSamples = settings.MachineExportIncludeSamples;
         LogFilePath = settings.LastLogFilePath;
         DbcFilePath = settings.LastDbcFilePath;
         SettingsFilePath = settingsPath;
@@ -245,6 +308,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void UpdateDataset(CanDataset dataset)
     {
+        UpdateInventorySources(dataset);
         CurrentSourceFiles.Clear();
         foreach (var source in dataset.SourceFiles.OrderBy(source => source.Logger, StringComparer.Ordinal)
                      .ThenBy(source => source.Session, StringComparer.Ordinal).ThenBy(source => source.Name, StringComparer.Ordinal))
@@ -261,13 +325,15 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
             $"Geopend: {CurrentSourceFiles.Count:N0} logbestand(en) · {sessions:N0} herkenbare sessie(s)\n" +
             $"Sessies: {string.Join(", ", dataset.SourceFiles.Select(source => source.Session).Where(session => session is not null).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).DefaultIfEmpty("Niet beschikbaar"))}\n" +
             (dataset.StartTimeUtc is { } sourceStart
-                ? $"Meetstart: {MeasurementTimestamp.FormatLocal(sourceStart, dataset.FirstRecordOffsetNanoseconds)}\n"
+                ? $"Loggerklok bij meetstart: {MeasurementTimestamp.FormatLocal(sourceStart, dataset.FirstRecordOffsetNanoseconds)}\n"
                 : "Meetstart: niet beschikbaar in de bron\n") +
+            $"Klokbetrouwbaarheid: {dataset.ClockQuality}\n" +
+            $"Interne loggerberichten: {dataset.LoggerDiagnostics.InternalFrameCount:N0} (apart van machineanalyse)\n" +
             $"Dataset: {dataset.Completeness.ToString().ToUpperInvariant()}";
         DecodeDiagnostics = dataset.Diagnostics.DecodeNote;
         var report = dataset.ImportReport;
         var measurementStart = dataset.StartTimeUtc is { } startTimeUtc
-            ? $"Meetstart lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nMeetstart UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\n"
+            ? $"Loggerklok lokaal: {MeasurementTimestamp.FormatLocal(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nLoggerklok UTC: {MeasurementTimestamp.FormatUtc(startTimeUtc, dataset.FirstRecordOffsetNanoseconds)}\nKlokbetrouwbaarheid: {dataset.ClockQuality}\n"
             : "Meetstart: niet beschikbaar in dit logbestand\n";
         IntegritySummary =
             $"DATASETSTATUS: {dataset.Completeness.ToString().ToUpperInvariant()}\n" +
@@ -291,6 +357,7 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void ClearCurrentDataset()
     {
+        UpdateInventorySources(null);
         CurrentSourceFiles.Clear();
         CurrentMeasurementSummary = "Geen meting geopend.";
         CurrentSourceLogPath = string.Empty;
@@ -302,6 +369,8 @@ public sealed partial class SettingsDiagnosticsViewModel : ObservableObject
 
     public void WriteBackToSettings(AppSettings settings)
     {
+        settings.MachineExportDirectory = MachineExportDirectory?.Trim();
+        settings.MachineExportIncludeSamples = MachineExportIncludeSamples;
         settings.LastPlotViewOptions.MaxPointsPerTrace = Math.Clamp(DefaultMaxPointsPerTrace, 200, 200_000);
         settings.LastPlotViewOptions.SubplotHeight = Math.Clamp(DefaultSubplotHeight, 160, 1200);
         settings.LastPlotViewOptions.UseDownsampling = DefaultUseDownsampling;

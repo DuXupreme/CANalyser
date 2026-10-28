@@ -4,6 +4,7 @@ using CanAnalyzer.App.State;
 using CanAnalyzer.App.ViewModels;
 using CanAnalyzer.Core.Analysis;
 using CanAnalyzer.Core.Domain;
+using CanAnalyzer.Core.Interfaces;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -56,7 +57,7 @@ public sealed class MainWindowPlotCancellationTests
     });
 
     [Fact]
-    public Task OtherAnalyses_DoNotEnableCancel_AndCancelDoesNotClearTheirBusyFlags()
+    public Task OtherAnalyses_EnableCancel_AndCancelDoesNotClearTheirBusyFlagsPrematurely()
         => PlotRegressionTests.OnDispatcher(() =>
     {
         var telemetry = new AnalyticsRegressionTests.Telemetry();
@@ -68,7 +69,7 @@ public sealed class MainWindowPlotCancellationTests
         shell.JoystickAnalytics.IsBusy = true;
         analysis.ActiveUsage.IsBusy = true;
         Assert.True(shell.IsAnyBusy);
-        Assert.False(shell.CancelCommand.CanExecute(null));
+        Assert.True(shell.CancelCommand.CanExecute(null));
 
         // Shell/import busy remains owned by that operation's finally block.
         shell.IsBusy = true;
@@ -83,9 +84,50 @@ public sealed class MainWindowPlotCancellationTests
         return Task.CompletedTask;
     });
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ImportLoadingPanelIsDelayedAndCancellationAlwaysHidesIt(bool waitForPanel) => PlotRegressionTests.OnDispatcher(async () =>
+    {
+        var telemetry = new AnalyticsRegressionTests.Telemetry();
+        var limits = new DisplayLimits();
+        using var analysis = new AnalysisViewModel(new PlotModelBuilder(), null!, new NoWindow(), null!,
+            new XAxisSyncService(), telemetry, new ActiveUsageViewModel(telemetry), NullLogger<AnalysisViewModel>.Instance, limits);
+        using var shell = CreateShell(analysis, telemetry, limits, new WaitingPipeline());
+        var file = System.IO.Path.GetTempFileName();
+        try
+        {
+            shell.LogFilePath = file; shell.DbcFilePath = file;
+            var work = shell.LoadAndDecodeCommand.ExecuteAsync(null);
+            Assert.True(shell.IsBusy);
+            Assert.False(shell.ShowDatasetLoading);
+            if (waitForPanel)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!shell.ShowDatasetLoading && DateTime.UtcNow < deadline) await Task.Delay(25);
+                Assert.True(shell.ShowDatasetLoading);
+            }
+            shell.CancelCommand.Execute(null);
+            await work.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(shell.IsBusy);
+            Assert.False(shell.ShowDatasetLoading);
+            await Task.Delay(250);
+            Assert.False(shell.ShowDatasetLoading);
+        }
+        finally { System.IO.File.Delete(file); }
+    });
+
+    private sealed class WaitingPipeline : ICanAnalysisPipeline
+    {
+        public async Task<PreparedCanAnalysis> PrepareForReviewAsync(string log, string dbc, IProgress<LoadProgress>? progress, CancellationToken token)
+        { await Task.Delay(Timeout.Infinite, token); throw new InvalidOperationException(); }
+        public Task<PreparedCanAnalysis> RetryForReviewAsync(PreparedCanAnalysis previous, string log, string dbc, IProgress<LoadProgress>? progress, CancellationToken token) => throw new NotSupportedException();
+        public Task<CanDataset> LoadAsync(string log, string dbc, ImportMode mode, IProgress<LoadProgress>? progress, CancellationToken token) => throw new NotSupportedException();
+    }
+
     private static MainWindowViewModel CreateShell(AnalysisViewModel analysis,
-        ITelemetryService telemetry, DisplayLimits limits)
-        => new(null!, null!, null!, null!, null!, null!, null!, new UnexpectedDialogs(), new MemorySettings(), telemetry,
+        ITelemetryService telemetry, DisplayLimits limits, ICanAnalysisPipeline? pipeline = null)
+        => new(pipeline!, null!, null!, null!, null!, null!, null!, new UnexpectedDialogs(), new MemorySettings(), telemetry,
             analysis, new JoystickAnalyticsViewModel(new JoystickAnalyticsService(), telemetry, new ActiveUsageViewModel(telemetry)),
             new RawFramesViewModel(new RawFrameFilterService(), limits), new BusmasterViewModel(limits, telemetry),
             new SettingsDiagnosticsViewModel(new FakeUpdateService(), new UnexpectedDialogs(), telemetry, limits),

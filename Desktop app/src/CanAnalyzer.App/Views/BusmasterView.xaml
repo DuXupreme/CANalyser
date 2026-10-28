@@ -74,18 +74,18 @@
                   VirtualizingPanel.ScrollUnit="Pixel"
                   ScrollViewer.CanContentScroll="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=G17}" Width="150" />
-                <DataGridTextColumn Header="Time [ns]" Binding="{Binding TimestampNanoseconds}" Width="145" />
-                <DataGridTextColumn Header="Frame" Binding="{Binding FrameIndex}" Width="75" />
-                <DataGridTextColumn Header="Source line" Binding="{Binding SourceLineNumber}" Width="85" />
-                <DataGridTextColumn Header="Tx/Rx" Binding="{Binding Direction}" Width="70" />
-                <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="75" />
-                <DataGridTextColumn Header="Msg" Binding="{Binding MessageType}" Width="85" />
-                <DataGridTextColumn Header="ID" Binding="{Binding IdHex}" Width="100" />
-                <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="180" />
-                <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="55" />
-                <DataGridTextColumn Header="Bytes" Binding="{Binding PayloadLength}" Width="55" />
-                <DataGridTextColumn Header="Data Byte(s)" Binding="{Binding DataBytes}" Width="*" />
+                <DataGridTextColumn IsReadOnly="True" Header="Time [s]" Binding="{Binding TimeSeconds, StringFormat=G17}" Width="150" />
+                <DataGridTextColumn IsReadOnly="True" Header="Time [ns]" Binding="{Binding TimestampNanoseconds}" Width="145" />
+                <DataGridTextColumn IsReadOnly="True" Header="Frame" Binding="{Binding FrameIndex}" Width="75" />
+                <DataGridTextColumn IsReadOnly="True" Header="Source line" Binding="{Binding SourceLineNumber}" Width="85" />
+                <DataGridTextColumn IsReadOnly="True" Header="Tx/Rx" Binding="{Binding Direction}" Width="70" />
+                <DataGridTextColumn IsReadOnly="True" Header="Channel" Binding="{Binding Channel}" Width="75" />
+                <DataGridTextColumn IsReadOnly="True" Header="Msg" Binding="{Binding MessageType}" Width="85" />
+                <DataGridTextColumn IsReadOnly="True" Header="ID" Binding="{Binding IdHex}" Width="100" />
+                <DataGridTextColumn IsReadOnly="True" Header="Message" Binding="{Binding MessageName}" Width="180" />
+                <DataGridTextColumn IsReadOnly="True" Header="DLC" Binding="{Binding Dlc}" Width="55" />
+                <DataGridTextColumn IsReadOnly="True" Header="Bytes" Binding="{Binding PayloadLength}" Width="55" />
+                <DataGridTextColumn IsReadOnly="True" Header="Data Byte(s)" Binding="{Binding DataBytes}" Width="*" />
             </DataGrid.Columns>
         </DataGrid>
 
@@ -122,10 +122,10 @@
                               HeadersVisibility="Column"
                               EnableRowVirtualization="True">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-                            <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="*" />
-                            <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="*" />
-                            <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="*" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Name" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Physical Value" Binding="{Binding PhysicalValue}" Width="*" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Raw Value" Binding="{Binding RawValue}" Width="*" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Units" Binding="{Binding Unit}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
@@ -144,19 +144,24 @@
                                    FontWeight="SemiBold"
                                    VerticalAlignment="Bottom"
                                    Margin="16,0,0,3" />
-                        <StackPanel Orientation="Horizontal">
+                        <WrapPanel>
                             <StackPanel Margin="0,0,10,0">
                                 <TextBlock Text="Zoeken in Signal Watch" />
                                 <TextBox Width="260"
                                          Text="{Binding SignalWatchSearchText, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
-                        </StackPanel>
+                            <CheckBox Content="Alleen gevolgd" IsChecked="{Binding OnlyWatchedSignals}" VerticalAlignment="Bottom" Margin="0,0,10,3" />
+                            <CheckBox Content="Laatste opnamewaarden" IsChecked="{Binding WatchLatestValues}" VerticalAlignment="Bottom" Margin="0,0,10,3" />
+                            <Button Content="Zichtbare volgen" Command="{Binding WatchVisibleSignalsCommand}" VerticalAlignment="Bottom" Margin="0,0,6,0" />
+                            <Button Content="Volglijst wissen" Command="{Binding ClearWatchedSignalsCommand}" VerticalAlignment="Bottom" />
+                            <TextBlock Text="{Binding WatchCursorText}" VerticalAlignment="Bottom" Margin="10,0,0,3" />
+                        </WrapPanel>
                     </DockPanel>
 
                     <DataGrid Grid.Row="1"
                               ItemsSource="{Binding SignalWatchRows}"
                               AutoGenerateColumns="False"
-                              IsReadOnly="True"
+                              IsReadOnly="False"
                               CanUserAddRows="False"
                               HeadersVisibility="Column"
                               EnableRowVirtualization="True"
@@ -164,18 +169,21 @@
                               VirtualizingPanel.IsVirtualizing="True"
                               VirtualizingPanel.ScrollUnit="Pixel">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="170" />
-                            <DataGridTextColumn Header="Signal" Binding="{Binding Name}" Width="190" />
-                            <DataGridTextColumn Header="ID" Binding="{Binding FrameIdHex}" Width="90" />
-                            <DataGridTextColumn Header="Channel" Binding="{Binding Channel}" Width="75" />
-                            <DataGridTextColumn Header="Last Time [s]" Binding="{Binding LastTimeSeconds}" Width="150" />
-                            <DataGridTextColumn Header="Last Frame" Binding="{Binding LastFrameIndex}" Width="95" />
-                            <DataGridTextColumn Header="Physical Value" Binding="{Binding PhysicalValue}" Width="120" />
-                            <DataGridTextColumn Header="Raw Value" Binding="{Binding RawValue}" Width="105" />
-                            <DataGridTextColumn Header="Units" Binding="{Binding Unit}" Width="80" />
-                            <DataGridTextColumn Header="Updates" Binding="{Binding UpdateCount}" Width="85" />
-                            <DataGridTextColumn Header="Min" Binding="{Binding Minimum}" Width="105" />
-                            <DataGridTextColumn Header="Max" Binding="{Binding Maximum}" Width="105" />
+                            <DataGridCheckBoxColumn Header="Volgen" Binding="{Binding IsWatched, UpdateSourceTrigger=PropertyChanged}" Width="65" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Message" Binding="{Binding MessageName}" Width="170" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Signal" Binding="{Binding Name}" Width="190" />
+                            <DataGridTextColumn IsReadOnly="True" Header="ID" Binding="{Binding FrameIdHex}" Width="90" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Channel" Binding="{Binding Channel}" Width="75" />
+                            <DataGridTextColumn Header="Sampletijd [s]" Binding="{Binding LastTimeSeconds}" Width="150" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Leeftijd" Binding="{Binding Age}" Width="100" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="240" IsReadOnly="True" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Last Frame" Binding="{Binding LastFrameIndex}" Width="95" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Physical Value" Binding="{Binding PhysicalValue}" Width="120" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Raw Value" Binding="{Binding RawValue}" Width="105" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Units" Binding="{Binding Unit}" Width="80" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Updates" Binding="{Binding UpdateCount}" Width="85" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Min" Binding="{Binding Minimum}" Width="105" />
+                            <DataGridTextColumn IsReadOnly="True" Header="Max" Binding="{Binding Maximum}" Width="105" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

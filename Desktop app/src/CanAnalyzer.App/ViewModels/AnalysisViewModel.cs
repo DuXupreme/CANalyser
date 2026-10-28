@@ -63,11 +63,23 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
         set => DisplayLimits.MaxPointsPerTrace = value;
     }
 
+    private bool _useDownsampling = true;
     public bool UseDownsampling
     {
-        get => DisplayLimits.UseDownsampling;
-        set => DisplayLimits.UseDownsampling = value;
+        get => _useDownsampling;
+        set
+        {
+            if (!SetProperty(ref _useDownsampling, value)) return;
+            OnPropertyChanged(nameof(SamplingStatus));
+            OnDisplayLimitsChanged(this, new PropertyChangedEventArgs(nameof(DisplayLimits.UseDownsampling)));
+        }
     }
+
+    public string SamplingStatus => UseDownsampling ? "Overzicht: weergave aangepast aan het zichtbare tijdvak."
+        : "Exact detail in dit venster; navigeren herstelt overzicht.";
+
+    [RelayCommand]
+    private void ShowAllPointsInViewport() => UseDownsampling = false;
 
     [ObservableProperty]
     private int _subplotHeight = 280;
@@ -143,6 +155,7 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
         ActiveUsage = activeUsage;
         _logger = logger;
         DisplayLimits = displayLimits;
+        _useDownsampling = displayLimits.UseDownsampling;
         DisplayLimits.PropertyChanged += OnDisplayLimitsChanged;
         _plotBuilds = new(BuildPlotsInBackgroundAsync, PublishPlots, running => IsBusy = !_disposed && (running || _openingDetached), ex =>
         {
@@ -258,6 +271,11 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
 
     private void OnDisplayLimitsChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (ReferenceEquals(sender, DisplayLimits) && e.PropertyName == nameof(DisplayLimits.UseDownsampling))
+        {
+            _useDownsampling = DisplayLimits.UseDownsampling;
+            OnPropertyChanged(nameof(SamplingStatus));
+        }
         if (e.PropertyName is nameof(DisplayLimits.MaxPointsPerTrace) or nameof(DisplayLimits.UseDownsampling))
         {
             CancelDetachedOpening();
@@ -311,6 +329,10 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         CancelPlotBuilds();
+        _useDownsampling = true;
+        OnPropertyChanged(nameof(UseDownsampling));
+        OnPropertyChanged(nameof(SamplingStatus));
+        foreach (var panel in PlotPanels) ViewportSampling.Suspend(panel.PlotModel);
         _dataset = dataset;
         ActiveUsage.LoadDataset(dataset);
         AvailableSignals.Clear();
@@ -341,6 +363,27 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
         _activeCursorPanel = null;
         _xAxisSyncService.Bind([]);
         PresetStatus = "Dataset geladen. Kies signalen en maak plotgroepen om grafieken te tonen.";
+    }
+
+    public void ClearDataset()
+    {
+        CancelPlotBuilds();
+        _dataset = null;
+        AvailableSignals.Clear(); FilteredSignalsView.Refresh(); MessageSummaries.Clear();
+        PlotGroups.Clear(); UnbindPlotNavigation();
+        foreach (var panel in PlotPanels) ViewportSampling.Suspend(panel.PlotModel);
+        PlotPanels.Clear(); SelectedPlotGroup = null; _activeCursorPanel = null;
+        CursorTime = null; FlagATime = null; FlagBTime = null;
+        CursorInfo = "Cursor: - | A: - | B: - | dt: -"; CursorValueInfo = "Signaalwaarde: -";
+        DecodeDiagnostics = string.Empty; _xAxisSyncService.Bind([]);
+        PresetStatus = "Geen dataset geladen.";
+    }
+
+    public async Task CancelAndWaitAsync()
+    {
+        CancelPlotBuilds();
+        await _plotBuilds.CancelAndWaitAsync();
+        if (_detachedCompletion is { } completion) await completion.Task;
     }
 
     public void ApplyViewOptions(PlotViewOptions options)
@@ -933,6 +976,7 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
     }
 
     private bool _openingDetached;
+    private TaskCompletionSource? _detachedCompletion;
 
     /// <summary>Cancel work without releasing a dataset that a worker is still reading.</summary>
     public void CancelPlotBuilds()
@@ -959,6 +1003,8 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
     private async Task OpenPlotsInWindowAsync(CancellationToken cancellationToken = default)
     {
         if (_openingDetached || _disposed) return;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _detachedCompletion = completion;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _detachedOpenCancellation = cancellation;
         try
@@ -1027,6 +1073,8 @@ public sealed partial class AnalysisViewModel : ObservableObject, IDisposable
         {
             _detachedOpenCancellation = null;
             _openingDetached = false;
+            completion.TrySetResult();
+            if (ReferenceEquals(_detachedCompletion, completion)) _detachedCompletion = null;
             IsBusy = !_disposed && _plotBuilds.IsRunning;
         }
     }

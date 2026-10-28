@@ -29,8 +29,9 @@ public sealed record UsageInterval(double StartSeconds, double EndSeconds, Usage
 /// <summary>Energy and its time denominator always have the same SOC coverage.</summary>
 public sealed record UsageEnergy(double CoveredSeconds, double DischargeSocPoints, double RiseSocPoints, double CapacityKwh)
 {
+    public bool EnergyAvailable { get; init; } = true;
     public double NetSocPoints => DischargeSocPoints - RiseSocPoints;
-    public double NetKwh => NetSocPoints * CapacityKwh / 100;
+    public double? NetKwh => EnergyAvailable ? NetSocPoints * CapacityKwh / 100 : null;
     public double? AverageKw => CoveredSeconds > 0 ? NetKwh * 3600 / CoveredSeconds : null;
 }
 
@@ -39,6 +40,9 @@ public sealed record ActiveUsageResult
     public required IReadOnlyList<UsageInterval> Intervals { get; init; }
     public required IReadOnlyDictionary<UsageState, UsageEnergy> EnergyByState { get; init; }
     public required ActiveUsageOptions Options { get; init; }
+    public BatteryConfigurationResult? BatteryConfiguration { get; init; }
+    public bool EnergyAvailable { get; init; } = true;
+    public string? ForecastUnavailableReason { get; init; }
     public bool HasOnSignal { get; init; }
     public double StartSeconds { get; init; }
     public double EndSeconds { get; init; }
@@ -52,10 +56,11 @@ public sealed record ActiveUsageResult
     public double OnSeconds => ActiveSeconds + IdleSeconds + Duration(UsageState.UnknownActivity);
     public double? ActivePercent => OnSeconds > 0 ? 100 * ActiveSeconds / OnSeconds : null;
     public UsageEnergy TotalEnergy => new(EnergyByState.Values.Sum(x => x.CoveredSeconds),
-        EnergyByState.Values.Sum(x => x.DischargeSocPoints), EnergyByState.Values.Sum(x => x.RiseSocPoints), Options.BatteryCapacityKwh);
+        EnergyByState.Values.Sum(x => x.DischargeSocPoints), EnergyByState.Values.Sum(x => x.RiseSocPoints), Options.BatteryCapacityKwh)
+        { EnergyAvailable = EnergyAvailable };
 
     // SOC rises can be charging or BMS corrections; neither is a sound discharge-only forecast.
-    public bool CanProject => TotalEnergy.RiseSocPoints <= 0.5;
+    public bool CanProject => EnergyAvailable && ForecastUnavailableReason is null && TotalEnergy.RiseSocPoints <= 0.5 && BatteryConfiguration?.HasConfigurationChanges != true;
     public double? ActiveRuntimeHours => Runtime(EnergyByState[UsageState.Active]);
     public double? MixedRuntimeHours
     {

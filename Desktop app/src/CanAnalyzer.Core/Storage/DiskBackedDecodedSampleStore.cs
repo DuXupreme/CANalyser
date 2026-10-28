@@ -14,6 +14,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     private readonly string _indexPath;
     private readonly string _frameIndexPath;
     private readonly DiskBackedSignalIndex _signalIndex;
+    private readonly AnalysisCacheSession _cacheSession;
     private readonly object _readLock = new();
     private readonly Dictionary<(SignalIdentity Identity, string Unit), int> _metadataIds = [];
     private readonly List<(SignalIdentity Identity, string Unit)> _metadata = [];
@@ -36,23 +37,35 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     private bool _complete;
     private bool _disposed;
 
-    public DiskBackedDecodedSampleStore()
+    public DiskBackedDecodedSampleStore(string? cacheDirectory = null)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "CANalyser", "sample-cache");
-        Directory.CreateDirectory(directory);
+        _cacheSession = AnalysisCacheStorage.CreateSession(cacheDirectory ?? Path.Combine(AnalysisCacheStorage.DefaultDirectory, "sample-cache"));
+        var directory = _cacheSession.DirectoryPath;
         var id = Guid.NewGuid().ToString("N");
         _dataPath = Path.Combine(directory, $"{id}.samples");
         _indexPath = Path.Combine(directory, $"{id}.index");
         _frameIndexPath = Path.Combine(directory, $"{id}.frame-index");
-        _signalIndex = new DiskBackedSignalIndex(Path.Combine(directory, $"{id}.series"));
-        _dataWriteStream = new FileStream(_dataPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        _indexWriteStream = new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        _frameIndexWriteStream = new FileStream(_frameIndexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        _dataWriter = new BinaryWriter(_dataWriteStream, Encoding.UTF8, true);
-        _indexWriter = new BinaryWriter(_indexWriteStream, Encoding.UTF8, true);
-        _frameIndexWriter = new BinaryWriter(_frameIndexWriteStream, Encoding.UTF8, true);
-        _dataWriter.Write(Magic);
-        _dataWriter.Write(2);
+        try
+        {
+            _signalIndex = new DiskBackedSignalIndex(Path.Combine(directory, $"{id}.series"));
+            _dataWriteStream = new FileStream(_dataPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            _indexWriteStream = new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            _frameIndexWriteStream = new FileStream(_frameIndexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            _dataWriter = new BinaryWriter(_dataWriteStream, Encoding.UTF8, true);
+            _indexWriter = new BinaryWriter(_indexWriteStream, Encoding.UTF8, true);
+            _frameIndexWriter = new BinaryWriter(_frameIndexWriteStream, Encoding.UTF8, true);
+            _dataWriter.Write(Magic);
+        _dataWriter.Write(3);
+        }
+        catch
+        {
+            _signalIndex?.Dispose();
+            _dataWriteStream?.Dispose();
+            _indexWriteStream?.Dispose();
+            _frameIndexWriteStream?.Dispose();
+            _cacheSession.Dispose();
+            throw;
+        }
     }
 
     public int Count { get; private set; }
@@ -150,6 +163,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         TryDelete(_dataPath);
         TryDelete(_indexPath);
         TryDelete(_frameIndexPath);
+        _cacheSession.Dispose();
     }
 
     public bool TryGetFrameSummary(long frameIndex, out string messageName, out int sampleCount)
@@ -174,6 +188,12 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
     {
         Complete();
         return _signalIndex.ReadSignalSeries(identity);
+    }
+
+    public SignalSeriesPoint? FindSignalPointAtOrBefore(SignalIdentity identity, long timestampNanoseconds)
+    {
+        Complete();
+        return _signalIndex.FindSignalPointAtOrBefore(identity, timestampNanoseconds);
     }
 
     public IEnumerable<SignalSeriesPoint> ReadSignalSeriesSampled(SignalIdentity identity, int maximumPoints)
@@ -254,7 +274,7 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
 
     private static void Validate(BinaryReader reader)
     {
-        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) || reader.ReadInt32() != 2)
+        if (!reader.ReadBytes(Magic.Length).SequenceEqual(Magic) || reader.ReadInt32() != 3)
             throw new InvalidDataException("Unsupported or corrupt CANalyser sample-store format.");
     }
 
@@ -272,6 +292,8 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         writer.Write(sample.TimestampNanoseconds);
         writer.Write(sample.FrameIndex);
         writer.Write(sample.SourceLineNumber);
+        writer.Write(sample.SourceFileIndex);
+        writer.Write(sample.SourceFrameIndex);
         writer.Write(metadataId);
         writer.Write(sample.Value);
         Span<byte> raw = stackalloc byte[128];
@@ -294,6 +316,8 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         var timestamp = reader.ReadInt64();
         var frameIndex = reader.ReadInt64();
         var sourceLine = reader.ReadInt64();
+        var sourceFileIndex = reader.ReadInt32();
+        var sourceFrameIndex = reader.ReadInt64();
         var metadataId = reader.ReadInt32();
         if ((uint)metadataId >= (uint)_metadata.Count) throw new InvalidDataException("Invalid sample metadata identifier.");
         var metadata = _metadata[metadataId];
@@ -304,7 +328,8 @@ public sealed class DiskBackedDecodedSampleStore : IReadOnlyList<DecodedSignalSa
         if (rawBytes.Length != rawLength) throw new EndOfStreamException("Truncated CANalyser sample store.");
         var quality = (DecodeQuality)reader.ReadByte();
         return new DecodedSignalSample(timestamp, frameIndex, sourceLine,
-            metadata.Identity, value, new BigInteger(rawBytes), metadata.Unit, quality);
+            metadata.Identity, value, new BigInteger(rawBytes), metadata.Unit, quality)
+        { SourceFileIndex = sourceFileIndex, SourceFrameIndex = sourceFrameIndex };
     }
 
     private static void TryDelete(string path)

@@ -21,7 +21,7 @@ public static class CalibratedStrokeAnalytics
 {
     public static CalibratedStrokeResult Analyze(SignalSeries position, StrokeReference reference,
         double? start = null, double? end = null, double edgePercent = 5, int bins = 40,
-        IReadOnlyList<MeasurementGap>? gaps = null)
+        IReadOnlyList<MeasurementGap>? gaps = null, CancellationToken cancellationToken = default)
     {
         if (reference.CenterSignal is null && (!reference.Center.HasValue || !double.IsFinite(reference.Center.Value)))
             throw new ArgumentException("Kies een nulpunt-signaal of vul een bekend nulpunt in.");
@@ -30,7 +30,8 @@ public static class CalibratedStrokeAnalytics
             !double.IsFinite(reference.RunValue) || !double.IsFinite(edgePercent) || edgePercent is <= 0 or >= 50)
             throw new ArgumentException("Halfbereik en maximale sampleafstand moeten positief zijn; grensband tussen 0 en 50%.");
         var sources = new[] { position, reference.CenterSignal, reference.HalfRangeSignal, reference.RunSignal, reference.Setpoint };
-        var readers = sources.Select(s => s is null ? null : new TimedSignalReader(s, reference.MaximumGapSeconds)).ToArray();
+        foreach (var source in sources.OfType<SignalSeries>()) source.GetData(cancellationToken);
+        var readers = sources.Select(s => s is null ? null : new TimedSignalReader(s, reference.MaximumGapSeconds, gaps)).ToArray();
         var from = start ?? (position.Time.Length > 0 ? position.Time[0] : 0);
         var to = end ?? (position.Time.Length > 0 ? position.Time[^1] : from);
         if (!double.IsFinite(from) || !double.IsFinite(to) || to < from)
@@ -42,11 +43,12 @@ public static class CalibratedStrokeAnalytics
         var bothLow = 0d; var bothHigh = 0d; var error = 0d;
         var lowVisits = 0; var highVisits = 0;
         var lowRun = 0d; var highRun = 0d; var longestLow = 0d; var longestHigh = 0d;
-        var orderedGaps = (gaps ?? []).OrderBy(g => g.StartSeconds).ToArray();
+        var orderedGaps = MeasurementGapSelection.Union(gaps ?? []).ToArray();
         var gapIndex = 0;
         var cursor = from;
         while (cursor < to)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var next = to;
             foreach (var reader in readers)
                 if (reader is not null) next = Math.Min(next, reader.NextBoundary(cursor, to));
@@ -124,10 +126,12 @@ internal sealed class TimedSignalReader
 {
     private readonly SignalSeries _series;
     private readonly double _gap;
+    private readonly IReadOnlyList<MeasurementGap> _gaps;
     private int _index;
-    public TimedSignalReader(SignalSeries series, double maxGap)
+    public TimedSignalReader(SignalSeries series, double maxGap, IReadOnlyList<MeasurementGap>? gaps = null)
     {
         _series = series;
+        _gaps = MeasurementGapSelection.Union(gaps ?? []);
         for (var i = 0; i < series.Time.Length; i++)
             if (!double.IsFinite(series.Time[i]) || (i > 0 && series.Time[i] < series.Time[i - 1]))
                 throw new ArgumentException($"Signaal {series.Label}: ongeldige of aflopende tijd.");
@@ -150,6 +154,7 @@ internal sealed class TimedSignalReader
         Advance(time); value = 0;
         if (_index + 1 >= _series.Time.Length || _series.Time[_index] > time ||
             _series.Time[_index + 1] - _series.Time[_index] > _gap ||
+            !MeasurementGapSelection.CanHoldSample(_gaps, _series.Time[_index], time) ||
             !double.IsFinite(_series.Value[_index]) || !double.IsFinite(_series.Value[_index + 1])) return false;
         value = _series.Value[_index]; return true;
     }

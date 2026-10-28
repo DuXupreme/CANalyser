@@ -39,7 +39,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        EndDatasetLoading();
         _loadCts?.Cancel();
+        Comparison.Dispose();
         // In-flight readers release their own leases on their worker thread.
         ReleaseCurrentDataset();
     }
@@ -50,10 +52,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         // Detach the tables before their backing stores are retired.
         RawFrames.ClearDataset();
         Busmaster.ClearDataset();
+        Analysis.ClearDataset();
+        JoystickAnalytics.ClearDataset();
+        Analysis.ActiveUsage.ClearDataset();
         var previous = _dataset;
         _dataset = null;
         previous?.Dispose();
         SettingsDiagnostics.ClearCurrentDataset();
+        RefreshSourceSelectionState();
     }
 
     [ObservableProperty]
@@ -79,6 +85,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _hasRepairablePartialImport;
+
+    [ObservableProperty]
+    private int _selectedMainTabIndex = 1;
 
     public MainWindowViewModel(
         ICanAnalysisPipeline analysisPipeline,
@@ -123,6 +132,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Analysis.ActiveUsage.PropertyChanged += OnBackgroundOperationPropertyChanged;
 
         LoadedSettings = _settingsStore.Load();
+        InitializeAnalysisProfiles();
+        Busmaster.ApplySignalWatchOptions(LoadedSettings.SignalWatch);
         _telemetryService.Configure(LoadedSettings.Telemetry);
         _ = _telemetryService.ReportInterruptedOperationAsync();
         LogFilePath = LoadedSettings.LastLogFilePath;
@@ -131,14 +142,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RawFrames.ApplyFilterOptions(LoadedSettings.LastRawFrameFilter);
         SettingsDiagnostics.ApplySettings(LoadedSettings, _settingsStore.SettingsPath);
         SettingsDiagnostics.BindApplySettingsHandler(ApplyProgramSettingsFromUiAsync);
+        InitializeAnalysisStorage();
 
-        BrowseLogFileCommand = new RelayCommand(BrowseLogFile);
-        ImportOnlineLogsCommand = new AsyncRelayCommand(ImportOnlineLogsAsync, () => !IsAnyBusy);
-        BrowseDbcFileCommand = new RelayCommand(BrowseDbcFile);
+        BrowseLogFileCommand = new RelayCommand(BrowseLogFile, () => !IsBusy);
+        ImportOnlineLogsCommand = new AsyncRelayCommand(ImportOnlineLogsAsync, () => !IsBusy);
+        BrowseDbcFileCommand = new RelayCommand(BrowseDbcFile, () => !IsBusy);
+        KeepLoadedSourceSelectionCommand = new RelayCommand(KeepLoadedSourceSelection, () => HasPendingSourceSelection && !IsBusy);
         LoadAndDecodeCommand = new AsyncRelayCommand(LoadAndDecodeAsync, CanLoadAndDecode);
-        ImportActuatorCsvCommand = new AsyncRelayCommand(ImportActuatorCsvAsync, () => !IsAnyBusy);
-        RepairPartialImportCommand = new AsyncRelayCommand(RepairPartialImportAsync, () => HasRepairablePartialImport && !IsAnyBusy);
-        CancelCommand = new RelayCommand(CancelLoad, () => IsBusy || Analysis.IsBusy);
+        ImportActuatorCsvCommand = new AsyncRelayCommand(ImportActuatorCsvAsync, () => !IsBusy);
+        RepairPartialImportCommand = new AsyncRelayCommand(RepairPartialImportAsync, () => HasRepairablePartialImport && !IsAnyBusy && !HasPendingSourceSelection);
+        CancelCommand = new RelayCommand(CancelLoad, () => IsAnyBusy);
         ExportDecodedCsvCommand = new AsyncRelayCommand(ExportDecodedCsvAsync, CanExportDecodedCsv);
         ExportAnalysesCommand = new AsyncRelayCommand(ExportAnalysesAsync, () => CanExportDecodedCsv() && !Analysis.ActiveUsage.IsBusy);
         ExportLayoutCommand = new AsyncRelayCommand(ExportLayoutAsync);
@@ -164,6 +177,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public SettingsDiagnosticsViewModel SettingsDiagnostics { get; }
 
     public DbcEditorViewModel DbcEditor { get; }
+
+    public ComparisonViewModel Comparison { get; } = new();
 
     public bool IsAnyBusy => IsBusy || IsBackgroundAnalysisBusy;
 
@@ -206,6 +221,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         LoadedSettings.LastLogFilePath = value;
         SettingsDiagnostics.LogFilePath = value;
+        RefreshSourceSelectionState();
         UpdateCommandStates();
     }
 
@@ -213,6 +229,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         LoadedSettings.LastDbcFilePath = value;
         SettingsDiagnostics.DbcFilePath = value;
+        RefreshSourceSelectionState();
         UpdateCommandStates();
     }
 
@@ -224,6 +241,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     partial void OnIsRepairWizardOpenChanged(bool value)
     {
         OnPropertyChanged(nameof(IsBusyIndicatorVisible));
+        OnPropertyChanged(nameof(ShowDatasetLoading));
     }
 
     partial void OnHasRepairablePartialImportChanged(bool value)
@@ -238,6 +256,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnBackgroundOperationPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
+        if (ReferenceEquals(sender, Analysis) && eventArgs.PropertyName == nameof(AnalysisViewModel.CursorTime))
+            Busmaster.SetWatchCursorAt(Analysis.CursorTime);
         if (eventArgs.PropertyName is nameof(AnalysisViewModel.IsBusy) or nameof(AnalysisViewModel.BusyLabel))
         {
             NotifyBusyStateChanged();
@@ -271,14 +291,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanLoadAndDecode()
     {
-        return !IsAnyBusy &&
+        return !IsBusy &&
                !string.IsNullOrWhiteSpace(LogFilePath) &&
                !string.IsNullOrWhiteSpace(DbcFilePath);
     }
 
     private bool CanExportDecodedCsv()
     {
-        return !IsAnyBusy && _dataset is not null;
+        return !IsAnyBusy && _dataset is not null && !HasPendingSourceSelection;
     }
 
     private void BrowseLogFile()
@@ -340,6 +360,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         IsBusy = true;
+        BeginDatasetLoading();
         ReleaseCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
@@ -381,7 +402,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(static channel => channel, StringComparer.Ordinal)
                 .ToArray();
-            if (channels.Length > 1)
+            var reusableProfile = AnalysisProfileResolver.Resolve(_dataset, LoadedSettings.AnalysisProfiles);
+            var decoderScopeConfirmed = reusableProfile.Confirmed &&
+                AnalysisProfileResolver.IsApplicable(reusableProfile, _dataset) &&
+                reusableProfile.ConfirmedDecoderChannels.Order(StringComparer.Ordinal)
+                    .SequenceEqual(_dataset.Channels.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+            if (channels.Length > 1 && !decoderScopeConfirmed)
             {
                 var dbcName = Path.GetFileName(DbcFilePath);
                 var mapping = string.Join(Environment.NewLine, channels.Select(channel => $"• {channel} → {dbcName}"));
@@ -407,6 +433,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             RawFrames.LoadDataset(_dataset);
             Busmaster.LoadDataset(_dataset);
             SettingsDiagnostics.UpdateDataset(_dataset);
+            MarkSourceSelectionLoaded();
+            SelectedMainTabIndex = 1;
             viewTimer.Stop();
             var timings = _dataset.LoadTimings;
 
@@ -496,6 +524,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _loadCts?.Dispose();
             _loadCts = null;
             IsBusy = false;
+            EndDatasetLoading();
             UpdateCommandStates();
         }
     }
@@ -521,6 +550,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (files.Count == 0) return;
 
         IsBusy = true;
+        BeginDatasetLoading();
         ReleaseCurrentDataset();
         HasRepairablePartialImport = false;
         ProgressValue = 0;
@@ -538,6 +568,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             });
             _dataset = await _actuatorCsvImportService.ImportAsync(files, progress, _loadCts.Token);
             if (_disposed) { _dataset.Dispose(); return; }
+            // This dataset came from the dedicated CSV importer, not the previous CAN/DBC selection.
+            LogFilePath = files[0];
+            DbcFilePath = null;
 
             Analysis.LoadDataset(_dataset);
             LoadDefaultActuatorComparisonGroups(_dataset);
@@ -547,6 +580,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SettingsDiagnostics.UpdateDataset(_dataset);
             SettingsDiagnostics.LogFilePath = string.Join(" | ", files.Select(Path.GetFileName));
             SettingsDiagnostics.DbcFilePath = "(niet nodig voor Actuator CSV)";
+            MarkSourceSelectionLoaded(isActuatorCsv: true);
 
             StatusText =
                 $"Actuator CSV-vergelijking geladen: {files.Count} run(s), {_dataset.SignalCount:N0} signalen.\n" +
@@ -599,6 +633,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _loadCts?.Dispose();
             _loadCts = null;
             IsBusy = false;
+            EndDatasetLoading();
             UpdateCommandStates();
         }
     }
@@ -606,7 +641,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task RepairPartialImportAsync()
     {
         var report = _dataset?.ImportReport;
-        if (!HasRepairablePartialImport || report is null ||
+        if (!HasRepairablePartialImport || report is null || IsAnyBusy || HasPendingSourceSelection ||
             string.IsNullOrWhiteSpace(LogFilePath) || string.IsNullOrWhiteSpace(DbcFilePath))
         {
             return;
@@ -808,74 +843,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _loadCts?.Cancel();
         Analysis.CancelPlotBuilds();
-    }
-
-    private async Task ExportAnalysesAsync()
-    {
-        if (_dataset is null || IsAnyBusy || Analysis.ActiveUsage.IsBusy) return;
-        var dataset = _dataset;
-        try
-        {
-            string[] sourceEntries = [];
-            if (System.IO.File.Exists(LogFilePath) && System.IO.Path.GetExtension(LogFilePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                using var archive = ZipFile.OpenRead(LogFilePath);
-                sourceEntries = archive.Entries.Where(e => e.Name.EndsWith(".mf4", StringComparison.OrdinalIgnoreCase))
-                    .Select(e => e.FullName).ToArray();
-            }
-            var loggerIds = dataset.SourceFiles.Select(source => source.Logger).Where(logger => !string.IsNullOrWhiteSpace(logger))
-                .Select(logger => logger!.ToUpperInvariant()).Distinct().ToArray();
-            var dialog = new CanAnalyzer.App.Views.AnalysisExportDialog(loggerIds.Length == 1 ? loggerIds[0] : "",
-                CanAnalyzer.App.Models.OnlineMachineCatalog.ResolveExportMachine(dataset.SourceFiles));
-            if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner) dialog.Owner = owner;
-            if (dialog.ShowDialog() != true || dialog.Options is not { } options) return;
-            var save = new Microsoft.Win32.SaveFileDialog
-            {
-                Title = "Analysepakket opslaan", Filter = "Analysepakket (*.zip)|*.zip", DefaultExt = ".zip",
-                FileName = "canalyser-analyses-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip", AddExtension = true
-            };
-            if (save.ShowDialog() != true) return;
-            IsBusy = true;
-            ProgressLabel = "Analysepakket berekenen en exporteren�";
-            _loadCts = new CancellationTokenSource();
-            var token = _loadCts.Token;
-            await JoystickAnalytics.RecomputeCommand.ExecuteAsync(null);
-            token.ThrowIfCancellationRequested();
-            await Analysis.ActiveUsage.CalculateCommand.ExecuteAsync(null);
-            token.ThrowIfCancellationRequested();
-            var active = Analysis.ActiveUsage;
-            // Freeze plain data on the UI thread before streaming the dataset on a worker.
-            var snapshot = JsonSerializer.SerializeToElement(new
-            {
-                CanAnalyses = JoystickAnalytics.CaptureExport(),
-                ActiveUsage = new { active.Status, active.Notes, active.ActivitySignal, active.SocSignal, active.OnSignal,
-                    Result = active.ExportResult, TimeMetrics = active.TimeMetrics.ToArray(),
-                    EnergyMetrics = active.EnergyMetrics.ToArray(), BatteryMetrics = active.BatteryMetrics.ToArray() }
-            }, AnalysisBundleExporter.JsonOptions);
-            var reader = dataset.AcquireReadLease();
-            await Task.Run(() =>
-            {
-                using (reader) AnalysisBundleExporter.Export(save.FileName, dataset, options, snapshot, sourceEntries, token);
-            });
-            _messageDialogService.ShowInfo("Analyse-export", "Analysepakket opgeslagen:\n" + save.FileName +
-                "\nCSV-tabellen, JSON-resultaten en instellingen. Onbeschikbare analyses blijven als onbekend gemarkeerd.");
-        }
-        catch (OperationCanceledException) { StatusText = "Analyse-export geannuleerd."; }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Analysis bundle export failed");
-            _messageDialogService.ShowError("Analyse-export mislukt", ex.Message);
-        }
-        finally
-        {
-            _loadCts?.Dispose(); _loadCts = null;
-            IsBusy = false; ProgressLabel = "Klaar.";
-        }
+        _ = JoystickAnalytics.CancelAndWaitAsync();
+        _ = Analysis.ActiveUsage.CancelAndWaitAsync();
+        _ = Busmaster.CancelAndWaitAsync();
     }
 
     private async Task ExportDecodedCsvAsync()
     {
-        if (_dataset is null || IsAnyBusy)
+        if (_dataset is null || IsAnyBusy || HasPendingSourceSelection)
         {
             return;
         }
@@ -961,8 +936,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SaveSettingsAsync(CancellationToken cancellationToken)
     {
+        LoadedSettings.SignalWatch = Busmaster.CaptureSignalWatchOptions();
         SettingsDiagnostics.WriteBackToSettings(LoadedSettings);
         LoadedSettings.LastPlotViewOptions = Analysis.CaptureViewOptions();
+        LoadedSettings.LastPlotViewOptions.UseDownsampling = true;
+        LoadedSettings.LastPlotViewOptions.PlotOptions.Remove("disable_downsampling");
         LoadedSettings.LastRawFrameFilter = RawFrames.CaptureFilterOptions();
         LoadedSettings.LastLogFilePath = LogFilePath;
         LoadedSettings.LastDbcFilePath = DbcFilePath;
@@ -1007,6 +985,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UpdateCommandStates()
     {
+        BrowseLogFileCommand?.NotifyCanExecuteChanged();
+        BrowseDbcFileCommand?.NotifyCanExecuteChanged();
         LoadAndDecodeCommand?.NotifyCanExecuteChanged();
         ImportOnlineLogsCommand?.NotifyCanExecuteChanged();
         ImportActuatorCsvCommand?.NotifyCanExecuteChanged();
@@ -1014,6 +994,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ExportDecodedCsvCommand?.NotifyCanExecuteChanged();
         ExportAnalysesCommand?.NotifyCanExecuteChanged();
         CancelCommand?.NotifyCanExecuteChanged();
+        KeepLoadedSourceSelectionCommand?.NotifyCanExecuteChanged();
     }
 
     private static string BuildStatusText(CanDataset dataset, bool useDownsampling, int maxPointsPerTrace)
@@ -1028,7 +1009,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var integrity = dataset.Completeness == DatasetCompleteness.Complete
             ? "Integriteit: COMPLETE"
-            : "Integriteit: PARTIAL — analyses en exports zijn onvolledig";
+            : dataset.ImportReport?.Exclusions.Count > 0
+                ? "Integriteit: PARTIAL — bewust uitgesloten bestanden; overige importmeldingen staan bij Diagnostics"
+                : "Integriteit: PARTIAL — analyses en exports zijn onvolledig";
 
         if (dataset.SignalCount > 0)
         {

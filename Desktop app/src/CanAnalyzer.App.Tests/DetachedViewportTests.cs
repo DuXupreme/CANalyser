@@ -38,14 +38,16 @@ public sealed class DetachedViewportTests
             Assert.All(raw.Points, point => Assert.InRange(point.X, 9.999, 10.051));
             Assert.Equal(10, model.Axes[0].ActualMinimum);
             Assert.Equal(10.05, model.Axes[0].ActualMaximum);
-            Assert.False(limits.UseDownsampling);
+            Assert.False(window.UseDownsampling);
+            Assert.True(limits.UseDownsampling);
             Assert.Same(data.SignalSeriesByLabel["test"].Time, panel.SeriesData[0].Time);
 
             window.StepPlot = true;
             Assert.True(window.IsBusy);
             await WaitForBuild(window);
             Assert.IsAssignableFrom<StairStepSeries>(Assert.Single(model.Series));
-            Assert.False(limits.UseDownsampling);
+            Assert.False(window.UseDownsampling);
+            Assert.True(limits.UseDownsampling);
             Assert.Equal(string.Empty, window.PlotStatus);
         }
         finally { window.Close(); }

@@ -73,6 +73,7 @@ public sealed class CsvExportService : ICsvExportService
             _ => null
         };
         var needsFrame = columns.Contains("dlc_code") || columns.Contains("payload_length");
+        var clockQuality = columns.Contains("clock_quality") ? dataset.ClockQuality : null;
         var rows = 0;
         foreach (var sample in dataset.DecodedSamples)
         {
@@ -103,6 +104,7 @@ public sealed class CsvExportService : ICsvExportService
                     "dataset_status" => dataset.Completeness.ToString().ToUpperInvariant(),
                     "source_log_sha256" => dataset.SourceLogSha256, "dbc_sha256" => dataset.DbcSha256,
                     "app_version" => dataset.ApplicationVersion, "import_mode" => dataset.ImportReport?.Mode.ToString() ?? "",
+                    "clock_quality" => clockQuality,
                     _ => throw new InvalidOperationException("Onbekende CSV-kolom.")
                 };
                 csv.WriteField(value);

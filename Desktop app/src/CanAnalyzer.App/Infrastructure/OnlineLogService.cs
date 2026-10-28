@@ -13,7 +13,7 @@ using CanAnalyzer.Core.Domain;
 namespace CanAnalyzer.App.Infrastructure;
 
 /// <summary>Reads the dashboard API; AWS credentials remain exclusively on the server.</summary>
-public sealed class OnlineLogService : IOnlineLogService, IDisposable
+public sealed partial class OnlineLogService : IOnlineLogService, IDisposable
 {
     internal const string DashboardBaseUrl = "https://main.d2qydggp5q6c4q.amplifyapp.com/";
     private const long MaximumCacheBytes = 2L * 1024 * 1024 * 1024;
@@ -80,21 +80,28 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         CancellationToken cancellationToken)
+        => await GetLogsAsync(machineId, fromUtc, toUtc, "recording", cancellationToken).ConfigureAwait(false);
+
+    public async Task<OnlineLogQueryResult> GetLogsAsync(string machineId, DateTimeOffset fromUtc,
+        DateTimeOffset toUtc, string timeBasis, CancellationToken cancellationToken)
     {
-        var result = await GetLogPageAsync(machineId, fromUtc, toUtc, cancellationToken).ConfigureAwait(false);
+        if (timeBasis is not ("recording" or "uploaded")) throw new ArgumentOutOfRangeException(nameof(timeBasis));
+        var result = await GetLogPageAsync(machineId, fromUtc, toUtc, timeBasis, cancellationToken).ConfigureAwait(false);
         if (!result.Truncated) return result;
         // The API caps each response at 200 newest files. Split the half-open
         // recording interval so older morning logs cannot silently disappear.
         if (toUtc - fromUtc <= TimeSpan.FromMilliseconds(1))
             throw new InvalidDataException("Te veel logs met dezelfde meettijd; de loglijst kan niet volledig worden geladen.");
         var middle = fromUtc.AddTicks((toUtc - fromUtc).Ticks / 2);
-        var earlier = await GetLogsAsync(machineId, fromUtc, middle, cancellationToken).ConfigureAwait(false);
-        var later = await GetLogsAsync(machineId, middle, toUtc, cancellationToken).ConfigureAwait(false);
+        var earlier = await GetLogsAsync(machineId, fromUtc, middle, timeBasis, cancellationToken).ConfigureAwait(false);
+        var later = await GetLogsAsync(machineId, middle, toUtc, timeBasis, cancellationToken).ConfigureAwait(false);
         return new OnlineLogQueryResult(earlier.Files.Concat(later.Files)
             .DistinctBy(static file => file.Key)
-            .OrderByDescending(static file => file.RecordedAt).ToArray(), false,
+            .OrderByDescending(file => timeBasis == "uploaded" ? file.UploadedAt : file.RecordedAt).ToArray(), false,
             Math.Min(earlier.MaximumSelection, later.MaximumSelection),
-            Math.Max(earlier.UnknownRecordingTimes, later.UnknownRecordingTimes));
+            Math.Max(earlier.UnknownRecordingTimes, later.UnknownRecordingTimes))
+        { AnnotationsAvailable = earlier.AnnotationsAvailable && later.AnnotationsAvailable,
+            DownloadManifestVersion = Math.Min(earlier.DownloadManifestVersion, later.DownloadManifestVersion) };
     }
 
     internal OnlineLogService(HttpClient httpClient, string? cacheDirectory = null,
@@ -111,21 +118,21 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
     }
 
     private async Task<OnlineLogQueryResult> GetLogPageAsync(
-        string machineId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+        string machineId, DateTimeOffset fromUtc, DateTimeOffset toUtc, string timeBasis, CancellationToken cancellationToken)
     {
         var url = "api/logs?machine=" + Uri.EscapeDataString(machineId)
                   + "&from=" + Uri.EscapeDataString(fromUtc.ToString("O", CultureInfo.InvariantCulture))
                   + "&to=" + Uri.EscapeDataString(toUtc.ToString("O", CultureInfo.InvariantCulture))
-                  + "&timeBasis=recording";
+                  + "&timeBasis=" + timeBasis + "&includeExcluded=true";
         using var request = CreateDashboardRequest(HttpMethod.Get, url);
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureDashboardSuccessAsync(request, response, cancellationToken).ConfigureAwait(false);
         var payload = await response.Content.ReadFromJsonAsync<LogListResponse>(cancellationToken: cancellationToken).ConfigureAwait(false)
                       ?? throw new InvalidDataException("De online-loglijst is leeg of ongeldig.");
-        if (!string.Equals(payload.TimeBasis, "recording", StringComparison.Ordinal))
+        if (!string.Equals(payload.TimeBasis, timeBasis, StringComparison.Ordinal))
             throw new InvalidDataException("Het dashboard ondersteunt selectie op meettijd nog niet. Werk eerst het dashboard bij; uploadtijden worden niet als meettijden gebruikt.");
         return new OnlineLogQueryResult(
-            payload.Files.Select(static file => new OnlineLogFile(
+            payload.Files.Select(file => new OnlineLogFile(
                 file.Key,
                 file.Name,
                 file.Machine,
@@ -133,10 +140,27 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
                 file.Session,
                 file.RecordedAt,
                 file.UploadedAt ?? file.CreatedAt,
-                file.SizeBytes)).ToArray(),
+                file.SizeBytes)
+            {
+                ClockQuality = NormalizeClockQuality(file.ClockQuality, file.ClockEvidence, file.RecordedAt),
+                ClockEvidence = file.ClockEvidence,
+                MachineAssignmentQuality = NormalizeMachineQuality(file.MachineAssignmentQuality, file.MachineAssignmentEvidence, file.MachineId, file.InstallationId),
+                MachineAssignmentEvidence = file.MachineAssignmentEvidence,
+                MachineId = file.MachineId,
+                InstallationId = file.InstallationId,
+                ConfigurationId = file.ConfigurationId,
+                ObjectVersion = file.ObjectVersion ?? file.ETag,
+                ETag = file.ETag,
+                MetadataRevision = file.MetadataRevision,
+                Sha256 = file.Sha256,
+                Annotation = payload.Capabilities?.Annotations?.Available == true ? file.Annotation : null,
+                RequiresAnnotationCheck = payload.Capabilities?.Annotations?.Version >= 1
+            }).ToArray(),
             payload.Truncated,
             Mdf4ImportLimits.MaximumFiles,
-            payload.UnknownRecordingTimes);
+            payload.UnknownRecordingTimes)
+        { AnnotationsAvailable = payload.Capabilities?.Annotations?.Available == true,
+            DownloadManifestVersion = payload.Capabilities?.DownloadManifestVersion ?? 1 };
     }
 
     public async Task<string> DownloadArchiveAsync(
@@ -154,12 +178,29 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
             .ToArray());
         if (!selectionValidation.IsValid) throw new InvalidOperationException(selectionValidation.Message);
         var keys = files.Select(static file => file.Key).ToArray();
+        if (keys.Distinct(StringComparer.Ordinal).Count() != keys.Length)
+            throw new InvalidDataException("De selectie bevat hetzelfde logbestand meer dan één keer.");
+        var cacheSelection = files;
+        var annotated = files.Any(file => file.RequiresAnnotationCheck || file.Annotation is not null)
+            ? await PrepareAnnotatedDownloadAsync(files, cancellationToken).ConfigureAwait(false) : null;
+        if (annotated is not null)
+        {
+            files = files.Where(file => annotated.Downloads.ContainsKey(file.Key)).Select(file => file with
+            {
+                Sha256 = annotated.Downloads[file.Key].Sha256 ?? file.Sha256,
+                MetadataRevision = annotated.Downloads[file.Key].MetadataRevision ?? file.MetadataRevision,
+                ETag = annotated.Downloads[file.Key].ETag ?? file.ETag
+            }).ToArray();
+            keys = files.Select(file => file.Key).ToArray();
+        }
+        if (files.Count == 0) throw new InvalidDataException("Alle geselecteerde bestanden zijn als niet nuttig gemarkeerd. Verwijder zo nodig eerst een markering.");
+        var byKey = files.ToDictionary(static file => file.Key, StringComparer.Ordinal);
 
         var cacheDirectory = GetCacheDirectory();
         Directory.CreateDirectory(cacheDirectory);
         CleanupCache(cacheDirectory);
-        var finalPath = BuildCachePath(cacheDirectory, files);
-        if (IsUsableCachedArchive(finalPath, files))
+        var finalPath = BuildCachePath(cacheDirectory, cacheSelection);
+        if (await IsUsableCachedArchiveAsync(finalPath, files, cancellationToken, annotated?.Omissions).ConfigureAwait(false))
         {
             File.SetLastWriteTimeUtc(finalPath, DateTime.UtcNow);
             var cachedBytes = files.Sum(static file => Math.Max(0, file.SizeBytes));
@@ -168,8 +209,7 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         }
 
         TryDelete(finalPath);
-        var partialPath = finalPath + ".partial";
-        TryDelete(partialPath);
+        var partialPath = finalPath + "." + Guid.NewGuid().ToString("N") + ".partial";
         try
         {
             var total = files.Sum(static file => Math.Max(0, file.SizeBytes));
@@ -179,49 +219,108 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
             {
                 using (var archive = new ZipArchive(target, ZipArchiveMode.Create, leaveOpen: true))
                 {
+                    var manifestFiles = new List<OnlineLogArchiveFile>();
+                    var archiveNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var downloadedKeys = new HashSet<string>(StringComparer.Ordinal);
                     // Request at most 200 signed URLs at a time, but put every
                     // batch into the same archive for one complete analysis.
                     foreach (var batch in keys.Chunk(200))
                     {
-                        using var planRequest = CreateDashboardRequest(HttpMethod.Post, "api/download-plan");
-                        planRequest.Content = JsonContent.Create(new { keys = batch });
-                        using var planResponse = await _httpClient.SendAsync(planRequest, cancellationToken).ConfigureAwait(false);
-                        await EnsureDashboardSuccessAsync(planRequest, planResponse, cancellationToken).ConfigureAwait(false);
-                        var plan = await planResponse.Content.ReadFromJsonAsync<DownloadPlanResponse>(cancellationToken: cancellationToken).ConfigureAwait(false);
-                        if (plan?.Files is not { } plannedFiles || plannedFiles.Length != batch.Length)
+                        // Renew URLs just before each batch; an earlier cache-validation
+                        // plan must not expire while a large selection downloads.
+                        var plan = await RequestDownloadPlanAsync(batch, cancellationToken,
+                            annotated is null ? null : batch.Select(key => byKey[key]).ToArray()).ConfigureAwait(false);
+                        if (plan.Files is not { } plannedFiles || plannedFiles.Length != batch.Length)
                             throw new InvalidDataException("Het online-downloadplan bevat niet alle geselecteerde bestanden.");
                         foreach (var plannedFile in plannedFiles)
                         {
                             var downloadUri = ValidateDownloadUri(plannedFile.Url);
                             var archiveName = ValidateArchiveName(plannedFile.ArchiveName);
-                            using var response = await _httpClient.GetAsync(
-                                    downloadUri,
+                            // Older dashboards identify the object by its unchanged path in the ZIP.
+                            // Never pair a reordered/duplicate plan to selections by array index.
+                            var key = plannedFile.Key ?? archiveName;
+                            if (!batch.Contains(key, StringComparer.Ordinal) || !byKey.TryGetValue(key, out var selected) ||
+                                !downloadedKeys.Add(key) || !archiveNames.Add(archiveName))
+                                throw new InvalidDataException("Het online-downloadplan bevat onverwachte of dubbele bestanden. Vernieuw de loglijst.");
+                            if (plannedFile.SizeBytes is { } plannedSize && plannedSize != selected.SizeBytes)
+                                throw new InvalidDataException("Een online logbestand is gewijzigd. Vernieuw de loglijst.");
+                            if (annotated is not null && (plan.SchemaVersion != 2 ||
+                                plannedFile.AnnotationRevision != selected.Annotation?.Revision ||
+                                plannedFile.ObjectVersion != selected.ObjectVersion))
+                                throw new InvalidDataException("Een bestand of markering is gewijzigd. Vernieuw de loglijst.");
+                            if (plannedFile.ObjectVersion is { } plannedVersion && selected.ObjectVersion is { } selectedVersion &&
+                                !string.Equals(plannedVersion, selectedVersion, StringComparison.Ordinal))
+                                throw new InvalidDataException("Een online logversie is gewijzigd. Vernieuw de loglijst.");
+                            if (plannedFile.MetadataRevision is { } plannedRevision && selected.MetadataRevision is { } selectedRevision &&
+                                !string.Equals(plannedRevision, selectedRevision, StringComparison.Ordinal))
+                                throw new InvalidDataException("De online bronmetadata is gewijzigd. Vernieuw de loglijst.");
+                            var expectedETag = plannedFile.ETag ?? selected.ETag;
+                            if (plannedFile.ETag is { } plannedETag && selected.ETag is { } selectedETag && plannedETag != selectedETag)
+                                throw new InvalidDataException("Een online logversie is gewijzigd. Vernieuw de loglijst.");
+                            using var downloadRequest = new HttpRequestMessage(HttpMethod.Get, downloadUri);
+                            if (expectedETag is not null)
+                                downloadRequest.Headers.IfMatch.Add(EntityTagHeaderValue.Parse(expectedETag));
+                            else if (selected.UploadedAtUtc is { } observedUpload)
+                                downloadRequest.Headers.IfUnmodifiedSince = observedUpload;
+                            using var response = await _httpClient.SendAsync(
+                                    downloadRequest,
                                     HttpCompletionOption.ResponseHeadersRead,
                                     cancellationToken)
                                 .ConfigureAwait(false);
                             await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+                            if (expectedETag is not null && response.Headers.ETag?.ToString() != expectedETag)
+                                throw new InvalidDataException("De ontvangen logversie wijkt af van het downloadplan (ETag).");
+                            if (plannedFile.VersionId is { Length: > 0 } versionId &&
+                                (!response.Headers.TryGetValues("x-amz-version-id", out var versions) || versions.SingleOrDefault() != versionId))
+                                throw new InvalidDataException("De ontvangen logversie wijkt af van het downloadplan (version ID).");
+                            if (selected.UploadedAtUtc is { } selectedUpload && response.Content.Headers.LastModified is { } receivedUpload &&
+                                selectedUpload.ToUnixTimeSeconds() != receivedUpload.ToUnixTimeSeconds())
+                                throw new InvalidDataException("De ontvangen uploadtijd wijkt af van de loglijst. Vernieuw de loglijst.");
+                            if (response.Content.Headers.ContentLength is { } contentLength && contentLength != selected.SizeBytes)
+                                throw new InvalidDataException("De downloadgrootte wijkt af van de loglijst. Vernieuw de loglijst.");
                             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken)
                                 .ConfigureAwait(false);
                             var entry = archive.CreateEntry(archiveName, CompressionLevel.Optimal);
-                            await using var destination = entry.Open();
-                            var buffer = new byte[128 * 1024];
-                            while (true)
+                            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                            long entryBytes = 0;
+                            await using (var destination = entry.Open())
                             {
-                                var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                                if (read == 0) break;
-                                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                                received += read;
-                                if (received > Mdf4ImportLimits.MaximumBytes)
-                                    throw new InvalidDataException("De download overschrijdt de importgrens van 4 GB.");
-                                progress?.Report(new OnlineDownloadProgress(received, total > 0 ? total : null));
+                                var buffer = new byte[128 * 1024];
+                                while (true)
+                                {
+                                    var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                                    if (read == 0) break;
+                                    entryBytes += read;
+                                    received += read;
+                                    if (entryBytes > selected.SizeBytes || received > Mdf4ImportLimits.MaximumBytes)
+                                        throw new InvalidDataException("De download overschrijdt de verwachte bestandsgrootte of importgrens.");
+                                    hash.AppendData(buffer, 0, read);
+                                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                                    progress?.Report(new OnlineDownloadProgress(received, total > 0 ? total : null));
+                                }
                             }
+                            var sha256 = Convert.ToHexString(hash.GetHashAndReset());
+                            if (entryBytes != selected.SizeBytes ||
+                                (selected.Sha256 is { } expectedHash && !string.Equals(expectedHash, sha256, StringComparison.OrdinalIgnoreCase)) ||
+                                (plannedFile.Sha256 is { } plannedHash && !string.Equals(plannedHash, sha256, StringComparison.OrdinalIgnoreCase)))
+                                throw new InvalidDataException("De download is onvolledig of wijkt af van de verwachte SHA-256.");
+                            manifestFiles.Add(CreateManifestFile(selected, archiveName, sha256));
                         }
                     }
+                    // A mark changed during a long download must not publish a
+                    // complete-looking archive under the superseded selection.
+                    if (annotated is not null)
+                        await PrepareAnnotatedDownloadAsync(cacheSelection, cancellationToken).ConfigureAwait(false);
+                    var manifestEntry = archive.CreateEntry(OnlineLogArchiveManifestCodec.EntryName, CompressionLevel.Optimal);
+                    await using var manifestStream = manifestEntry.Open();
+                    await OnlineLogArchiveManifestCodec.WriteAsync(manifestStream,
+                        new OnlineLogArchiveManifest { SchemaVersion = annotated is null ? 1 : 2,
+                            Files = manifestFiles, OmittedFiles = annotated?.Omissions ?? [] }, cancellationToken).ConfigureAwait(false);
                 }
 
                 await target.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
-            File.Move(partialPath, finalPath);
+            File.Move(partialPath, finalPath, overwrite: true);
             CleanupCache(cacheDirectory, finalPath);
             return finalPath;
         }
@@ -320,7 +419,10 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length == 0 || segments.Any(static segment => segment is "." or ".."))
             throw new InvalidDataException("Het online-downloadplan bevat een ongeldige bestandsnaam.");
-        return string.Join('/', segments);
+        var archiveName = string.Join('/', segments);
+        if (!OnlineLogArchiveManifestCodec.IsSafeArchiveName(archiveName))
+            throw new InvalidDataException("Het online-downloadplan bevat geen veilige MF4-bestandsnaam.");
+        return archiveName;
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -343,25 +445,45 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
 
     private static string BuildCachePath(string directory, IReadOnlyList<OnlineLogSelection> files)
     {
-        var identity = string.Join('\n', files
-            .OrderBy(static file => file.Key, StringComparer.Ordinal)
-            .Select(static file => $"{file.Key}\t{file.SizeBytes.ToString(CultureInfo.InvariantCulture)}"));
+        var identity = JsonSerializer.Serialize(new
+        {
+            schemaVersion = OnlineLogArchiveManifestCodec.CurrentSchemaVersion,
+            files = files.OrderBy(static file => file.Key, StringComparer.Ordinal)
+        });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
         return Path.Combine(directory, $"online-logs-{hash}.zip");
     }
 
     private string GetCacheDirectory() => _cacheDirectoryOverride ?? CanAnalyzer.Core.Storage.OnlineDownloadCache.DefaultDirectory;
 
-    private static bool IsUsableCachedArchive(string path, IReadOnlyList<OnlineLogSelection> files)
+    private static async Task<bool> IsUsableCachedArchiveAsync(string path, IReadOnlyList<OnlineLogSelection> files, CancellationToken cancellationToken,
+        IReadOnlyList<OnlineLogArchiveOmission>? omissions = null)
     {
         if (!File.Exists(path)) return false;
+        // S3 upload time has finite precision and is not an object revision.
+        if (files.Any(static file => string.IsNullOrWhiteSpace(file.ETag) && string.IsNullOrWhiteSpace(file.ObjectVersion) && string.IsNullOrWhiteSpace(file.Sha256))) return false;
         try
         {
             using var archive = ZipFile.OpenRead(path);
-            if (archive.Entries.Count != files.Count) return false;
-            var expectedLengths = files.Select(static file => file.SizeBytes).Order().ToArray();
-            var actualLengths = archive.Entries.Select(static entry => entry.Length).Order().ToArray();
-            return expectedLengths.SequenceEqual(actualLengths);
+            if (archive.Entries.Count != files.Count + 1 || archive.Entries.Select(static entry => entry.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != archive.Entries.Count) return false;
+            var manifestEntry = archive.GetEntry(OnlineLogArchiveManifestCodec.EntryName);
+            if (manifestEntry is null || manifestEntry.Length > OnlineLogArchiveManifestCodec.MaximumManifestBytes) return false;
+            await using var manifestStream = manifestEntry.Open();
+            var manifest = await OnlineLogArchiveManifestCodec.ReadAsync(manifestStream, cancellationToken).ConfigureAwait(false);
+            if (manifest.Files.Count != files.Count) return false;
+            if (!manifest.OmittedFiles.OrderBy(item => item.ObjectKey, StringComparer.Ordinal)
+                    .SequenceEqual((omissions ?? []).OrderBy(item => item.ObjectKey, StringComparer.Ordinal))) return false;
+            foreach (var file in files)
+            {
+                var metadata = manifest.Files.SingleOrDefault(item => item.ObjectKey == file.Key);
+                if (metadata is null || metadata != CreateManifestFile(file, metadata.ArchiveName, metadata.Sha256) ||
+                    (file.Sha256 is { } expectedHash && !string.Equals(metadata.Sha256, expectedHash, StringComparison.OrdinalIgnoreCase))) return false;
+                var entry = archive.GetEntry(metadata.ArchiveName);
+                if (entry is null || entry.Length != file.SizeBytes) return false;
+                await using var source = entry.Open();
+                await OnlineLogArchiveManifestCodec.ValidateFileAsync(source, metadata, cancellationToken).ConfigureAwait(false);
+            }
+            return true;
         }
         catch (InvalidDataException)
         {
@@ -371,7 +493,26 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         {
             return false;
         }
+        catch (UnauthorizedAccessException) { return false; }
     }
+
+    private static OnlineLogArchiveFile CreateManifestFile(OnlineLogSelection file, string archiveName, string sha256) => new()
+    {
+        ArchiveName = archiveName, ObjectKey = file.Key, LoggerId = file.Logger, Session = file.Session,
+        RawRecordedAtUtc = file.RawRecordedAtUtc, UploadedAtUtc = file.UploadedAtUtc,
+        ClockQuality = NormalizeClockQuality(file.ClockQuality, file.ClockEvidence, file.RawRecordedAtUtc), ClockEvidence = file.ClockEvidence,
+        MachineName = file.MachineName, MachineId = file.MachineId, InstallationId = file.InstallationId, ConfigurationId = file.ConfigurationId,
+        MachineAssignmentQuality = NormalizeMachineQuality(file.MachineAssignmentQuality, file.MachineAssignmentEvidence, file.MachineId, file.InstallationId),
+        MachineAssignmentEvidence = file.MachineAssignmentEvidence,
+        ObjectVersion = file.ObjectVersion, MetadataRevision = file.MetadataRevision, Sha256 = sha256, SizeBytes = file.SizeBytes
+    };
+
+    private static string NormalizeClockQuality(string? quality, string? evidence, DateTimeOffset? rawTime) =>
+        quality == "suspect" ? "suspect" : quality == "verified" && rawTime.HasValue && !string.IsNullOrWhiteSpace(evidence) ? "verified" : "unverified";
+
+    private static string NormalizeMachineQuality(string? quality, string? evidence, string? machineId, string? installationId) =>
+        quality == "verified-installation" && !string.IsNullOrWhiteSpace(evidence) && !string.IsNullOrWhiteSpace(machineId) &&
+        !string.IsNullOrWhiteSpace(installationId) ? "verified-installation" : "unverified";
 
     private static void CleanupCache(string directory, string? preservePath = null)
     {
@@ -411,9 +552,15 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private sealed record LogListResponse(LogFileResponse[] Files, bool Truncated, int MaximumSelection, string? TimeBasis, int UnknownRecordingTimes);
-    private sealed record DownloadPlanResponse(DownloadFileResponse[]? Files, DateTimeOffset ExpiresAt);
-    private sealed record DownloadFileResponse(string? ArchiveName, string? Url);
+    private sealed record LogListResponse(LogFileResponse[] Files, bool Truncated, int MaximumSelection, string? TimeBasis, int UnknownRecordingTimes,
+        LogCapabilities? Capabilities);
+    private sealed record LogCapabilities(AnnotationCapabilities? Annotations, int DownloadManifestVersion);
+    private sealed record AnnotationCapabilities(bool Available, int Version, bool Shared);
+    private sealed record DownloadPlanResponse(DownloadFileResponse[]? Files, DateTimeOffset ExpiresAt,
+        int SchemaVersion = 1, OnlineLogArchiveOmission[]? OmittedFiles = null);
+    private sealed record DownloadFileResponse(string? ArchiveName, string? Url, string? Key, long? SizeBytes, string? ObjectVersion, string? Sha256,
+        string? ETag, string? VersionId, string? MetadataRevision, DateTimeOffset? UploadedAt,
+        string? AnnotationRevision = null);
     private sealed record LogFileResponse(
         string Key,
         string Name,
@@ -423,7 +570,10 @@ public sealed class OnlineLogService : IOnlineLogService, IDisposable
         DateTimeOffset CreatedAt,
         long SizeBytes,
         DateTimeOffset? RecordedAt,
-        DateTimeOffset? UploadedAt);
+        DateTimeOffset? UploadedAt,
+        string? ClockQuality, string? ClockEvidence, string? MachineAssignmentQuality, string? MachineAssignmentEvidence,
+        string? MachineId, string? InstallationId, string? ConfigurationId, string? ObjectVersion, string? ETag, string? MetadataRevision, string? Sha256,
+        OnlineLogAnnotation? Annotation);
     private sealed record ErrorResponse(string Error);
 
     // A class deliberately avoids a generated record ToString containing authentication data.

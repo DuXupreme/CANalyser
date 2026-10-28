@@ -66,7 +66,7 @@ public static class OnlineLogSequencePolicy
         return OnlineLogSequenceValidation.Valid;
     }
 
-    internal static bool TryParsePartNumber(string fileName, out int partNumber)
+    public static bool TryParsePartNumber(string fileName, out int partNumber)
     {
         partNumber = 0;
         var stem = Path.GetFileNameWithoutExtension(fileName);

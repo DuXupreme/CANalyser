@@ -19,6 +19,19 @@ public static class OnlineMachineCatalog
     public static string ResolveName(string? loggerId, DateTimeOffset? recordedAt = null) =>
         ResolveName(loggerId, recordedAt, Machine3TransferUtc);
 
+    public static string ResolveName(CanAnalyzer.Core.Domain.SourceLogFile source)
+    {
+        if (HasInstallationIdentity(source))
+            return source.MachineId switch
+            {
+                "M01" => "Vlindermachine 1", "M02" => "Vlindermachine 2", "M03" => "Vlindermachine 3",
+                _ => source.MachineId ?? "Onbekend"
+            };
+        if (string.Equals(source.Logger, "48EDFD35", StringComparison.OrdinalIgnoreCase) && !HasClockEvidence(source))
+            return "Onbekend (machine 1/3; loggerklok niet bevestigd)";
+        return ResolveName(source.Logger, source.RecordedAt);
+    }
+
     public static string ResolveName(string? loggerId, DateTimeOffset? recordedAt, DateTimeOffset? transferUtc)
     {
         if (string.Equals(loggerId, "48EDFD35", StringComparison.OrdinalIgnoreCase))
@@ -34,7 +47,16 @@ public static class OnlineMachineCatalog
 
     public static string ResolveExportMachine(IEnumerable<CanAnalyzer.Core.Domain.SourceLogFile> sources, DateTimeOffset? transferUtc)
     {
-        var names = sources.Select(source => ResolveName(source.Logger, source.RecordedAt, transferUtc)).Distinct(StringComparer.Ordinal).ToArray();
+        var names = sources.Select(source => HasInstallationIdentity(source) || !HasClockEvidence(source)
+            ? ResolveName(source) : ResolveName(source.Logger, source.RecordedAt, transferUtc)).Distinct(StringComparer.Ordinal).ToArray();
         return names is [var name] && !name.StartsWith("Onbekend", StringComparison.Ordinal) ? name : "";
     }
+
+    private static bool HasInstallationIdentity(CanAnalyzer.Core.Domain.SourceLogFile source) =>
+        !string.IsNullOrWhiteSpace(source.MachineId) && !string.IsNullOrWhiteSpace(source.InstallationId) &&
+        (source.MachineAssignmentQuality == "embedded-installation" ||
+         source.MachineAssignmentQuality == "verified-installation" && !string.IsNullOrWhiteSpace(source.MachineAssignmentEvidence));
+
+    private static bool HasClockEvidence(CanAnalyzer.Core.Domain.SourceLogFile source) =>
+        source.ClockQuality == "verified" && !string.IsNullOrWhiteSpace(source.ClockEvidence);
 }
